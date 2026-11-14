@@ -1,4 +1,7 @@
+import { LEVELS } from './data';
 import type { Sim } from './sim';
+
+const need = (level: number) => LEVELS[level - 1].need.toLocaleString('de-DE');
 
 export interface Mission {
   title: string;
@@ -63,5 +66,60 @@ export const MISSIONS: Mission[] = [
     title: 'Fertige 5 Schiffe pünktlich ab',
     text: 'Unter 8 Stunden am Kai. Staut es, schau in den Engpass-Überblick.',
     done: (s) => s.shipsOnTime >= 5,
+  },
+  {
+    title: 'Werde Regionalhafen',
+    text: `Schlage insgesamt ${need(2)} Container um. Der Balken neben der Uhr zeigt den Fortschritt.`,
+    done: (s) => s.level >= 2,
+  },
+  {
+    title: 'Belade Schiffe mit 30 Export-Containern',
+    text: 'Export kommt von selbst über das Gate. Deine Trucks bringen ihn zum Kran, solange Platz und Zeit ist.',
+    done: (s) => s.exportsLoaded >= 30,
+  },
+  {
+    title: 'Schließe einen Vertrag ab',
+    text: 'Öffne die Verträge (Handschlag-Knopf) und nimm ein Angebot an. Pünktliche Anläufe bringen Bonus.',
+    done: (s) => s.contracts.length > 0 || s.contractsDone > 0,
+  },
+  {
+    title: 'Rüste einen Kran zur Containerbrücke auf',
+    text: 'Wähle „Ansehen“, tippe einen Kran an und rüste ihn auf. Er arbeitet doppelt so schnell.',
+    done: (s) => s.cranes.some((c) => c.big),
+  },
+  {
+    title: 'Werde Handelshafen',
+    text: `Schlage insgesamt ${need(3)} Container um.`,
+    done: (s) => s.level >= 3,
+  },
+  {
+    title: 'Schlage 20 Kühlcontainer um',
+    text: 'Baue mindestens 2 Kühlplätze an die Straße. Dann bringen Schiffe Kühlfracht, die in 10 Stunden raus muss.',
+    done: (s) => s.reefersHandled >= 20,
+  },
+  {
+    title: 'Schicke einen Zug mit Containern los',
+    text: 'Baue einen Gleisanschluss am rechten Kartenrand und verbinde ihn mit einer Straße.',
+    done: (s) => s.trainsDone >= 1,
+  },
+  {
+    title: 'Fertige ein großes Schiff ab',
+    text: 'Baue 6 Kai-Felder in einer Reihe und baggere das Wasser davor aus. Große Schiffe bringen 300 Container.',
+    done: (s) => s.bigShipsDone >= 1,
+  },
+  {
+    title: 'Werde Seehafen',
+    text: `Schlage insgesamt ${need(4)} Container um.`,
+    done: (s) => s.level >= 4,
+  },
+  {
+    title: 'Rüste einen Truck zum fahrerlosen Fahrzeug auf',
+    text: 'Tippe einen Truck an und rüste ihn auf. Er fährt schneller und kostet weniger im Betrieb.',
+    done: (s) => s.trucks.some((t) => t.agv),
+  },
+  {
+    title: 'Werde Weltklasse-Hafen',
+    text: `Schlage insgesamt ${need(5)} Container um.`,
+    done: (s) => s.level >= 5,
   },
 ];

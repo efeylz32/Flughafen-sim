@@ -1,12 +1,12 @@
 import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture, TilingSprite } from 'pixi.js';
-import { COAST_ROW, CRANE_BUFFER, CRANE_MOVE_GM, GRID_H, GRID_W, MIN_PER_DAY, SHIP_LEN, T, TICK_GM, TILE, YARD_CAP_PER_TILE } from '../sim/data';
-import type { Crane, Ship, Sim, Truck } from '../sim/sim';
+import { COAST_ROW, CRANE_BUFFER, CRANE_EXP_BUFFER, GRID_H, GRID_W, MIN_PER_DAY, RAIL_CAP, RAIL_TRAVEL_GM, T, TICK_GM, TILE, YARD_CAP_PER_TILE } from '../sim/data';
+import type { Crane, Rail, Ship, Sim, Truck } from '../sim/sim';
 
 export interface View {
   overlay: boolean;
   tool: string;
   hover: { x: number; y: number; ok: boolean } | null;
-  selected: { kind: 'ship' | 'crane' | 'gate' | 'yard' | 'truck'; id: number } | null;
+  selected: { kind: 'ship' | 'crane' | 'gate' | 'yard' | 'reefer' | 'rail' | 'truck'; id: number } | null;
   /** Anteil zwischen letztem und nächstem Tick (0..1) für weiche Bewegung. */
   alpha: number;
   /** Laufzeit in Sekunden (Echtzeit) für Animationen. */
@@ -58,6 +58,9 @@ const C = {
 /** Containerfarben. Die Textur ist hellgrau und wird damit eingefärbt. */
 const BOX = [0xd2503f, 0x3b7fc8, 0xeba433, 0x35996c, 0x8a6bc4, 0xe6e1d3, 0x27a5ad];
 const CAB = [0xf2b632, 0xe8542f, 0x2f7fd0, 0xf4f5f7];
+/** Export-Container sind einheitlich dunkel, Kühlcontainer weiß. */
+const EXPORT_BOX = 0x4a607c;
+const REEFER_BOX = 0xf4f9fd;
 
 function hash(x: number, y: number): number {
   let h = Math.imul(x + 374761393, 668265263) ^ Math.imul(y + 1274126177, 2246822519);
@@ -91,11 +94,14 @@ interface ShipView {
   cargo: Sprite[];
   alert: Graphics;
   filled: number;
+  len: number;
 }
 interface TruckView {
   root: Container;
   load: Sprite[];
-  n: number;
+  /** Ladung und Art, um Änderungen zu erkennen */
+  key: string;
+  agv: boolean;
   rot: number;
 }
 interface CraneView {
@@ -104,8 +110,20 @@ interface CraneView {
   hook: Sprite;
   lamp: Graphics;
   buffer: Sprite[];
-  n: number;
+  exp: Sprite[];
+  key: string;
+  big: boolean;
   pos: number;
+}
+interface TrainView {
+  root: Container;
+  cargo: Sprite[];
+  n: number;
+}
+interface StoreView {
+  sprites: Sprite[];
+  key: number;
+  reefer: boolean;
 }
 interface Float {
   text: Text;
@@ -150,7 +168,15 @@ export class Renderer {
   private ships = new Map<number, ShipView>();
   private trucks = new Map<number, TruckView>();
   private cranes = new Map<number, CraneView>();
-  private yard = new Map<number, { sprites: Sprite[]; n: number }>();
+  private yard = new Map<number, StoreView>();
+  private trains = new Map<number, TrainView>();
+  private trainLayer = new Container();
+  private stormTint = new Graphics();
+  private fogTint = new Graphics();
+  private rain!: TilingSprite;
+  private fog!: TilingSprite;
+  private stormA = 0;
+  private fogA = 0;
   private floats: Float[] = [];
   private pops: Pop[] = [];
   private simRef: Sim | null = null;
@@ -190,6 +216,7 @@ export class Renderer {
       this.yardLayer,
       this.shipLayer,
       this.truckLayer,
+      this.trainLayer,
       this.craneLayer,
       this.heat,
       this.grid,
@@ -200,7 +227,11 @@ export class Renderer {
       this.dyn,
       this.fxLayer,
     );
-    this.app.stage.addChild(this.world);
+    // Wetter liegt über der Karte und füllt immer den ganzen Bildschirm
+    this.stormTint.rect(0, 0, 8, 8).fill(0x1b2a3f);
+    this.fogTint.rect(0, 0, 8, 8).fill(0xe9eff3);
+    for (const o of [this.stormTint, this.rain, this.fogTint, this.fog]) o.visible = false;
+    this.app.stage.addChild(this.world, this.stormTint, this.rain, this.fogTint, this.fog);
     this.fitCamera();
     this.app.renderer.on('resize', () => this.clampCamera());
   }
@@ -356,6 +387,25 @@ export class Renderer {
         }),
       );
     }
+
+    const rainTex = make(128, 128, 1, (g) => {
+      for (let i = 0; i < 26; i++) {
+        const h = hash(i, 313);
+        const x = 10 + (h % 108);
+        const y = 4 + ((h >>> 8) % 104);
+        g.moveTo(x, y).lineTo(x - 5, y + 16).stroke({ width: 1.2, color: 0xffffff, alpha: 0.4, cap: 'round' });
+      }
+    });
+    this.rain = new TilingSprite({ texture: rainTex, width: 64, height: 64 });
+    const fogTex = make(512, 512, 1, (g) => {
+      for (let i = 0; i < 12; i++) {
+        const h = hash(i, 707);
+        const x = 130 + (h % 250);
+        const y = 70 + ((h >>> 9) % 370);
+        for (let k = 0; k < 6; k++) g.ellipse(x, y, (120 - k * 16) * (1 + ((h >>> 20) % 5) / 10), 46 - k * 6).fill({ color: 0xffffff, alpha: 0.07 });
+      }
+    });
+    this.fog = new TilingSprite({ texture: fogTex, width: 64, height: 64 });
 
     const wavesTex = make(256, 256, 2, (g) => {
       for (let i = 0; i < 18; i++) {
@@ -555,6 +605,37 @@ export class Renderer {
             if (!same(1, 0)) g.rect(px + TILE - 2, py, 2, TILE).fill(C.yellow);
             break;
           }
+          case T.Reefer: {
+            g.rect(px, py, TILE, TILE).fill(0xdde8ef);
+            const line = { color: 0x3b9bd6, alpha: 0.45 };
+            g.rect(px + 11, py + 2, 0.8, TILE - 4).fill(line);
+            g.rect(px + 20.5, py + 2, 0.8, TILE - 4).fill(line);
+            g.rect(px + 2, py + 15.6, TILE - 4, 0.8).fill(line);
+            // Stromanschlüsse zwischen den Reihen
+            for (let i = 0; i < 3; i++) g.roundRect(px + 4.6 + i * 9.4, py + 14.4, 3.2, 3.2, 0.8).fill(0x2f7fd0);
+            if (!same(0, -1)) g.rect(px, py, TILE, 2).fill(0x3b9bd6);
+            if (!same(0, 1)) g.rect(px, py + TILE - 2, TILE, 2).fill(0x3b9bd6);
+            if (!same(-1, 0)) g.rect(px, py, 2, TILE).fill(0x3b9bd6);
+            if (!same(1, 0)) g.rect(px + TILE - 2, py, 2, TILE).fill(0x3b9bd6);
+            break;
+          }
+          case T.Rail: {
+            // Schotterbett und Gleis führen nach rechts aus der Karte
+            const far = DECOR + 500;
+            g.rect(W - 4, py + 15, far, 16).fill(0xb7ad97);
+            g.rect(px, py, TILE, TILE).fill(0xcbc6ba);
+            g.rect(px, py + 15, TILE, 16).fill(0xb7ad97);
+            for (let x = px + 5; x < W + far; x += 6) g.rect(x, py + 17.5, 2.6, 11).fill(0x6e5d4b);
+            g.rect(px + 4, py + 19.6, far + TILE, 1.5).fill(0x8f979f);
+            g.rect(px + 4, py + 25.4, far + TILE, 1.5).fill(0x8f979f);
+            g.roundRect(px + 1, py + 17, 4, 12, 1).fill(0xd9473f);
+            // Bahnsteigdach
+            g.roundRect(px + 3.5, py + 4.5, 26, 9, 2).fill({ color: 0x000000, alpha: 0.22 });
+            g.roundRect(px + 2, py + 2, 26, 9, 2).fill(0x5f6f82);
+            g.rect(px + 2, py + 2, 26, 2.2).fill(0x7c8da1);
+            g.rect(px, py, TILE, 1.5).fill(C.yellow);
+            break;
+          }
           case T.Gate: {
             g.rect(px, py, TILE, TILE).fill(C.road);
             g.rect(px + 1.5, py + 1.5, TILE - 3, TILE - 3).stroke({ width: 1.3, color: C.roadEdge, alpha: 0.85 });
@@ -569,6 +650,19 @@ export class Renderer {
             break;
           }
         }
+      }
+    }
+    // Ausgebaggerte Fahrrinne vor dem Kai: dunkleres Wasser mit Bojen an den Rändern
+    for (let x = 0; x < GRID_W; x++) {
+      if (!sim.depth[x]) continue;
+      const top = COAST - 3 * TILE;
+      g.rect(x * TILE, top, TILE, 3 * TILE - 7).fill({ color: 0x0c3560, alpha: 0.4 });
+      for (const side of [-1, 1]) {
+        const nx = x + side;
+        if (nx >= 0 && nx < GRID_W && sim.depth[nx]) continue;
+        const bx = side < 0 ? x * TILE + 2 : (x + 1) * TILE - 2;
+        g.circle(bx, top + 2, 3.2).fill(0xffffff);
+        g.circle(bx, top + 2, 2.3).fill(side < 0 ? 0xd9473f : 0x2f9e6b);
       }
     }
     // Rand des Baugebiets
@@ -598,11 +692,13 @@ export class Renderer {
       else if (k === T.Kai && (i % GRID_W) % 2 === 0) add(x + 16, y + 26, 40, 0xffdcae, 0.26);
       else if (k === T.Gate) add(x + 16, y + 11, 46, 0xffe2b8, 0.42);
       else if (k === T.Yard && hash(i, 9) % 4 === 0) add(x + 16, y + 16, 46, 0xffdcae, 0.22);
+      else if (k === T.Reefer && hash(i, 9) % 2 === 0) add(x + 16, y + 16, 40, 0x9fd4ff, 0.3);
+      else if (k === T.Rail) add(x + 14, y + 8, 48, 0xffe2b8, 0.4);
     }
     for (const c of sim.cranes) {
       const x = c.x * TILE + 16;
       const y = c.y * TILE;
-      add(x, y - 56, 16, 0xff5a4a, 0.75);
+      add(x, y - (c.big ? 66 : 56), 16, 0xff5a4a, 0.75);
       add(x, y - 26, 50, 0xffe6c2, 0.3);
       add(x, y + 12, 44, 0xffe6c2, 0.3);
     }
@@ -640,6 +736,8 @@ export class Renderer {
     for (const v of this.cranes.values()) v.root.destroy({ children: true });
     for (const y of this.yard.values()) for (const s of y.sprites) s.destroy();
     for (const f of this.floats) f.text.destroy();
+    for (const v of this.trains.values()) v.root.destroy({ children: true });
+    this.trains.clear();
     this.ships.clear();
     this.trucks.clear();
     this.cranes.clear();
@@ -656,35 +754,53 @@ export class Renderer {
     return s;
   }
 
+  /** Stapelplatz und Kühlplätze: sechs Stellplätze pro Feld. */
   private syncYard(sim: Sim) {
-    const tiles = new Set(sim.yardTileList);
+    const tiles = new Map<number, boolean>();
+    for (const i of sim.yardTileList) tiles.set(i, false);
+    for (const i of sim.reeferTileList) tiles.set(i, true);
     for (const [i, y] of this.yard) {
-      if (!tiles.has(i)) {
+      if (tiles.get(i) !== y.reefer) {
         for (const s of y.sprites) s.destroy();
         this.yard.delete(i);
       }
     }
-    for (const i of tiles) {
+    for (const [i, reefer] of tiles) {
       if (this.yard.has(i)) continue;
       const px = (i % GRID_W) * TILE;
       const py = ((i / GRID_W) | 0) * TILE;
       const sprites: Sprite[] = [];
       for (let k = 0; k < YARD_CAP_PER_TILE; k++) {
-        const s = this.box(this.boxV, BOX[hash(i, k) % BOX.length], px + 2.3 + (k % 3) * 9.4, py + 2.6 + Math.floor(k / 3) * 14);
+        const s = this.box(this.boxV, 0xffffff, px + 2.3 + (k % 3) * 9.4, py + 2.6 + Math.floor(k / 3) * 14);
         s.visible = false;
         this.yardLayer.addChild(s);
         sprites.push(s);
       }
-      this.yard.set(i, { sprites, n: 0 });
+      this.yard.set(i, { sprites, key: -1, reefer });
     }
   }
 
-  private hullPath(g: Graphics, inset: number): Graphics {
+  private updateYard(sim: Sim) {
+    for (const [i, y] of this.yard) {
+      const imp = sim.stock[i];
+      const exp = sim.stockExp[i];
+      const key = imp * 16 + exp;
+      if (key === y.key) continue;
+      y.key = key;
+      for (let k = 0; k < y.sprites.length; k++) {
+        const sp = y.sprites[k];
+        sp.visible = k < imp + exp;
+        sp.tint = k < imp ? (y.reefer ? REEFER_BOX : BOX[hash(i, k) % BOX.length]) : EXPORT_BOX;
+      }
+    }
+  }
+
+  private hullPath(g: Graphics, inset: number, L: number): Graphics {
     const y0 = 7 + inset;
     const y1 = 57 - inset;
     const x0 = 3 + inset;
-    const xb = 97 - inset * 0.5;
-    const xt = 126 - inset * 2.2;
+    const xb = L - 31 - inset * 0.5;
+    const xt = L - 2 - inset * 2.2;
     return g
       .moveTo(x0 + 5, y0)
       .lineTo(xb, y0)
@@ -698,25 +814,27 @@ export class Renderer {
   }
 
   private makeShip(s: Ship): ShipView {
+    const L = s.len * TILE;
+    const cols = Math.floor((L - 48) / 10);
     const root = new Container();
     const wake = new Graphics();
     const body = new Container();
     const hull = new Graphics();
     // Schatten auf dem Wasser
     const shadow = new Graphics();
-    this.hullPath(shadow, 0).fill({ color: 0x0a2440, alpha: 0.3 });
+    this.hullPath(shadow, 0, L).fill({ color: 0x0a2440, alpha: 0.3 });
     shadow.position.set(4, 6);
     // Rumpf, Scheuerleiste, Deck
-    this.hullPath(hull, 0).fill(shade(s.color, 0.62));
-    this.hullPath(hull, 1.4).fill(s.color);
-    this.hullPath(hull, 4).fill(C.steel);
+    this.hullPath(hull, 0, L).fill(shade(s.color, 0.62));
+    this.hullPath(hull, 1.4, L).fill(s.color);
+    this.hullPath(hull, 4, L).fill(C.steel);
     // Lukendeckel
-    for (let c = 0; c < 8; c++) hull.roundRect(24 + c * 10, 11.2, 9.2, 41.6, 1).fill(0x4c5560);
+    for (let c = 0; c < cols; c++) hull.roundRect(24 + c * 10, 11.2, 9.2, 41.6, 1).fill(0x4c5560);
     // Vorschiff: Ankerwinden und Mast
-    hull.circle(110, 27, 2.2).fill(C.bollard);
-    hull.circle(110, 37, 2.2).fill(C.bollard);
-    hull.rect(113.5, 31, 5, 2).fill(0x8d96a0);
-    hull.circle(119, 32, 1.4).fill(C.white);
+    hull.circle(L - 18, 27, 2.2).fill(C.bollard);
+    hull.circle(L - 18, 37, 2.2).fill(C.bollard);
+    hull.rect(L - 14.5, 31, 5, 2).fill(0x8d96a0);
+    hull.circle(L - 9, 32, 1.4).fill(C.white);
     // Aufbau am Heck
     hull.roundRect(7.5, 13, 15, 39, 2).fill({ color: 0x000000, alpha: 0.25 });
     hull.roundRect(6, 11.5, 15, 39, 2).fill(C.white);
@@ -730,7 +848,7 @@ export class Renderer {
     body.addChild(shadow, hull);
 
     const cargo: Sprite[] = [];
-    for (let c = 0; c < 8; c++) {
+    for (let c = 0; c < cols; c++) {
       for (let r = 0; r < 5; r++) {
         const sp = this.box(this.boxH, BOX[hash(c * 5 + r, s.id) % BOX.length], 24.1 + c * 10, 11.4 + r * 8.3, 1);
         body.addChild(sp);
@@ -756,11 +874,11 @@ export class Renderer {
     alert.circle(0, 0, 8).fill(C.bad);
     alert.roundRect(-1.4, -5, 2.8, 6.2, 1.2).fill(0xffffff);
     alert.circle(0, 3.8, 1.5).fill(0xffffff);
-    alert.position.set(64, 2);
+    alert.position.set(L / 2, 2);
     alert.visible = false;
 
     root.addChild(wake, body, label, alert);
-    return { root, wake, body, cargo, alert, filled: -1 };
+    return { root, wake, body, cargo, alert, filled: -1, len: L };
   }
 
   private syncShips(sim: Sim, a: number, view: View) {
@@ -774,7 +892,8 @@ export class Renderer {
         this.shipLayer.addChild(v.root);
       }
       v.root.position.set((s.px + (s.x - s.px) * a) * TILE, (s.py + (s.y - s.py) * a) * TILE);
-      const filled = Math.ceil((s.containers / s.total) * v.cargo.length);
+      // Ladung an Deck: was noch an Bord ist, plus was schon verladen wurde
+      const filled = Math.ceil(Math.min(1, (s.containers + s.reefers + s.loaded) / s.total) * v.cargo.length);
       if (filled !== v.filled) {
         for (let k = 0; k < v.cargo.length; k++) v.cargo[k].visible = k < filled;
         v.filled = filled;
@@ -783,16 +902,17 @@ export class Renderer {
       v.wake.visible = moving;
       if (moving) {
         const g = v.wake;
+        const L = v.len;
         g.clear();
         for (let i = 0; i < 7; i++) {
           const wob = Math.sin(view.time * 5 + i * 1.3 + s.id) * 2.5;
           g.circle(-3 - i * 8, 32 + wob, 6.5 - i * 0.7).fill({ color: 0xffffff, alpha: 0.42 - i * 0.055 });
         }
-        g.moveTo(122, 22).quadraticCurveTo(108, 6, 84, 2).stroke({ width: 2, color: 0xffffff, alpha: 0.35, cap: 'round' });
-        g.moveTo(122, 42).quadraticCurveTo(108, 58, 84, 62).stroke({ width: 2, color: 0xffffff, alpha: 0.35, cap: 'round' });
+        g.moveTo(L - 6, 22).quadraticCurveTo(L - 20, 6, L - 44, 2).stroke({ width: 2, color: 0xffffff, alpha: 0.35, cap: 'round' });
+        g.moveTo(L - 6, 42).quadraticCurveTo(L - 20, 58, L - 44, 62).stroke({ width: 2, color: 0xffffff, alpha: 0.35, cap: 'round' });
       }
-      // Leichtes Schaukeln am Liegeplatz
-      v.body.position.y = moving ? 0 : Math.sin(view.time * 1.4 + s.id) * 0.5;
+      // Leichtes Schaukeln am Liegeplatz, stärker bei Sturm
+      v.body.position.y = moving ? 0 : Math.sin(view.time * 1.4 + s.id) * (0.5 + this.stormA * 1.5);
       v.alert.visible = s.blocked;
       if (s.blocked) v.alert.scale.set(1 + Math.sin(view.time * 6) * 0.12);
     }
@@ -808,23 +928,34 @@ export class Renderer {
     const root = new Container();
     const g = new Graphics();
     g.roundRect(-11.5, -3, 26, 11, 2.5).fill({ color: 0x000000, alpha: 0.24 });
-    g.roundRect(-13, -4.4, 19.5, 8.8, 1.4).fill(0x2f353e);
-    g.rect(-12.2, -3.6, 17.9, 7.2).fill(0x8b949f);
-    g.rect(-12.2, -0.4, 17.9, 0.8).fill(0x6d7681);
-    const cab = CAB[t.id % CAB.length];
-    g.roundRect(5.6, -5.4, 8, 10.8, 2.4).fill(shade(cab, 0.72));
-    g.roundRect(6.2, -4.8, 6.8, 9.6, 2).fill(cab);
-    g.roundRect(10.2, -3.8, 2.4, 7.6, 1).fill(0x22344b);
-    g.rect(6.8, -3.6, 2.6, 7.2).fill(tint(cab, 0.3));
+    if (t.agv) {
+      // Fahrerloses Fahrzeug: flache Plattform ohne Kabine
+      g.roundRect(-13.5, -5.2, 27, 10.4, 3).fill(0x1f8f97);
+      g.roundRect(-12.5, -4.2, 25, 8.4, 2.2).fill(0xe8eef2);
+      g.rect(-12.5, -0.4, 25, 0.8).fill(0xb9c4cc);
+      g.circle(11, -3, 1.1).fill(0x27d7c4);
+      g.circle(11, 3, 1.1).fill(0x27d7c4);
+      g.circle(-11, -3, 1.1).fill(0xff6a5a);
+      g.circle(-11, 3, 1.1).fill(0xff6a5a);
+    } else {
+      g.roundRect(-13, -4.4, 19.5, 8.8, 1.4).fill(0x2f353e);
+      g.rect(-12.2, -3.6, 17.9, 7.2).fill(0x8b949f);
+      g.rect(-12.2, -0.4, 17.9, 0.8).fill(0x6d7681);
+      const cab = CAB[t.id % CAB.length];
+      g.roundRect(5.6, -5.4, 8, 10.8, 2.4).fill(shade(cab, 0.72));
+      g.roundRect(6.2, -4.8, 6.8, 9.6, 2).fill(cab);
+      g.roundRect(10.2, -3.8, 2.4, 7.6, 1).fill(0x22344b);
+      g.rect(6.8, -3.6, 2.6, 7.2).fill(tint(cab, 0.3));
+    }
     root.addChild(g);
     const load: Sprite[] = [];
     for (let k = 0; k < 2; k++) {
-      const s = this.box(this.boxH, BOX[hash(t.id, k + 40) % BOX.length], -12.4 + k * 8.9, -3.9, 0.96);
+      const s = this.box(this.boxH, 0xffffff, (t.agv ? -10 : -12.4) + k * (t.agv ? 10.4 : 8.9), -3.9, 0.96);
       s.visible = false;
       root.addChild(s);
       load.push(s);
     }
-    return { root, load, n: 0, rot: t.angle };
+    return { root, load, key: '', agv: t.agv, rot: t.angle };
   }
 
   private syncTrucks(sim: Sim, a: number, view: View) {
@@ -832,6 +963,10 @@ export class Renderer {
     for (const t of sim.trucks) {
       seen.add(t.id);
       let v = this.trucks.get(t.id);
+      if (v && v.agv !== t.agv) {
+        v.root.destroy({ children: true });
+        v = undefined;
+      }
       if (!v) {
         v = this.makeTruck(t);
         this.trucks.set(t.id, v);
@@ -843,9 +978,13 @@ export class Renderer {
       d = Math.atan2(Math.sin(d), Math.cos(d));
       v.rot += d * Math.min(1, view.dt * 16);
       v.root.rotation = v.rot;
-      if (t.load !== v.n) {
-        for (let k = 0; k < v.load.length; k++) v.load[k].visible = k < t.load;
-        v.n = t.load;
+      const key = t.load + t.cargo;
+      if (key !== v.key) {
+        v.key = key;
+        for (let k = 0; k < v.load.length; k++) {
+          v.load[k].visible = k < t.load;
+          v.load[k].tint = t.cargo === 'reef' ? REEFER_BOX : t.cargo === 'exp' ? EXPORT_BOX : BOX[hash(t.id, k + 40) % BOX.length];
+        }
       }
     }
     for (const [id, v] of this.trucks) {
@@ -859,13 +998,18 @@ export class Renderer {
   private makeCrane(c: Crane): CraneView {
     const root = new Container();
     root.position.set(c.x * TILE, c.y * TILE);
-    const main = 0xe2582c;
+    // Mobilkran: orange. Containerbrücke: blau, mit längerem und breiterem Ausleger
+    const main = c.big ? 0x2f6db0 : 0xe2582c;
     const dark = shade(main, 0.7);
     const light = tint(main, 0.35);
+    const top = c.big ? -70 : -60;
+    const bw = c.big ? 11 : 9;
+    const bx = 16 - bw / 2;
+    const len = 22 - top;
 
     // Schatten von Ausleger und Portal
     const shadow = new Graphics();
-    shadow.rect(12, -60, 8, 82).fill({ color: 0x06182c, alpha: 0.22 });
+    shadow.rect(bx + 0.5, top, bw - 1, len).fill({ color: 0x06182c, alpha: 0.22 });
     shadow.rect(1, 2, 30, 4.5).fill({ color: 0x06182c, alpha: 0.22 });
     shadow.rect(1, 15, 30, 4.5).fill({ color: 0x06182c, alpha: 0.22 });
     shadow.position.set(5, 7);
@@ -881,19 +1025,23 @@ export class Renderer {
       g.roundRect(lx, 13.5, 4, 7, 1).fill(0x2b323b);
     }
     // Ausleger mit Fachwerk
-    g.roundRect(11.5, -60, 9, 82, 1.5).fill(dark);
-    g.rect(12.6, -59, 6.8, 80).fill(main);
-    for (let y = -56; y < 18; y += 8) {
-      g.moveTo(12.8, y)
-        .lineTo(19.2, y + 4)
-        .lineTo(12.8, y + 8)
+    g.roundRect(bx, top, bw, len, 1.5).fill(dark);
+    g.rect(bx + 1.1, top + 1, bw - 2.2, len - 2).fill(main);
+    for (let y = top + 4; y < 18; y += 8) {
+      g.moveTo(bx + 1.3, y)
+        .lineTo(bx + bw - 1.3, y + 4)
+        .lineTo(bx + 1.3, y + 8)
         .stroke({ width: 0.9, color: light, alpha: 0.9 });
     }
-    g.rect(15.2, -59, 1.6, 80).fill({ color: 0x2b323b, alpha: 0.55 });
+    g.rect(15.2, top + 1, 1.6, len - 2).fill({ color: 0x2b323b, alpha: 0.55 });
+    if (c.big) {
+      g.rect(bx - 1.5, top + 14, bw + 3, 2).fill(dark);
+      g.rect(bx - 1.5, top + 40, bw + 3, 2).fill(dark);
+    }
     // Maschinenhaus
     g.roundRect(9.5, 6, 13, 9, 1.5).fill({ color: 0x000000, alpha: 0.2 });
     g.roundRect(8.5, 5, 13, 9, 1.5).fill(C.white);
-    g.rect(9.5, 6, 11, 2).fill(0xcfd6dc);
+    g.rect(9.5, 6, 11, 2).fill(c.big ? 0x9cc4ff : 0xcfd6dc);
 
     // Laufkatze mit Container am Haken
     const trolley = new Container();
@@ -907,16 +1055,23 @@ export class Renderer {
 
     const lamp = new Graphics();
     lamp.circle(0, 0, 3.2).fill(0xffffff);
-    lamp.position.set(16, -57);
+    lamp.position.set(16, top + 3);
 
+    // Am Fuß des Krans: unten entladene Container, darüber Export fürs Schiff
     const buffer: Sprite[] = [];
     for (let k = 0; k < CRANE_BUFFER; k++) {
-      const s = this.box(this.boxV, BOX[hash(c.id, k + 7) % BOX.length], 1.6 + k * 7.4, 21.6, 0.82);
+      const s = this.box(this.boxV, 0xffffff, 1.6 + k * 7.4, 22.2, 0.8);
       s.visible = false;
       buffer.push(s);
     }
-    root.addChild(shadow, ...buffer, g, trolley, lamp);
-    return { root, trolley, hook, lamp, buffer, n: 0, pos: 0 };
+    const exp: Sprite[] = [];
+    for (let k = 0; k < CRANE_EXP_BUFFER; k++) {
+      const s = this.box(this.boxV, EXPORT_BOX, 2.4 + k * 7.2, 12.6, 0.7);
+      s.visible = false;
+      exp.push(s);
+    }
+    root.addChild(shadow, ...buffer, g, ...exp, trolley, lamp);
+    return { root, trolley, hook, lamp, buffer, exp, key: '', big: c.big, pos: 0 };
   }
 
   private syncCranes(sim: Sim, a: number, view: View) {
@@ -924,32 +1079,39 @@ export class Renderer {
     for (const c of sim.cranes) {
       seen.add(c.id);
       let v = this.cranes.get(c.id);
+      if (v && v.big !== c.big) {
+        v.root.destroy({ children: true });
+        v = undefined;
+      }
       if (!v) {
         v = this.makeCrane(c);
         this.cranes.set(c.id, v);
         this.craneLayer.addChild(v.root);
       }
       // Laufkatze: 0 = über dem Kai, 1 = über dem Schiff
-      let target = 0;
       let carrying = false;
       if (c.state === 'working') {
-        const u = Math.min(1, Math.max(0, 1 - (c.cd - a * TICK_GM) / CRANE_MOVE_GM));
-        target = u < 0.5 ? u * 2 : 2 - u * 2;
+        const u = Math.min(1, Math.max(0, 1 - (c.cd - a * TICK_GM) / sim.moveTime(c)));
+        v.pos = u < 0.5 ? u * 2 : 2 - u * 2;
         carrying = u >= 0.5;
-        v.pos = target;
       } else {
         carrying = c.state === 'blocked';
-        target = c.state === 'blocked' ? 0.35 : 0;
+        const target = c.state === 'blocked' ? 0.35 : 0;
         v.pos += (target - v.pos) * Math.min(1, view.dt * 6);
       }
       const e = v.pos * v.pos * (3 - 2 * v.pos);
       v.trolley.position.y = 11 - e * 44;
       v.hook.visible = carrying;
-      v.lamp.tint = c.state === 'working' ? 0x3fe08a : c.state === 'blocked' ? 0xffb020 : 0x9aa5b1;
-      v.lamp.alpha = c.state === 'blocked' ? 0.45 + 0.55 * Math.abs(Math.sin(view.time * 5)) : 1;
-      if (c.buffer !== v.n) {
-        for (let k = 0; k < v.buffer.length; k++) v.buffer[k].visible = k < c.buffer;
-        v.n = c.buffer;
+      v.lamp.tint = c.state === 'working' ? 0x3fe08a : c.state === 'blocked' ? 0xffb020 : c.state === 'storm' ? 0x8fb4ff : 0x9aa5b1;
+      v.lamp.alpha = c.state === 'blocked' || c.state === 'storm' ? 0.45 + 0.55 * Math.abs(Math.sin(view.time * 5)) : 1;
+      const key = `${c.buffer}.${c.bufReef}.${c.expBuf}`;
+      if (key !== v.key) {
+        v.key = key;
+        for (let k = 0; k < v.buffer.length; k++) {
+          v.buffer[k].visible = k < c.buffer + c.bufReef;
+          v.buffer[k].tint = k < c.buffer ? BOX[hash(c.id, k + 7) % BOX.length] : REEFER_BOX;
+        }
+        for (let k = 0; k < v.exp.length; k++) v.exp[k].visible = k < c.expBuf;
       }
     }
     for (const [id, v] of this.cranes) {
@@ -957,6 +1119,97 @@ export class Renderer {
         v.root.destroy({ children: true });
         this.cranes.delete(id);
       }
+    }
+  }
+
+  private makeTrain(r: Rail): TrainView {
+    const root = new Container();
+    const g = new Graphics();
+    const y = r.y * TILE + 23;
+    // Lok
+    g.roundRect(2, y - 5, 30, 14, 3).fill({ color: 0x000000, alpha: 0.22 });
+    g.roundRect(0, y - 7, 30, 14, 3).fill(0xa8322b);
+    g.roundRect(1.2, y - 5.8, 27.6, 11.6, 2.4).fill(0xd9473f);
+    g.roundRect(3, y - 4.6, 7, 9.2, 1.5).fill(0x25384f);
+    g.rect(13, y - 3.2, 13, 6.4).fill(0xf2c230);
+    g.circle(1.5, y - 3.5, 1.2).fill(0xfff4c2);
+    g.circle(1.5, y + 3.5, 1.2).fill(0xfff4c2);
+    // Fünf Tragwagen mit je zwei Stellplätzen
+    const cargo: Sprite[] = [];
+    for (let k = 0; k < 5; k++) {
+      const x = 34 + k * 26;
+      g.rect(x - 2, y - 1, 2, 2).fill(0x2b323b);
+      g.roundRect(x + 1.5, y - 4, 23, 11, 1.5).fill({ color: 0x000000, alpha: 0.2 });
+      g.roundRect(x, y - 5.5, 23, 11, 1.5).fill(0x3a424c);
+      g.rect(x + 1, y - 4.5, 21, 9).fill(0x6c7682);
+      for (let j = 0; j < 2; j++) {
+        const sp = this.box(this.boxH, BOX[hash(r.id + k, j) % BOX.length], x + 1.6 + j * 10.2, y - 4, 1);
+        sp.visible = false;
+        cargo.push(sp);
+      }
+    }
+    root.addChild(g, ...cargo);
+    return { root, cargo, n: -1 };
+  }
+
+  private syncTrains(sim: Sim, a: number) {
+    const seen = new Set<number>();
+    for (const r of sim.rails) {
+      seen.add(r.id);
+      let v = this.trains.get(r.id);
+      if (!v) {
+        v = this.makeTrain(r);
+        this.trains.set(r.id, v);
+        this.trainLayer.addChild(v.root);
+      }
+      v.root.visible = r.state !== 'away';
+      if (!v.root.visible) continue;
+      // Der Zug rollt von rechts ein und wieder nach rechts hinaus
+      const t = Math.max(0, r.timer - a * TICK_GM) / RAIL_TRAVEL_GM;
+      const u = r.state === 'arriving' ? t : r.state === 'leaving' ? 1 - t : 0;
+      v.root.position.set(W + 3 + u * u * 900, 0);
+      const n = r.state === 'leaving' ? Math.ceil((r.lastLoad / RAIL_CAP) * v.cargo.length) : 0;
+      if (n !== v.n) {
+        v.n = n;
+        for (let k = 0; k < v.cargo.length; k++) v.cargo[k].visible = k < n;
+      }
+    }
+    for (const [id, v] of this.trains) {
+      if (!seen.has(id)) {
+        v.root.destroy({ children: true });
+        this.trains.delete(id);
+      }
+    }
+  }
+
+  /** Sturm: dunkler Himmel und Regen. Nebel: heller Schleier. Beides blendet weich ein und aus. */
+  private updateWeather(sim: Sim, view: View) {
+    const k = Math.min(1, view.dt * 1.2);
+    this.stormA += ((sim.weather === 'storm' ? 1 : 0) - this.stormA) * k;
+    this.fogA += ((sim.weather === 'fog' ? 1 : 0) - this.fogA) * k;
+    const w = this.viewW;
+    const h = this.viewH;
+    const storm = this.stormA > 0.01;
+    this.stormTint.visible = storm;
+    this.rain.visible = storm;
+    if (storm) {
+      this.stormTint.scale.set(w / 8, h / 8);
+      this.stormTint.alpha = this.stormA * 0.34;
+      this.rain.width = w;
+      this.rain.height = h;
+      this.rain.alpha = this.stormA * 0.85;
+      this.rain.tilePosition.set(-view.time * 190, view.time * 620);
+    }
+    const fog = this.fogA > 0.01;
+    this.fogTint.visible = fog;
+    this.fog.visible = fog;
+    if (fog) {
+      this.fogTint.scale.set(w / 8, h / 8);
+      this.fogTint.alpha = this.fogA * 0.34;
+      this.fog.width = w;
+      this.fog.height = h;
+      this.fog.alpha = this.fogA * 0.9;
+      this.fog.tilePosition.set(view.time * 14, Math.sin(view.time * 0.2) * 20);
     }
   }
 
@@ -977,20 +1230,17 @@ export class Renderer {
     }
     const a = Math.max(0, Math.min(1, view.alpha));
 
-    // Wasser
-    this.waves.tilePosition.set(view.time * 7, Math.sin(view.time * 0.6) * 5);
+    // Wasser, bei Sturm schneller
+    this.updateWeather(sim, view);
+    const sea = 1 + this.stormA * 2.5;
+    this.waves.tilePosition.set(view.time * 7 * sea, Math.sin(view.time * 0.6 * sea) * 5);
     this.swell.tilePosition.set(-view.time * 3, view.time * 1.2);
 
     this.syncShips(sim, a, view);
     this.syncTrucks(sim, a, view);
     this.syncCranes(sim, a, view);
-    for (const [i, y] of this.yard) {
-      const n = sim.stock[i];
-      if (n !== y.n) {
-        for (let k = 0; k < y.sprites.length; k++) y.sprites[k].visible = k < n;
-        y.n = n;
-      }
-    }
+    this.syncTrains(sim, a);
+    this.updateYard(sim);
 
     // Tageszeit
     const hr = (sim.gm % MIN_PER_DAY) / 60;
@@ -1007,9 +1257,9 @@ export class Renderer {
     this.lights.visible = nf > 0.02;
 
     // Möwen kreisen tagsüber über der Küste
-    this.birdLayer.visible = nf < 0.6;
+    this.birdLayer.visible = nf < 0.6 && this.stormA < 0.5;
     if (this.birdLayer.visible) {
-      this.birdLayer.alpha = 1 - nf / 0.6;
+      this.birdLayer.alpha = (1 - nf / 0.6) * (1 - this.stormA * 2);
       for (const b of this.birds) {
         const ang = b.phase + view.time * b.speed;
         b.root.position.set(b.cx + Math.cos(ang) * b.r, b.cy + Math.sin(ang) * b.r * 0.6);
@@ -1040,8 +1290,10 @@ export class Renderer {
       const y = (i / GRID_W) | 0;
       let col = -1;
       if (k === T.Road) col = utilColor(sim.stats.trucks);
-      else if (k === T.Yard) col = utilColor(sim.stock[i] / YARD_CAP_PER_TILE);
+      else if (k === T.Yard) col = utilColor((sim.stock[i] + sim.stockExp[i]) / YARD_CAP_PER_TILE);
+      else if (k === T.Reefer) col = utilColor(sim.stock[i] / YARD_CAP_PER_TILE);
       else if (k === T.Gate) col = utilColor(sim.stats.gate);
+      else if (k === T.Rail) col = utilColor((sim.railAt(x, y)?.platform ?? 0) / RAIL_CAP);
       else if (k === T.Kai && sim.craneAt(x, y)) col = utilColor(sim.stats.crane);
       if (col >= 0) g.rect(x * TILE, y * TILE, TILE, TILE).fill({ color: col, alpha: 0.4 });
     }
@@ -1065,18 +1317,24 @@ export class Renderer {
       const x = s.x * TILE;
       const y = s.y * TILE;
       const rope = { width: 1.1, color: 0xe9e3cf, alpha: 0.9 };
+      const L = s.len * TILE;
       g.moveTo(x + 9, y + 56).lineTo(x + 8, COAST + 4.6).stroke(rope);
-      g.moveTo(x + 100, y + 56).lineTo(x + 120, COAST + 4.6).stroke(rope);
+      g.moveTo(x + L - 28, y + 56).lineTo(x + L - 8, COAST + 4.6).stroke(rope);
     }
 
     // Gates: wartende Container, Schranke, Ampel
     for (const gt of sim.gates) {
       const px = gt.x * TILE;
       const py = gt.y * TILE;
-      for (let k = 0; k < gt.apron; k++) {
+      for (let k = 0; k < gt.apron.length; k++) {
         const bx = px + 3.5 + k * 6.4;
         g.roundRect(bx + 0.8, py + 22.3, 5.4, 7.4, 0.8).fill({ color: 0x000000, alpha: 0.3 });
-        g.roundRect(bx, py + 21.5, 5.4, 7.4, 0.8).fill(BOX[(gt.id + k) % BOX.length]);
+        g.roundRect(bx, py + 21.5, 5.4, 7.4, 0.8).fill(gt.apron[k] > 300 ? REEFER_BOX : BOX[(gt.id + k) % BOX.length]);
+      }
+      // Angekommener Export wartet oben am Gate auf einen Truck
+      for (let k = 0; k < gt.inApron; k++) {
+        g.roundRect(px + 2.5 + k * 6.8, py - 4.5, 5.8, 5.8, 1).fill(0xffffff);
+        g.roundRect(px + 3.2 + k * 6.8, py - 3.8, 4.4, 4.4, 0.7).fill(EXPORT_BOX);
       }
       const open = gt.proc > 0;
       if (open) {
@@ -1088,11 +1346,31 @@ export class Renderer {
       g.circle(px + 26.5, py + 10.5, 1.8).fill(open ? 0x3fe08a : 0xff5a4a);
     }
 
+    // Gleisanschluss: Füllstand des Bahnsteigs
+    for (const r of sim.rails) {
+      const px = r.x * TILE;
+      const py = r.y * TILE;
+      const u = Math.min(1, r.platform / RAIL_CAP);
+      g.roundRect(px + 3, py + 12.2, 26, 3.6, 1.8).fill({ color: 0x1d2a3a, alpha: 0.55 });
+      if (u > 0) g.roundRect(px + 3, py + 12.2, Math.max(3.6, 26 * u), 3.6, 1.8).fill(u >= 1 ? C.bad : C.good);
+      g.circle(px + 25, py + 6.5, 1.8).fill(r.state === 'loading' ? 0x3fe08a : r.state === 'away' ? 0x9aa5b1 : 0xffb020);
+    }
+
     // Hinweise, wo das aktive Werkzeug bauen kann
     if (view.tool === 'kai') {
       for (let x = 0; x < GRID_W; x++) {
         if (sim.kind[COAST_ROW * GRID_W + x] === T.Land) {
           g.rect(x * TILE + 1.5, COAST + 1.5, TILE - 3, TILE - 3).stroke({ width: 1.5, color: 0xffffff, alpha: 0.5 + 0.2 * Math.sin(view.time * 4) });
+        }
+      }
+    } else if (view.tool === 'dredge') {
+      for (let x = 0; x < GRID_W; x++) {
+        if (!sim.depth[x]) g.rect(x * TILE + 1.5, COAST - 2 * TILE + 1.5, TILE - 3, 2 * TILE - 10).stroke({ width: 1.5, color: 0xffffff, alpha: 0.4 + 0.2 * Math.sin(view.time * 4) });
+      }
+    } else if (view.tool === 'rail') {
+      for (let y = COAST_ROW + 1; y < GRID_H; y++) {
+        if (sim.kind[y * GRID_W + GRID_W - 1] === T.Land) {
+          g.rect(W - TILE + 1.5, y * TILE + 1.5, TILE - 3, TILE - 3).stroke({ width: 1.5, color: 0xffffff, alpha: 0.5 + 0.2 * Math.sin(view.time * 4) });
         }
       }
     } else if (view.tool === 'crane') {
@@ -1138,6 +1416,9 @@ export class Renderer {
         if (view.tool === 'crane' && ok) {
           g.roundRect(x * TILE + 11.5, y * TILE - 60, 9, 82, 1.5).fill({ color: 0xffffff, alpha: 0.35 });
         }
+        if (view.tool === 'dredge' && ok) {
+          g.rect(x * TILE, COAST - 3 * TILE, TILE, 3 * TILE - 7).fill({ color: 0x0c3560, alpha: 0.45 });
+        }
       }
     }
   }
@@ -1166,8 +1447,8 @@ export class Renderer {
       const x = (s.px + (s.x - s.px) * a) * TILE;
       const y = (s.py + (s.y - s.py) * a) * TILE;
       use(x + 15, y + 32, 44, 0xffe2b0, 0.4);
-      use(x + 119, y + 25, 10, 0xff4a3d, 0.8);
-      use(x + 119, y + 39, 10, 0x3fe08a, 0.8);
+      use(x + s.len * TILE - 9, y + 25, 10, 0xff4a3d, 0.8);
+      use(x + s.len * TILE - 9, y + 39, 10, 0x3fe08a, 0.8);
     }
     for (const t of sim.trucks) {
       const cx = (t.px + (t.fx - t.px) * a + 0.5) * TILE;
@@ -1205,20 +1486,26 @@ export class Renderer {
       if (!s) return;
       x = (s.px + (s.x - s.px) * a) * TILE;
       y = (s.py + (s.y - s.py) * a) * TILE + 3;
-      w = SHIP_LEN * TILE;
+      w = s.len * TILE;
       h = 2 * TILE - 6;
     } else if (sel.kind === 'crane') {
       const c = sim.cranes.find((c) => c.id === sel.id);
       if (!c) return;
+      const up = c.big ? 70 : 60;
       x = c.x * TILE;
-      y = c.y * TILE - 60;
-      h = TILE + 60;
+      y = c.y * TILE - up;
+      h = TILE + up;
     } else if (sel.kind === 'gate') {
       const gt = sim.gates.find((gt) => gt.id === sel.id);
       if (!gt) return;
       x = gt.x * TILE;
       y = gt.y * TILE;
-    } else if (sel.kind === 'yard') {
+    } else if (sel.kind === 'rail') {
+      const r = sim.rails.find((r) => r.id === sel.id);
+      if (!r) return;
+      x = r.x * TILE;
+      y = r.y * TILE;
+    } else if (sel.kind === 'yard' || sel.kind === 'reefer') {
       x = (sel.id % GRID_W) * TILE;
       y = ((sel.id / GRID_W) | 0) * TILE;
     } else {

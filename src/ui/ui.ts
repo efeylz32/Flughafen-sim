@@ -1,8 +1,25 @@
 import type { Game } from '../game';
-import { CRANE_BUFFER, GATE_APRON_CAP, SHIP_DWELL_TARGET_GM, Tool, YARD_CAP_PER_TILE } from '../sim/data';
+import {
+  BuildTool,
+  CRANE_BUFFER,
+  CRANE_EXP_BUFFER,
+  GATE_APRON_CAP,
+  LEVELS,
+  LEVEL_NEWS,
+  RAIL_CAP,
+  RAIL_TRAVEL_GM,
+  SHIP_TYPES,
+  Tool,
+  UNLOCK,
+  UPGRADE,
+  YARD_CAP_PER_TILE,
+} from '../sim/data';
 import { MISSIONS } from '../sim/missions';
+import type { Contract, Job, Sim } from '../sim/sim';
 
-const eur = (n: number) => `${Math.round(n).toLocaleString('de-DE')} €`;
+const num = (n: number) => Math.round(n).toLocaleString('de-DE');
+const eur = (n: number) => `${num(n)} €`;
+const hours = (gm: number) => `${(gm / 60).toFixed(1).replace('.', ',').replace(',0', '')} h`;
 
 const svg = (body: string) =>
   `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
@@ -13,11 +30,15 @@ const ICONS: Record<string, string> = {
   crane: svg('<path d="M6 21V6M3 21h6M6 6h14M17 6v6"/><rect x="15" y="12" width="4" height="3" rx=".6"/><path d="M6 6l6-3"/>'),
   road: svg('<path d="M8.5 3L5 21M15.5 3L19 21"/><path d="M12 4.5v3M12 10.5v3M12 16.5v3"/>'),
   yard: svg('<rect x="3" y="4" width="8" height="7" rx="1"/><rect x="13" y="4" width="8" height="7" rx="1"/><rect x="3" y="13" width="8" height="7" rx="1"/><rect x="13" y="13" width="8" height="7" rx="1"/>'),
+  reefer: svg('<path d="M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9"/><path d="M9.5 4.5L12 7l2.5-2.5M9.5 19.5L12 17l2.5 2.5"/>'),
   gate: svg('<path d="M3 20h18"/><path d="M5 20V9h14v11"/><path d="M5 13h14M9 9v4M14 9v4"/>'),
+  rail: svg('<path d="M7 3v18M17 3v18"/><path d="M7 6h10M7 10h10M7 14h10M7 18h10"/>'),
   truck: svg('<rect x="2" y="7" width="12" height="9" rx="1.2"/><path d="M14 10h4l3 3.5V16h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>'),
+  dredge: svg('<path d="M3 8c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/><path d="M12 11v9M8.5 16.5L12 20l3.5-3.5"/>'),
   demolish: svg('<path d="M5 5l14 14M19 5L5 19"/>'),
   eye: svg('<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'),
   coins: svg('<circle cx="12" cy="12" r="8.5"/><path d="M14.8 9.2c-.6-1-1.6-1.5-2.8-1.5-1.8 0-3.2 1.8-3.2 4.3s1.4 4.3 3.2 4.3c1.2 0 2.2-.5 2.8-1.5M7.5 11h5M7.5 13h5"/>'),
+  deal: svg('<path d="M3 8.5l4-2 4 1.5 2-1.5h3l5 2.5v6l-3 1.5"/><path d="M3 8.5v7l3 1 5.5 3.5c1 .6 2-.2 1.8-1.2M11 8l-3 3.5c1.2 1.2 2.8 1 3.8 0l1.2-1 5 4.5"/>'),
   menu: svg('<path d="M4 7h16M4 12h16M4 17h16"/>'),
   pause: svg('<path d="M8 5v14M16 5v14"/>'),
   close: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
@@ -25,6 +46,8 @@ const ICONS: Record<string, string> = {
   sound: svg('<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M15.5 9a4.5 4.5 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11"/>'),
   mute: svg('<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/>'),
   star: svg('<path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 16.9l-5.2 2.8 1-5.9L3.5 9.7l5.9-.8z"/>'),
+  lock: svg('<rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>'),
+  trophy: svg('<path d="M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M7 6H4v1.5A3.5 3.5 0 0 0 7.5 11M17 6h3v1.5a3.5 3.5 0 0 1-3.5 3.5M12 14v4M8 20h8"/>'),
 };
 
 interface ToolDef {
@@ -36,22 +59,26 @@ interface ToolDef {
 const TOOLS: ToolDef[] = [
   { tool: 'view', label: 'Ansehen', sub: 'Info', color: '#5b6b82' },
   { tool: 'kai', label: 'Kai', sub: '5k', color: '#b8b2a3' },
-  { tool: 'crane', label: 'Kran', sub: '80k', color: '#3b82c4' },
+  { tool: 'crane', label: 'Kran', sub: '80k', color: '#e2582c' },
   { tool: 'road', label: 'Straße', sub: '500 €', color: '#59606a' },
   { tool: 'yard', label: 'Stapel', sub: '1k', color: '#c9b88a' },
   { tool: 'gate', label: 'Gate', sub: '20k', color: '#d9534f' },
   { tool: 'truck', label: 'Truck', sub: '25k', color: '#e0a030' },
+  { tool: 'reefer', label: 'Kühlplatz', sub: '4k', color: '#3b9bd6' },
+  { tool: 'rail', label: 'Gleis', sub: '150k', color: '#5f6f82' },
+  { tool: 'dredge', label: 'Baggern', sub: '15k', color: '#1f5f95' },
   { tool: 'demolish', label: 'Abriss', sub: '50 %', color: '#8a8f98' },
 ];
 
 const STAGES: { key: 'crane' | 'trucks' | 'yard' | 'gate'; label: string; hint: string }[] = [
-  { key: 'crane', label: 'Kran', hint: 'Der Kran ist voll ausgelastet. Ein zweiter Kran am Liegeplatz verdoppelt das Tempo.' },
+  { key: 'crane', label: 'Kran', hint: 'Der Kran ist voll ausgelastet. Ein zweiter Kran am Liegeplatz oder eine Containerbrücke verdoppelt das Tempo.' },
   { key: 'trucks', label: 'Trucks', hint: 'Die Trucks sind der Engpass. Kaufe mehr Trucks oder verkürze die Wege.' },
-  { key: 'yard', label: 'Stapelplatz', hint: 'Der Stapelplatz läuft voll. Baue mehr Stapelplatz oder mehr Gates, damit Container abfließen.' },
+  { key: 'yard', label: 'Stapelplatz', hint: 'Der Stapelplatz läuft voll. Baue mehr Stapelplatz oder mehr Ausgänge, damit Container abfließen.' },
   { key: 'gate', label: 'Gate', hint: 'Das Gate ist der Engpass. Baue ein weiteres Gate an die Straße.' },
 ];
 
 const utilClass = (u: number) => (u < 0.6 ? 'ok' : u < 0.85 ? 'mid' : 'hi');
+const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -60,13 +87,26 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''):
   return e;
 }
 
+function jobText(j: Job | null): string {
+  if (!j) return 'Wartet auf einen Auftrag';
+  const store = j.cargo === 'reef' ? 'Kühlplatz' : 'Stapelplatz';
+  const cargo = j.cargo === 'reef' ? 'Kühlcontainer' : j.cargo === 'exp' ? 'Export-Container' : 'Container';
+  if (j.stage === 0) return `Fährt zum ${j.srcKind === 'crane' ? 'Kran' : j.srcKind === 'gate' ? 'Gate' : store}`;
+  const dst = j.dstKind === 'store' ? store : j.dstKind === 'gate' ? 'Gate' : j.dstKind === 'rail' ? 'Gleisanschluss' : 'Kran';
+  return `Bringt ${cargo} zum ${dst}`;
+}
+
 export class UI {
   private acc = 1;
   private moneyEl!: HTMLElement;
   private repEl!: HTMLElement;
   private clockEl!: HTMLElement;
+  private levelEl!: HTMLElement;
+  private levelBar!: HTMLElement;
+  private levelName!: HTMLElement;
+  private weatherEl!: HTMLElement;
   private speedBtns: HTMLButtonElement[] = [];
-  private toolBtns = new Map<Tool, HTMLButtonElement>();
+  private toolBtns = new Map<Tool, { btn: HTMLButtonElement; sub: HTMLElement; def: ToolDef }>();
   private missionCard!: HTMLElement;
   private missionCount!: HTMLElement;
   private missionTitle!: HTMLElement;
@@ -78,12 +118,25 @@ export class UI {
   private finBody!: HTMLElement;
   private sheet!: HTMLElement;
   private sheetBody!: HTMLElement;
+  private sheetActions!: HTMLElement;
   private toasts!: HTMLElement;
   private overlayBtn!: HTMLButtonElement;
   private undoBtn!: HTMLButtonElement;
   private soundBtn!: HTMLButtonElement;
+  private dealBtn!: HTMLButtonElement;
+  private dealBadge!: HTMLElement;
   private menu!: HTMLElement;
   private resumeBtn!: HTMLButtonElement;
+  private deals!: HTMLElement;
+  private dealsBody!: HTMLElement;
+  private levelUp!: HTMLElement;
+  private levelUpBody!: HTMLElement;
+  private speedBeforeModal = 1;
+  private lastLevel = 0;
+  private lastSheet = '';
+  private lastActions = '';
+  private lastDeals = '';
+  private confirmCancel = 0;
 
   constructor(
     private game: Game,
@@ -94,6 +147,7 @@ export class UI {
 
   private build() {
     const root = this.root;
+    const click = () => this.game.sound.play('click');
 
     // Obere Leiste
     const top = el('div', 'topbar');
@@ -105,7 +159,7 @@ export class UI {
     const rep = el('div', 'pill rep');
     rep.innerHTML = `<span class="star">${ICONS.star}</span><span class="v"></span>`;
     this.repEl = rep.querySelector('.v')!;
-    rep.title = 'Ruf';
+    rep.title = 'Ruf: Pünktliche Schiffe heben ihn, wartende Schiffe senken ihn. Guter Ruf bringt mehr Schiffe.';
     const speed = el('div', 'pill speed');
     const sp: [string, number][] = [
       ['pause', 0],
@@ -119,7 +173,7 @@ export class UI {
       b.setAttribute('aria-label', v === 0 ? 'Pause' : `Geschwindigkeit ${label}`);
       b.addEventListener('click', () => {
         this.game.setSpeed(v);
-        this.game.sound.play('click');
+        click();
       });
       b.dataset.v = String(v);
       this.speedBtns.push(b);
@@ -127,39 +181,17 @@ export class UI {
     }
     top.append(money, rep, speed);
 
-    this.clockEl = el('div', 'pill clock');
+    // Linke Spalte: Status, dann Karten
+    const left = el('div', 'left');
+    const status = el('div', 'status');
+    this.clockEl = el('div', 'pill small clock');
+    this.levelEl = el('div', 'pill small level');
+    this.levelEl.innerHTML = `<span class="lname"></span><span class="track"><span class="bar"></span></span>`;
+    this.levelName = this.levelEl.querySelector('.lname')!;
+    this.levelBar = this.levelEl.querySelector('.bar')!;
+    this.weatherEl = el('div', 'pill small weather hidden');
+    status.append(this.clockEl, this.levelEl, this.weatherEl);
 
-    // Rechte Knopfleiste
-    const side = el('div', 'side');
-    this.undoBtn = el('button', 'roundbtn');
-    this.undoBtn.innerHTML = ICONS.undo;
-    this.undoBtn.title = 'Rückgängig (Strg+Z)';
-    this.undoBtn.setAttribute('aria-label', 'Rückgängig');
-    this.undoBtn.addEventListener('click', () => this.game.undo());
-    this.soundBtn = el('button', 'roundbtn');
-    this.soundBtn.title = 'Ton an/aus (M)';
-    this.soundBtn.setAttribute('aria-label', 'Ton an oder aus');
-    this.soundBtn.addEventListener('click', () => this.game.toggleSound());
-    this.overlayBtn = el('button', 'roundbtn');
-    this.overlayBtn.innerHTML = ICONS.eye;
-    this.overlayBtn.title = 'Engpass auf der Karte einfärben (O)';
-    this.overlayBtn.setAttribute('aria-label', 'Engpass auf der Karte einfärben');
-    this.overlayBtn.addEventListener('click', () => {
-      this.game.toggleOverlay();
-      this.game.sound.play('click');
-    });
-    const finBtn = el('button', 'roundbtn');
-    finBtn.innerHTML = ICONS.coins;
-    finBtn.title = 'Finanzen';
-    finBtn.addEventListener('click', () => this.toggleCard(this.finCard));
-    const menuBtn = el('button', 'roundbtn');
-    menuBtn.innerHTML = ICONS.menu;
-    menuBtn.title = 'Menü';
-    menuBtn.addEventListener('click', () => this.showMenu());
-    side.append(this.undoBtn, this.overlayBtn, finBtn, this.soundBtn, menuBtn);
-
-    // Karten links
-    const cards = el('div', 'cards');
     this.missionCard = el('div', 'card mission');
     this.missionCard.innerHTML = `
       <div class="mhead"><div class="flag">${ICONS.star}</div>
@@ -187,29 +219,67 @@ export class UI {
     this.bnHint = this.bnCard.querySelector('.hint')!;
 
     this.finCard = el('div', 'card fin hidden');
-    this.finCard.innerHTML = `<div class="ctitle">Finanzen <button class="x" aria-label="Schließen">${ICONS.close}</button></div><div class="body"></div>`;
+    this.finCard.innerHTML = `<div class="ctitle">Finanzen heute <button class="x" aria-label="Schließen">${ICONS.close}</button></div><div class="body"></div>`;
     this.finBody = this.finCard.querySelector('.body')!;
     this.finCard.querySelector('.x')!.addEventListener('click', () => this.finCard.classList.add('hidden'));
 
-    cards.append(this.missionCard, this.bnCard, this.finCard);
+    left.append(status, this.missionCard, this.bnCard, this.finCard);
+
+    // Rechte Knopfleiste
+    const side = el('div', 'side');
+    const mk = (icon: string, title: string, fn: () => void) => {
+      const b = el('button', 'roundbtn');
+      b.innerHTML = icon;
+      b.title = title;
+      b.setAttribute('aria-label', title);
+      b.addEventListener('click', fn);
+      return b;
+    };
+    this.undoBtn = mk(ICONS.undo, 'Rückgängig', () => this.game.undo());
+    this.dealBtn = mk(ICONS.deal, 'Verträge', () => {
+      this.showDeals();
+      click();
+    });
+    this.dealBadge = el('span', 'badge hidden');
+    this.dealBtn.appendChild(this.dealBadge);
+    this.overlayBtn = mk(ICONS.eye, 'Engpass auf der Karte einfärben', () => {
+      this.game.toggleOverlay();
+      click();
+    });
+    const finBtn = mk(ICONS.coins, 'Finanzen', () => {
+      this.toggleCard(this.finCard);
+      click();
+    });
+    this.soundBtn = mk(ICONS.sound, 'Ton an oder aus', () => this.game.toggleSound());
+    const menuBtn = mk(ICONS.menu, 'Menü', () => this.showMenu());
+    side.append(this.undoBtn, this.dealBtn, this.overlayBtn, finBtn, this.soundBtn, menuBtn);
 
     // Info-Blatt
     this.sheet = el('div', 'sheet hidden');
-    this.sheet.innerHTML = `<button class="x" aria-label="Schließen">${ICONS.close}</button><div class="body"></div>`;
+    this.sheet.innerHTML = `<button class="x" aria-label="Schließen">${ICONS.close}</button><div class="body"></div><div class="actions"></div>`;
     this.sheetBody = this.sheet.querySelector('.body')!;
+    this.sheetActions = this.sheet.querySelector('.actions')!;
     this.sheet.querySelector('.x')!.addEventListener('click', () => (this.game.selected = null));
+    this.sheetActions.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('[data-upgrade]')) this.game.upgradeSelected();
+    });
 
     // Werkzeugleiste
     const bar = el('div', 'toolbar');
     for (const t of TOOLS) {
       const b = el('button', 'tool');
-      b.innerHTML = `<span class="ico" style="--c:${t.color}">${ICONS[t.tool]}</span><b>${t.label}</b><small>${t.sub}</small>`;
+      b.innerHTML = `<span class="ico" style="--c:${t.color}">${ICONS[t.tool]}<span class="lk">${ICONS.lock}</span></span><b>${t.label}</b><small>${t.sub}</small>`;
       b.addEventListener('click', () => {
+        const need = t.tool === 'view' || t.tool === 'demolish' ? 1 : UNLOCK[t.tool as BuildTool];
+        if (this.game.sim.level < need) {
+          this.game.fail(`${t.label} gibt es ab Stufe ${need} (${LEVELS[need - 1].name})`);
+          return;
+        }
         this.game.setTool(t.tool);
-        this.game.sound.play('click');
+        click();
       });
-      b.title = `${t.label}`;
-      this.toolBtns.set(t.tool, b);
+      b.title = t.label;
+      this.toolBtns.set(t.tool, { btn: b, sub: b.querySelector('small')!, def: t });
       bar.appendChild(b);
     }
 
@@ -220,7 +290,7 @@ export class UI {
     this.menu.innerHTML = `
       <div class="dialog">
         <h1>Hafen-Imperium</h1>
-        <p class="sub">Prototyp · Phase 0: Ein Schiff, ein Container-Fluss</p>
+        <p class="sub">Vom Anleger zum Weltklasse-Hafen</p>
         <button class="primary resume">Weiterspielen</button>
         <button class="primary demo">Demo-Hafen mit Engpass</button>
         <button class="secondary empty">Neuer leerer Hafen</button>
@@ -228,9 +298,16 @@ export class UI {
           <ul>
             <li><b>Handy:</b> Werkzeug unten wählen, tippen oder ziehen zum Bauen. Mit zwei Fingern verschieben und zoomen, mit „Ansehen" auch mit einem Finger.</li>
             <li><b>PC:</b> Linksklick baut, Rechtsklick oder Mittelklick verschiebt, Mausrad zoomt.</li>
+            <li><b>Aufrüsten:</b> Mit „Ansehen" einen Kran oder Truck antippen, dann im Info-Blatt aufrüsten.</li>
             <li><b>Rückgängig:</b> Der Pfeil-Knopf oder Strg+Z nimmt den letzten Bauschritt zurück, mit voller Erstattung. Das geht 4 Spielstunden lang, danach hilft nur der Abriss (50 %).</li>
             <li><b>Tasten:</b> Leertaste Pause, 1/2/3 Tempo, O Engpass einfärben, M Ton, V K C R Y G T X Werkzeuge, Esc Abbrechen.</li>
-            <li><b>Ziel:</b> Finde den Engpass und beseitige ihn, bevor die Schiffe zu lange liegen.</li>
+          </ul>
+        </details>
+        <details><summary>Wie verdiene ich Geld?</summary>
+          <ul>
+            <li>Jeder Container, der den Hafen verlässt, bringt 200 €, Kühlcontainer 400 €, Export aufs Schiff 250 €.</li>
+            <li>Jedes abgefertigte Schiff zahlt Liegegebühr. Verträge zahlen Bonus bei pünktlicher Abfertigung und Strafe bei Verspätung.</li>
+            <li>Kräne, Trucks, Gates und Flächen kosten jeden Tag Betrieb. Die Finanzen zeigen, was heute läuft.</li>
           </ul>
         </details>
         <button class="close-menu">Zurück zum Spiel</button>
@@ -249,7 +326,39 @@ export class UI {
     });
     this.menu.querySelector('.close-menu')!.addEventListener('click', () => this.hideMenu());
 
-    root.append(top, this.clockEl, side, cards, this.sheet, bar, this.toasts, this.menu);
+    // Verträge
+    this.deals = el('div', 'modal hidden');
+    this.deals.innerHTML = `<div class="dialog deals"><div class="dhead"><h2>Verträge</h2><button class="x" aria-label="Schließen">${ICONS.close}</button></div><div class="body"></div></div>`;
+    this.dealsBody = this.deals.querySelector('.body')!;
+    this.deals.querySelector('.x')!.addEventListener('click', () => this.hideDeals());
+    this.deals.addEventListener('click', (e) => {
+      const t = e.target as HTMLElement;
+      if (t === this.deals) return this.hideDeals();
+      const acc = t.closest<HTMLElement>('[data-accept]');
+      const can = t.closest<HTMLElement>('[data-cancel]');
+      if (acc) this.game.acceptContract(Number(acc.dataset.accept));
+      else if (can) {
+        const id = Number(can.dataset.cancel);
+        if (this.confirmCancel === id) {
+          this.game.cancelContract(id);
+          this.confirmCancel = 0;
+        } else {
+          this.confirmCancel = id;
+        }
+      }
+      this.renderDeals(true);
+    });
+
+    // Neue Stufe
+    this.levelUp = el('div', 'modal hidden');
+    this.levelUp.innerHTML = `<div class="dialog levelup"><div class="body"></div><button class="primary go">Weiter</button></div>`;
+    this.levelUpBody = this.levelUp.querySelector('.body')!;
+    this.levelUp.querySelector('.go')!.addEventListener('click', () => {
+      this.levelUp.classList.add('hidden');
+      this.game.setSpeed(this.speedBeforeModal);
+    });
+
+    root.append(top, left, side, this.sheet, bar, this.toasts, this.menu, this.deals, this.levelUp);
     this.refreshSpeed();
     this.refreshTools();
     this.refreshOverlay();
@@ -271,15 +380,37 @@ export class UI {
     this.menu.classList.add('hidden');
     if (this.game.speed === 0) this.game.setSpeed(this.game.lastSpeed || 1);
   }
-  get menuOpen(): boolean {
-    return !this.menu.classList.contains('hidden');
+
+  showDeals() {
+    this.confirmCancel = 0;
+    this.deals.classList.remove('hidden');
+    this.renderDeals(true);
+  }
+  hideDeals() {
+    this.deals.classList.add('hidden');
+  }
+
+  /** Feier beim Stufenaufstieg. Das Spiel pausiert, bis der Spieler weiterklickt. */
+  showLevelUp() {
+    const sim = this.game.sim;
+    const lv = LEVELS[sim.level - 1];
+    const news = LEVEL_NEWS[sim.level - 1] ?? [];
+    this.levelUpBody.innerHTML = `
+      <div class="trophy">${ICONS.trophy}</div>
+      <div class="eyebrow">Neue Stufe · ${sim.level} von ${LEVELS.length}</div>
+      <h1>${lv.name}</h1>
+      <p class="sub">Glückwunsch! Der Bonus von ${eur(lv.bonus)} ist auf deinem Konto. Das ist neu:</p>
+      ${news.map((n) => `<div class="news"><b>${n.title}</b><span>${n.text}</span></div>`).join('')}`;
+    if (this.levelUp.classList.contains('hidden')) this.speedBeforeModal = this.game.speed || this.game.lastSpeed || 1;
+    this.levelUp.classList.remove('hidden');
+    this.game.setSpeed(0);
   }
 
   refreshSpeed() {
     for (const b of this.speedBtns) b.classList.toggle('on', Number(b.dataset.v) === this.game.speed);
   }
   refreshTools() {
-    for (const [t, b] of this.toolBtns) b.classList.toggle('on', t === this.game.tool);
+    for (const [t, v] of this.toolBtns) v.btn.classList.toggle('on', t === this.game.tool);
   }
   refreshOverlay() {
     this.overlayBtn.classList.toggle('on', this.game.overlay);
@@ -307,8 +438,43 @@ export class UI {
     const sim = this.game.sim;
 
     this.moneyEl.textContent = eur(sim.money);
+    this.moneyEl.classList.toggle('neg', sim.money < 0);
     this.repEl.textContent = String(Math.round(sim.rep));
     this.clockEl.textContent = `Tag ${sim.day} ${sim.clock}`;
+    this.undoBtn.classList.toggle('off', !this.game.canUndo);
+
+    // Hafenstufe
+    const next = LEVELS[sim.level];
+    this.levelName.textContent = `Stufe ${sim.level}`;
+    this.levelBar.style.width = `${Math.round(sim.levelProgress * 100)}%`;
+    this.levelEl.title = next
+      ? `${sim.levelName}: ${num(sim.handled)} von ${num(next.need)} Containern bis ${next.name}`
+      : `${sim.levelName}: ${num(sim.handled)} Container umgeschlagen`;
+    if (sim.level !== this.lastLevel) {
+      this.lastLevel = sim.level;
+      for (const v of this.toolBtns.values()) {
+        const need = v.def.tool === 'view' || v.def.tool === 'demolish' ? 1 : UNLOCK[v.def.tool as BuildTool];
+        const locked = sim.level < need;
+        v.btn.classList.toggle('locked', locked);
+        v.sub.textContent = locked ? `Stufe ${need}` : v.def.sub;
+      }
+    }
+
+    // Wetter
+    const f = sim.forecast;
+    let wx = '';
+    if (sim.weather === 'storm') wx = `Sturm bis ${sim.clockAt(sim.gm + sim.weatherLeft)}`;
+    else if (sim.weather === 'fog') wx = `Nebel bis ${sim.clockAt(sim.gm + sim.weatherLeft)}`;
+    else if (f && f.warned) wx = `${f.kind === 'storm' ? 'Sturm' : 'Nebel'} ab ${sim.clockAt(sim.gm + f.in)}`;
+    this.weatherEl.classList.toggle('hidden', !wx);
+    this.weatherEl.classList.toggle('now', sim.weather !== 'clear');
+    this.weatherEl.textContent = wx;
+
+    // Verträge: Zähler am Knopf, wenn Angebote offen und Plätze frei sind
+    const open = sim.level >= 2 && sim.contracts.length < sim.maxContracts ? sim.offers.length : 0;
+    this.dealBadge.classList.toggle('hidden', open === 0);
+    this.dealBadge.textContent = String(open);
+    if (!this.deals.classList.contains('hidden')) this.renderDeals(false);
 
     // Mission
     const m = MISSIONS[sim.mission];
@@ -321,41 +487,82 @@ export class UI {
       this.missionCard.classList.add('hidden');
     }
 
-    this.undoBtn.classList.toggle('off', !this.game.canUndo);
-
     // Engpass
-    {
-      for (const s of STAGES) {
-        const v = sim.stats[s.key];
-        const r = this.bnRows.get(s.key)!;
-        r.bar.style.width = `${Math.round(v * 100)}%`;
-        r.bar.className = `bar ${utilClass(v)}`;
-        r.val.textContent = `${Math.round(v * 100)} %`;
-      }
-      const b = sim.bottleneck();
-      this.bnHint.textContent = b ? STAGES.find((s) => s.key === b)!.hint : 'Kein Engpass erkennbar.';
-      this.bnHint.classList.toggle('alert', b !== null);
+    for (const s of STAGES) {
+      const v = sim.stats[s.key];
+      const r = this.bnRows.get(s.key)!;
+      r.bar.style.width = `${Math.round(v * 100)}%`;
+      r.bar.className = `bar ${utilClass(v)}`;
+      r.val.textContent = `${Math.round(v * 100)} %`;
     }
+    const b = sim.bottleneck();
+    this.bnHint.textContent = b ? STAGES.find((s) => s.key === b)!.hint : sim.weather === 'storm' ? 'Sturm: Die Kräne stehen still.' : 'Kein Engpass erkennbar.';
+    this.bnHint.classList.toggle('alert', b !== null);
 
-    // Finanzen
-    if (!this.finCard.classList.contains('hidden')) {
-      const d = sim.today;
-      const inc = d.fees + d.berth;
-      const exp = d.running + d.building;
-      const y = sim.history.at(-1);
-      this.finBody.innerHTML = `
-        <div class="fl"><b>Einnahmen</b><b>${eur(inc)}</b></div>
-        <div class="fl sub"><span>Container (Gate)</span><span>${eur(d.fees)}</span></div>
-        <div class="fl sub"><span>Liegegebühren</span><span>${eur(d.berth)}</span></div>
-        <div class="fl"><b>Ausgaben</b><b>${eur(exp)}</b></div>
-        <div class="fl sub"><span>Betrieb (Tagesabschluss)</span><span>${eur(d.running)}</span></div>
-        <div class="fl sub"><span>Bau</span><span>${eur(d.building)}</span></div>
-        <div class="fl total"><b>Ergebnis heute</b><b class="${inc - exp >= 0 ? 'pos' : 'neg'}">${eur(inc - exp)}</b></div>
-        ${y ? `<div class="fl sub"><span>Gestern</span><span>${eur(y.fees + y.berth - y.running - y.building)}</span></div>` : ''}
-        <div class="fl sub"><span>Schiffe / Container gesamt</span><span>${sim.shipsDone} / ${sim.containersDone}</span></div>`;
-    }
-
+    if (!this.finCard.classList.contains('hidden')) this.renderFinance(sim);
     this.updateSheet();
+  }
+
+  private renderFinance(sim: Sim) {
+    const d = sim.today;
+    const inc = d.fees + d.rail + d.exportFees + d.berth + d.bonus;
+    const exp = d.running + d.building + d.penalty;
+    const y = sim.history.at(-1);
+    const row = (label: string, v: number) => (v ? `<div class="fl sub"><span>${label}</span><span>${eur(v)}</span></div>` : '');
+    this.finBody.innerHTML = `
+      <div class="fl"><b>Einnahmen</b><b>${eur(inc)}</b></div>
+      ${row('Container am Gate', d.fees)}${row('Container per Bahn', d.rail)}${row('Export aufs Schiff', d.exportFees)}
+      ${row('Liegegebühren', d.berth)}${row('Vertrags- und Stufenbonus', d.bonus)}
+      <div class="fl"><b>Ausgaben</b><b>${eur(exp)}</b></div>
+      ${row('Bau und Aufrüstung', d.building)}${row('Strafen', d.penalty)}${row('Betrieb (Tagesabschluss)', d.running)}
+      <div class="fl total"><b>Ergebnis heute</b><b class="${inc - exp >= 0 ? 'pos' : 'neg'}">${eur(inc - exp)}</b></div>
+      ${y ? `<div class="fl sub"><span>Gestern</span><span>${eur(y.fees + y.rail + y.exportFees + y.berth + y.bonus - y.running - y.building - y.penalty)}</span></div>` : ''}
+      <div class="fl sub"><span>Betriebskosten pro Tag</span><span>${eur(sim.runningCost())}</span></div>
+      <div class="fl sub"><span>Schiffe / Container gesamt</span><span>${num(sim.shipsDone)} / ${num(sim.handled)}</span></div>`;
+  }
+
+  private contractCard(c: Contract, active: boolean, canAccept: boolean): string {
+    const st = SHIP_TYPES[c.ship];
+    const tags = `<span class="tag">${st.name} · ${st.containers} Container</span>${c.reefer ? '<span class="tag cold">Kühlfracht</span>' : ''}`;
+    const need =
+      c.ship === 'panamax' && !this.game.sim.hasDeepBerth()
+        ? '<div class="warn">Braucht einen tiefen Liegeplatz mit 6 Kai-Feldern.</div>'
+        : c.reefer && this.game.sim.reeferCapacity === 0
+          ? '<div class="warn">Braucht Kühlplätze.</div>'
+          : '';
+    const btn = active
+      ? `<button class="secondary" data-cancel="${c.id}">${this.confirmCancel === c.id ? `Wirklich kündigen? −${eur(c.penalty * 2)}` : 'Kündigen'}</button>`
+      : `<button class="primary" data-accept="${c.id}" ${canAccept ? '' : 'disabled'}>Annehmen</button>`;
+    return `<div class="deal">
+      <div class="dl"><span class="dot" style="background:${hex(c.color)}"></span><b>${c.line}</b></div>
+      <div class="tags">${tags}</div>
+      <div class="terms">
+        <span>Alle ${hours(c.interval)}</span>
+        <span>${active ? `noch ${c.calls} von ${c.callsTotal}` : `${c.calls}`} Anläufe</span>
+        <span>Liegezeit höchstens ${hours(c.dwell)}</span>
+        <span class="pos">Bonus ${eur(c.bonus)}</span>
+        <span class="neg">Strafe ${eur(c.penalty)}</span>
+        ${active ? `<span>Nächstes Schiff in ${hours(Math.max(0, c.next))}</span>` : ''}
+      </div>${need}${btn}</div>`;
+  }
+
+  private renderDeals(force: boolean) {
+    const sim = this.game.sim;
+    const key = `${sim.level}|${sim.contracts.map((c) => `${c.id}:${c.calls}:${Math.round(c.next / 6)}`)}|${sim.offers.map((o) => o.id)}|${this.confirmCancel}`;
+    if (!force && key === this.lastDeals) return;
+    this.lastDeals = key;
+    if (sim.level < 2) {
+      this.dealsBody.innerHTML = `<p class="sub">Verträge gibt es ab Stufe 2 (${LEVELS[1].name}). Schlage dafür ${num(LEVELS[1].need)} Container um, bisher sind es ${num(sim.handled)}.</p>`;
+      return;
+    }
+    const free = sim.contracts.length < sim.maxContracts;
+    this.dealsBody.innerHTML = `
+      <p class="sub">Vertragsschiffe kommen nach Fahrplan. Pünktlich abgefertigt gibt es den Bonus, sonst die Strafe. Bei Sturm läuft die Liegezeit nicht.</p>
+      <h3>Laufende Verträge (${sim.contracts.length} von ${sim.maxContracts})</h3>
+      ${sim.contracts.length ? sim.contracts.map((c) => this.contractCard(c, true, false)).join('') : '<p class="sub">Noch kein Vertrag.</p>'}
+      <h3>Angebote</h3>
+      ${sim.offers.length ? sim.offers.map((c) => this.contractCard(c, false, free)).join('') : '<p class="sub">Neue Angebote kommen jeden Morgen.</p>'}
+      ${free ? '' : '<p class="sub">Alle Vertragsplätze sind belegt. Die nächste Hafenstufe bringt mehr.</p>'}`;
   }
 
   private updateSheet() {
@@ -363,50 +570,97 @@ export class UI {
     const sim = this.game.sim;
     if (!sel) {
       this.sheet.classList.add('hidden');
+      this.lastSheet = '';
+      this.lastActions = '';
       return;
     }
     let html = '';
+    let actions = '';
+    const gone = () => {
+      this.game.selected = null;
+    };
+    const upgradeBtn = (kind: 'crane' | 'truck', label: string) => {
+      const u = UPGRADE[kind];
+      return sim.level < u.level
+        ? `<div class="locknote">${ICONS.lock}<span>${label} ab Stufe ${u.level} (${LEVELS[u.level - 1].name})</span></div>`
+        : `<button class="primary" data-upgrade="1">${label} · ${eur(u.cost)}</button>`;
+    };
     if (sel.kind === 'ship') {
       const s = sim.ships.find((s) => s.id === sel.id);
-      if (!s) {
-        this.game.selected = null;
-        return;
-      }
-      const done = s.total - s.containers;
-      const hours = s.atBerth / 60;
-      const late = s.atBerth > SHIP_DWELL_TARGET_GM;
-      html = `<h3>${s.name} <span class="tag">Containerschiff</span></h3>
+      if (!s) return gone();
+      const done = s.total - s.containers - s.reefers;
+      const late = s.atBerth > s.dwellTarget;
+      const c = sim.contracts.find((c) => c.id === s.contractId);
+      html = `<h3>${s.name} <span class="tag">${SHIP_TYPES[s.type].name}</span></h3>
+        <div class="meta">${s.line}${c ? ` · Bonus ${eur(c.bonus)} bei pünktlicher Abfertigung` : ''}</div>
         <div class="progress"><span style="width:${Math.round((done / s.total) * 100)}%"></span></div>
-        <div class="meta">${done} von ${s.total} Containern abgeladen</div>
+        <div class="meta">${done} von ${s.total} Containern abgeladen${s.reefers ? `, noch ${s.reefers} Kühlcontainer an Bord` : ''}</div>
+        ${s.exportTotal ? `<div class="progress exp"><span style="width:${Math.round((s.loaded / s.exportTotal) * 100)}%"></span></div><div class="meta">${s.loaded} von ${s.exportTotal} Export-Containern geladen</div>` : ''}
         <div class="why ${s.blocked ? 'alert' : ''}"><b>Warum steht das Schiff?</b><br>${s.reason || '–'}</div>
-        ${s.state === 'unloading' ? `<div class="meta ${late ? 'neg' : ''}">Liegezeit ${hours.toFixed(1).replace('.', ',')} h (Ziel: ${SHIP_DWELL_TARGET_GM / 60} h)</div>` : ''}`;
+        ${s.state === 'unloading' ? `<div class="meta ${late ? 'neg' : ''}">Liegezeit ${hours(s.atBerth)} (zugesagt: ${hours(s.dwellTarget)})</div>` : ''}`;
     } else if (sel.kind === 'crane') {
       const c = sim.cranes.find((c) => c.id === sel.id);
-      if (!c) {
-        this.game.selected = null;
-        return;
-      }
-      const st = c.state === 'working' ? 'Entlädt ein Schiff' : c.state === 'blocked' ? 'Blockiert: Container am Kran warten auf einen Truck' : 'Wartet auf ein Schiff';
-      html = `<h3>Kran <span class="tag">20 Moves pro Stunde</span></h3><div class="meta">${st}</div><div class="meta">Container am Kran: ${c.buffer} von ${CRANE_BUFFER}</div>`;
+      if (!c) return gone();
+      const st =
+        c.state === 'working'
+          ? 'Arbeitet am Schiff'
+          : c.state === 'blocked'
+            ? 'Blockiert: Container am Kran warten auf einen Truck'
+            : c.state === 'storm'
+              ? 'Steht wegen Sturm still'
+              : 'Wartet auf ein Schiff';
+      html = `<h3>${c.big ? 'Containerbrücke' : 'Mobilkran'} <span class="tag">${c.big ? 40 : 20} Moves pro Stunde</span></h3>
+        <div class="meta">${st}</div>
+        <div class="meta">Entladen am Kran: ${c.buffer + c.bufReef} von ${CRANE_BUFFER}${sim.level >= 2 ? ` · Export am Kran: ${c.expBuf} von ${CRANE_EXP_BUFFER}` : ''}</div>`;
+      if (!c.big) actions = upgradeBtn('crane', 'Zur Containerbrücke aufrüsten');
     } else if (sel.kind === 'gate') {
       const g = sim.gates.find((g) => g.id === sel.id);
-      if (!g) {
-        this.game.selected = null;
-        return;
-      }
-      html = `<h3>Gate <span class="tag">30 Container pro Stunde</span></h3><div class="meta">${g.proc > 0 ? 'Fertigt einen Container ab' : 'Wartet auf Container'}</div><div class="meta">Wartend: ${g.apron} von ${GATE_APRON_CAP} · Abgefertigt: ${g.served}</div>`;
+      if (!g) return gone();
+      html = `<h3>Gate <span class="tag">30 Container pro Stunde</span></h3>
+        <div class="meta">${g.proc > 0 ? (g.procIn ? 'Nimmt einen Export-Container an' : 'Fertigt einen Container ab') : 'Wartet auf Container'}</div>
+        <div class="meta">Wartend nach draußen: ${g.apron.length} von ${GATE_APRON_CAP}${sim.level >= 2 ? ` · Export wartet auf Truck: ${g.inApron}` : ''}</div>
+        <div class="meta">Abgefertigt: ${num(g.served)}</div>`;
     } else if (sel.kind === 'yard') {
-      html = `<h3>Stapelplatz <span class="tag">${YARD_CAP_PER_TILE} Container pro Feld</span></h3><div class="meta">Dieses Feld: ${sim.stock[sel.id]} von ${YARD_CAP_PER_TILE}</div><div class="meta">Gesamt: ${sim.yardStock} von ${sim.yardCapacity}</div>`;
+      html = `<h3>Stapelplatz <span class="tag">${YARD_CAP_PER_TILE} Container pro Feld</span></h3>
+        <div class="meta">Dieses Feld: ${sim.stock[sel.id]} Import, ${sim.stockExp[sel.id]} Export</div>
+        <div class="meta">Gesamt: ${sim.yardStock} von ${sim.yardCapacity}</div>`;
+    } else if (sel.kind === 'reefer') {
+      const left = sim.reeferTimeLeft(sel.id);
+      html = `<h3>Kühlplatz <span class="tag">mit Strom</span></h3>
+        <div class="meta">Dieses Feld: ${sim.stock[sel.id]} von ${YARD_CAP_PER_TILE} · Gesamt: ${sim.reeferStock} von ${sim.reeferCapacity}</div>
+        <div class="meta ${left !== null && left < 120 ? 'neg' : ''}">${left === null ? 'Kein Kühlcontainer auf diesem Feld' : `Der älteste Container verdirbt in ${hours(Math.max(0, left))}`}</div>`;
+    } else if (sel.kind === 'rail') {
+      const r = sim.rails.find((r) => r.id === sel.id);
+      if (!r) return gone();
+      const st =
+        r.state === 'away'
+          ? `Nächster Zug in ${hours(r.timer + RAIL_TRAVEL_GM)}`
+          : r.state === 'arriving'
+            ? 'Der Zug fährt ein'
+            : r.state === 'loading'
+              ? `Der Zug wird beladen, Abfahrt in ${Math.ceil(r.timer)} Minuten`
+              : 'Der Zug fährt ab';
+      html = `<h3>Gleisanschluss <span class="tag">bis zu ${RAIL_CAP} Container pro Zug</span></h3>
+        <div class="progress"><span style="width:${Math.round((r.platform / RAIL_CAP) * 100)}%"></span></div>
+        <div class="meta">Am Bahnsteig: ${r.platform} von ${RAIL_CAP} · Wert ${eur(r.value)}</div>
+        <div class="meta">${st}</div>`;
     } else {
       const t = sim.trucks.find((t) => t.id === sel.id);
-      if (!t) {
-        this.game.selected = null;
-        return;
-      }
-      const what = !t.job ? 'Wartet auf einen Auftrag' : t.job.kind === 'C2Y' ? (t.job.stage === 0 ? 'Fährt zum Kran' : 'Bringt Container zum Stapelplatz') : t.job.stage === 0 ? 'Fährt zum Stapelplatz' : 'Bringt Container zum Gate';
-      html = `<h3>Truck <span class="tag">2 Container pro Fahrt</span></h3><div class="meta">${what}</div><div class="meta">Geladen: ${t.load}</div>`;
+      if (!t) return gone();
+      html = `<h3>${t.agv ? 'Fahrerloses Fahrzeug' : 'Truck'} <span class="tag">2 Container pro Fahrt</span></h3>
+        <div class="meta">${jobText(t.job)}</div>
+        <div class="meta">Geladen: ${t.load}</div>`;
+      if (!t.agv) actions = upgradeBtn('truck', 'Fahrerlos machen');
     }
-    this.sheetBody.innerHTML = html;
+    // Nur bei Änderung neu setzen, damit Knöpfe beim Antippen nicht verschwinden
+    if (html !== this.lastSheet) {
+      this.sheetBody.innerHTML = html;
+      this.lastSheet = html;
+    }
+    if (actions !== this.lastActions) {
+      this.sheetActions.innerHTML = actions;
+      this.lastActions = actions;
+    }
     this.sheet.classList.remove('hidden');
   }
 }

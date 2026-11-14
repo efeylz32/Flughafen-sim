@@ -3,9 +3,27 @@
 Ein Browser-Tycoon für Handy und PC: Baue aus einem kleinen Anleger einen Containerhafen und
 beseitige die Engpässe, bevor die Schiffe zu lange liegen.
 
-**Stand: Phase 0 (Prototyp).** Ein Schiff, ein Container-Fluss:
-Schiff → Kran → Trucks → Stapelplatz → Trucks → Gate. Die langsamste Stufe bestimmt den Durchsatz.
+**Stand: spielbarer Prototyp mit fünf Hafenstufen.** Die Kette ist
+Schiff → Kran → Trucks → Stapelplatz → Trucks → Gate oder Bahn. Die langsamste Stufe bestimmt den Durchsatz.
 Das Spielkonzept steht im Doc „Hafen-Imperium: Spielkonzept“.
+
+| Stufe | Name | Ab umgeschlagenen Containern | Neu |
+|---|---|---|---|
+| 1 | Anleger | 0 | Kai, Kran, Straße, Stapelplatz, Gate, Trucks |
+| 2 | Regionalhafen | 400 | Export (Schiffe beladen), Verträge mit Reedereien, Containerbrücke, Wetter |
+| 3 | Handelshafen | 2.500 | Kühlfracht mit Kühlplätzen, Gleisanschluss, Baggern für große Schiffe |
+| 4 | Seehafen | 8.000 | Fahrerlose Fahrzeuge, 4 Verträge |
+| 5 | Weltklasse-Hafen | 20.000 | 5 Verträge |
+
+- **Export:** Schiffe wollen auch beladen werden. Export-Container kommen über das Gate, Trucks bringen sie zum Kran (250 € pro Stück).
+- **Verträge:** Feste Anläufe einer Reederei. Pünktlich abgefertigt gibt es Bonus, sonst Strafe.
+- **Wetter:** Bei Sturm stehen die Kräne (die Liegezeit läuft dann nicht), bei Nebel läuft kein Schiff ein. Es gibt zwei Stunden Vorwarnung.
+- **Kühlfracht:** Kühlcontainer brauchen Kühlplätze und verderben dort nach 10 Stunden. Sie bringen 400 €.
+- **Bahn:** Gleisanschluss am rechten Kartenrand. Alle 6 Stunden holt ein Zug bis zu 40 Container.
+- **Große Schiffe:** 300 Container, brauchen 6 Kai-Felder in einer Reihe und ausgebaggertes Wasser davor.
+- **Aufrüsten:** Kran oder Truck mit „Ansehen“ antippen und im Info-Blatt aufrüsten.
+
+Alle Werte stehen in `src/sim/data.ts`. Das Balancing ist grob und noch nicht durch Spielen abgestimmt.
 
 ## Starten
 
@@ -20,7 +38,7 @@ npm run build:single  # zusätzlich eine einzelne, selbstständige Datei dist/ha
 Im Menü gibt es zwei Startarten:
 
 - **Demo-Hafen mit Engpass:** Fertig gebaut, aber mit zu wenig Trucks und nur einem Gate. Finde den Engpass.
-- **Neuer leerer Hafen:** Mit acht geführten Missionen vom ersten Kai-Feld bis zum ersten abgefertigten Schiff.
+- **Neuer leerer Hafen:** Mit 19 geführten Missionen vom ersten Kai-Feld bis zum Weltklasse-Hafen.
 
 ## Bedienung
 
@@ -44,7 +62,7 @@ Der Spielstand wird automatisch im Browser gespeichert (`localStorage`).
 ```
 src/sim/      Simulation in reinem TypeScript, kein Browser-Code (testbar, headless)
   data.ts       alle Balancing-Werte
-  sim.ts        Spielzustand, Bauen, Ticks, Jobs der Trucks, Speichern
+  sim.ts        Spielzustand, Bauen, Ticks, Jobs der Trucks, Schiffe, Verträge, Wetter, Stufen, Speichern
   missions.ts   Tutorial-Missionen
   demo.ts       Demo-Hafen
 src/render/   PixiJS-Darstellung und Kamera (Gelände, Schiffe, Kräne, Trucks, Tag und Nacht)

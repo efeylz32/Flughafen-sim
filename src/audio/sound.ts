@@ -13,7 +13,12 @@ export type Sfx =
   | 'horn'
   | 'mission'
   | 'bad'
-  | 'day';
+  | 'day'
+  | 'train'
+  | 'thunder'
+  | 'foghorn'
+  | 'level'
+  | 'upgrade';
 
 const KEY = 'hafen-imperium-sound';
 
@@ -26,6 +31,9 @@ const GAP: Partial<Record<Sfx, number>> = {
   horn: 2.5,
   bad: 0.6,
   shipDone: 0.4,
+  train: 1.5,
+  thunder: 2,
+  foghorn: 2,
 };
 
 interface ToneOpts {
@@ -44,6 +52,9 @@ export class Sound {
   private master: GainNode | null = null;
   private noiseBuf: AudioBuffer | null = null;
   private last: Partial<Record<Sfx, number>> = {};
+  private ambGain: GainNode | null = null;
+  private ambFilter: BiquadFilterNode | null = null;
+  private storm = false;
 
   constructor() {
     try {
@@ -125,6 +136,18 @@ export class Sound {
     src.connect(lp).connect(gain).connect(this.master!);
     src.start();
     lfo.start();
+    this.ambGain = gain;
+    this.ambFilter = lp;
+    this.setStorm(this.storm);
+  }
+
+  /** Bei Sturm wird das Rauschen lauter und heller (Wind und Regen). */
+  setStorm(on: boolean) {
+    this.storm = on;
+    if (!this.ctx || !this.ambGain || !this.ambFilter) return;
+    const t = this.ctx.currentTime;
+    this.ambGain.gain.setTargetAtTime(on ? 0.15 : 0.05, t, 1.2);
+    this.ambFilter.frequency.setTargetAtTime(on ? 1700 : 520, t, 1.2);
   }
 
   private tone(freq: number, dur: number, o: ToneOpts = {}) {
@@ -239,6 +262,32 @@ export class Sound {
       case 'day':
         this.tone(880, 0.9, { vol: 0.05 });
         this.tone(1320, 0.9, { vol: 0.03, at: 0.02 });
+        break;
+      case 'train':
+        // Zweiklang-Pfeife, zweimal
+        for (const at of [0, 0.42]) {
+          this.tone(622, 0.3, { type: 'triangle', vol: 0.08, at, attack: 0.03 });
+          this.tone(740, 0.3, { type: 'triangle', vol: 0.07, at, attack: 0.03 });
+        }
+        break;
+      case 'thunder':
+        this.noise(1.6, { vol: 0.5, freq: 160 });
+        this.noise(0.5, { vol: 0.25, freq: 420, at: 0.05 });
+        this.tone(58, 1.3, { vol: 0.3, to: 34 });
+        break;
+      case 'foghorn':
+        this.tone(73, 1.6, { type: 'sawtooth', vol: 0.09, attack: 0.25 });
+        this.tone(110, 1.6, { type: 'sine', vol: 0.09, attack: 0.25 });
+        break;
+      case 'level':
+        [392, 523.25, 659.25, 783.99, 1046.5].forEach((f, i) => this.tone(f, 0.3, { type: 'triangle', vol: 0.12, at: i * 0.11 }));
+        this.tone(1318.5, 0.7, { vol: 0.08, at: 0.55 });
+        this.tone(1568, 0.7, { vol: 0.06, at: 0.55 });
+        break;
+      case 'upgrade':
+        this.noise(0.1, { vol: 0.18, freq: 2400, type: 'highpass' });
+        this.tone(440, 0.12, { type: 'triangle', vol: 0.1, to: 880 });
+        this.tone(1175, 0.3, { type: 'triangle', vol: 0.09, at: 0.11 });
         break;
     }
   }
