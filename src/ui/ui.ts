@@ -724,7 +724,8 @@ export class UI {
     }
     const b = sim.bottleneck();
     this.bnHint.textContent = b ? STAGES.find((s) => s.key === b)!.hint : sim.weather === 'storm' ? 'Sturm: Die Kräne stehen still.' : 'Kein Engpass erkennbar.';
-    this.bnHint.classList.toggle('alert', b !== null);
+    if (sim.jamShare > 0.2) this.bnHint.textContent += ` Stau: ${Math.round(sim.jamShare * 100)} % der Trucks stehen. Rote Straßen zeigen wo, Einbahnstraßen oder eine zweite Straße helfen.`;
+    this.bnHint.classList.toggle('alert', b !== null || sim.jamShare > 0.2);
     const sum = this.bnCard.querySelector('.bnsum')!;
     sum.textContent = b ? `${STAGES.find((s) => s.key === b)!.label} ${Math.round(sim.stats[b] * 100)} %` : 'keiner';
     sum.className = `bnsum ${b ? 'alert' : ''}`;

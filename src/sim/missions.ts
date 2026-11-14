@@ -73,6 +73,16 @@ export const MISSIONS: Mission[] = [
     done: (s) => s.level >= 2,
   },
   {
+    title: 'Baue eine Werkstatt',
+    text: 'Ab jetzt nutzen sich Kräne und Trucks ab und fallen irgendwann aus. Eine Werkstatt (2 × 2, Gebäude) mit Mechaniker repariert sie.',
+    done: (s) => s.shops.length > 0,
+  },
+  {
+    title: 'Gib Trucks feste Aufgaben',
+    text: 'Unter Geräte: „Aufgaben“ wählen, eine Aufgabe antippen und einen Rahmen über Trucks ziehen. Feste Aufgaben fahren schneller als die Automatik.',
+    done: (s) => s.trucks.filter((t) => t.role !== 'auto').length >= 3,
+  },
+  {
     title: 'Belade Schiffe mit 30 Export-Containern',
     text: 'Export kommt von selbst über das Gate. Deine Trucks bringen ihn zum Kran, solange Platz und Zeit ist.',
     done: (s) => s.exportsLoaded >= 30,
@@ -86,6 +96,16 @@ export const MISSIONS: Mission[] = [
     title: 'Rüste einen Kran zur Containerbrücke auf',
     text: 'Wähle „Ansehen“, tippe einen Kran an und rüste ihn auf. Er arbeitet doppelt so schnell.',
     done: (s) => s.cranes.some((c) => c.big),
+  },
+  {
+    title: 'Stelle 10 Container Fertigware her',
+    text: 'Baue eine Packhalle (3 × 2) und eine Veredelung (3 × 3) an die Straße. Fertigware bringt 900 € statt 200 €.',
+    done: (s) => s.premiumDone >= 10,
+  },
+  {
+    title: 'Kaufe ein Stück Land',
+    text: 'Unter Gelände: „Land kaufen“ und auf einen dunklen Streifen tippen. Jeder weitere Streifen wird teurer.',
+    done: (s) => s.plotsBought >= 1,
   },
   {
     title: 'Werde Handelshafen',
