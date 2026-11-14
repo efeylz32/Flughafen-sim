@@ -259,8 +259,11 @@ describe('Verträge', () => {
     expect(sim.acceptContract(offer.id).ok).toBe(true);
     expect(sim.contracts.length).toBe(1);
     run(sim, 30);
-    const bonus = sim.today.bonus + sim.history.reduce((n, h) => n + h.bonus, 0);
-    expect(bonus).toBeGreaterThan(0);
+    // Vertragsschiffe wurden abgerechnet: entweder Bonus oder Strafe, und der Fahrplan ist vorangekommen
+    const sum = (f: 'bonus' | 'penalty') => sim.today[f] + sim.history.reduce((n, h) => n + h[f], 0);
+    const c = sim.contracts.find((c) => c.id === offer.id);
+    expect(sum('bonus') + sum('penalty')).toBeGreaterThan(0);
+    expect(c ? c.calls : 0).toBeLessThan(offer.callsTotal);
   });
 
   it('mehr als das Limit der Stufe geht nicht', () => {
@@ -456,9 +459,9 @@ describe('Schwierigkeit', () => {
 describe('Verarbeitung und Aufgaben', () => {
   function plantPort(): Sim {
     const sim = bigPort(2, 10);
-    sim.build('unpack', 20, k + 2);
-    sim.build('unpack', 21, k + 2);
-    sim.build('pack', 26, k + 2);
+    expect(sim.build('unpack', 26, k + 2).ok).toBe(true);
+    expect(sim.build('unpack', 29, k + 2).ok).toBe(true);
+    expect(sim.build('pack', 32, k + 2).ok).toBe(true);
     return sim;
   }
 
@@ -539,14 +542,37 @@ describe('Ziel, Pleite, Kredit', () => {
   });
 });
 
+describe('Gebäudegrößen', () => {
+  it('Gebäude belegen mehrere Felder, Abriss und Rückgängig räumen alle', () => {
+    const sim = new Sim();
+    sim.level = 3;
+    expect(sim.build('pack', 5, k + 3).ok).toBe(true);
+    for (let y = k + 3; y < k + 6; y++) for (let x = 5; x < 8; x++) expect(sim.kind[sim.idx(x, y)]).toBe(8);
+    expect(sim.canBuild('gate', 7, k + 3)).toMatchObject({ ok: false });
+    expect(sim.canBuild('gate', 4, k + 3).reason).toMatch(/2 × 1/);
+    expect(sim.plantAt(7, k + 5)?.kind).toBe('pack');
+    const res = sim.demolish(6, k + 4);
+    expect(sim.plants.length).toBe(0);
+    expect(sim.kind[sim.idx(7, k + 5)]).toBe(1);
+    expect(sim.undoDemolish(res.removed).ok).toBe(true);
+    expect(sim.plantAt(5, k + 3)?.w).toBe(3);
+  });
+
+  it('Zufahrt von jeder Seite des Gebäudes', () => {
+    const sim = new Sim();
+    sim.build('gate', 5, k + 3);
+    sim.build('road', 6, k + 4);
+    expect(sim.accessOf(sim.gates[0])).toEqual([sim.idx(6, k + 4)]);
+  });
+});
+
 describe('Kühlhalle', () => {
   it('macht aus Kühlcontainern Lebensmittel für 750 €', () => {
     const sim = bigPort(3, 12);
     for (let x = 10; x <= 15; x++) sim.build('reefer', x, k + 5);
     for (let x = 9; x <= 22; x++) sim.build('road', x, k + 6);
     for (let y = k + 2; y <= k + 6; y++) sim.build('road', 9, y);
-    sim.build('cold', 16, k + 5);
-    sim.build('cold', 17, k + 5);
+    expect(sim.build('cold', 21, k + 4).ok).toBe(true);
     (sim as unknown as { addShip(t: string, c: null, r: boolean): void }).addShip('feeder', null, true);
     run(sim, 30);
     expect(sim.plants.reduce((n, p) => n + p.made, 0)).toBeGreaterThan(0);
@@ -567,6 +593,30 @@ describe('Einbahnstraßen', () => {
     expect(sim.distMap(b)[a]).toBe(-1);
     for (let i = 0; i < 3; i++) sim.toggleOneway(4, k + 2);
     expect(sim.oneway[sim.idx(4, k + 2)]).toBe(-1);
+  });
+
+  it('ein Einbahn-Ring mit Kurven ist befahrbar', () => {
+    // Ring: oben nach Osten, rechts nach Süden, unten nach Westen, links nach Norden
+    const sim = new Sim();
+    for (let x = 2; x <= 6; x++) {
+      sim.build('road', x, k + 2);
+      sim.build('road', x, k + 6);
+    }
+    for (let y = k + 3; y <= k + 5; y++) {
+      sim.build('road', 2, y);
+      sim.build('road', 6, y);
+    }
+    const set = (x: number, y: number, d: number) => {
+      while (sim.oneway[sim.idx(x, y)] !== d) sim.toggleOneway(x, y);
+    };
+    for (let x = 2; x <= 5; x++) set(x, k + 2, 0);
+    for (let y = k + 2; y <= k + 5; y++) set(6, y, 1);
+    for (let x = 3; x <= 6; x++) set(x, k + 6, 2);
+    for (let y = k + 3; y <= k + 6; y++) set(2, y, 3);
+    const a = sim.idx(3, k + 2);
+    const b = sim.idx(3, k + 6);
+    expect(sim.distMap(b)[a]).toBe(10);
+    expect(sim.distMap(a)[b]).toBe(6);
   });
 });
 

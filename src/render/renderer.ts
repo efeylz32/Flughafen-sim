@@ -1,5 +1,5 @@
 import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture, TilingSprite } from 'pixi.js';
-import { COAST_ROW, CRANE_BUFFER, CRANE_EXP_BUFFER, GRID_H, GRID_W, MapId, MIN_PER_DAY, PLOT_W, RAIL_CAP, RAIL_TRAVEL_GM, T, TICK_GM, TILE, YARD_CAP_PER_TILE } from '../sim/data';
+import { COAST_ROW, CRANE_BUFFER, CRANE_EXP_BUFFER, GRID_H, GRID_W, MapId, MIN_PER_DAY, PLOT_W, RAIL_CAP, RAIL_TRAVEL_GM, sizeOf, T, TICK_GM, TILE, YARD_CAP_PER_TILE } from '../sim/data';
 import type { Crane, Rail, Ship, Sim, Truck } from '../sim/sim';
 
 export interface View {
@@ -660,25 +660,10 @@ export class Renderer {
             if (!same(1, 0)) g.rect(px + TILE - 2, py, 2, TILE).fill(C.yellow);
             break;
           }
-          case T.Plant: {
-            const pk = sim.plantAt(x, y)?.kind;
-            const pack = pk === 'pack';
-            const roof = pk === 'pack' ? 0x7a5cc7 : pk === 'cold' ? 0x3b9bd6 : 0xc98a3c;
+          case T.Plant:
+          case T.Shop:
             g.rect(px, py, TILE, TILE).fill(0xc9c4b8);
-            g.roundRect(px + 3.5, py + 5, 27, 20, 2.5).fill({ color: 0x000000, alpha: 0.25 });
-            g.roundRect(px + 2, py + 2.5, 27, 20, 2.5).fill(shade(roof, 0.75));
-            g.roundRect(px + 3, py + 3.5, 25, 18, 2).fill(roof);
-            // Sheddach
-            for (let i = 0; i < 4; i++) g.rect(px + 4.5 + i * 6, py + 4.5, 2.6, 16).fill(tint(roof, 0.35));
-            if (pack) {
-              g.circle(px + 24, py + 8, 2.6).fill(0x3a424c);
-              g.circle(px + 24, py + 8, 1.4).fill(0xd8dde2);
-            }
-            // Rampe zur Straße
-            g.rect(px + 4, py + 24, 24, 5.5).fill(0x8d949b);
-            g.rect(px + 4, py + 24, 24, 1.2).fill(C.yellow);
             break;
-          }
           case T.Water: {
             // Wasser innerhalb der Karte (Insel)
             g.rect(px, py, TILE, TILE).fill(C.shallow);
@@ -698,21 +683,6 @@ export class Renderer {
             g.circle(px + 23, py + 23, 5.5).fill(0x7c838a);
             g.circle(px + 22, py + 21.5, 2.8).fill(0xa2a9ae);
             if (h & 1) g.circle(px + 24, py + 9, 3.6).fill(0x949ba1);
-            break;
-          }
-          case T.Shop: {
-            g.rect(px, py, TILE, TILE).fill(0xc9c4b8);
-            g.roundRect(px + 3.5, py + 5, 27, 19, 2.5).fill({ color: 0x000000, alpha: 0.25 });
-            g.roundRect(px + 2, py + 2.5, 27, 19, 2.5).fill(0x4a5868);
-            g.roundRect(px + 3, py + 3.5, 25, 17, 2).fill(0x5b6b82);
-            // Werkzeugschild
-            g.circle(px + 15.5, py + 12, 5.2).fill(0xf2c230);
-            g.rect(px + 12.2, py + 11.2, 6.6, 1.8).fill(0x2b323b);
-            g.circle(px + 12.2, py + 12.1, 1.8).fill(0x2b323b);
-            g.circle(px + 18.8, py + 12.1, 1.8).fill(0x2b323b);
-            // Rolltor
-            g.rect(px + 7, py + 21.5, 18, 8).fill(0x8d949b);
-            for (let i = 0; i < 4; i++) g.rect(px + 7, py + 22.5 + i * 2, 18, 0.7).fill(0x6d747b);
             break;
           }
           case T.Reefer: {
@@ -746,22 +716,14 @@ export class Renderer {
             g.rect(px, py, TILE, 1.5).fill(C.yellow);
             break;
           }
-          case T.Gate: {
+          case T.Gate:
             g.rect(px, py, TILE, TILE).fill(C.road);
-            g.rect(px + 1.5, py + 1.5, TILE - 3, TILE - 3).stroke({ width: 1.3, color: C.roadEdge, alpha: 0.85 });
-            // Dach mit Schatten, darunter die Spur
-            g.roundRect(px + 4.5, py + 7, 26, 13, 2).fill({ color: 0x000000, alpha: 0.25 });
-            g.roundRect(px + 3, py + 4, 26, 13, 2).fill(C.white);
-            g.rect(px + 3, py + 4, 26, 3).fill(0xd9473f);
-            g.rect(px + 3, py + 14, 26, 3).fill(0xd9473f);
-            for (let i = 0; i < 4; i++) g.rect(px + 6 + i * 6.5, py + 4, 3, 3).fill(C.white);
-            g.roundRect(px + 12, py + 8, 8, 5, 1.2).fill(0x2f6db0);
-            g.rect(px + 13.5, py + 9.2, 5, 1.6).fill(0xbfe1ff);
             break;
-          }
         }
       }
     }
+    this.drawBuildings(g, sim);
+
     // Einbahnstraßen: weiße Pfeile in Fahrtrichtung
     for (let i = 0; i < sim.oneway.length; i++) {
       const ow = sim.oneway[i];
@@ -811,6 +773,77 @@ export class Renderer {
     sp.tint = color;
     sp.alpha = alpha;
     return sp;
+  }
+
+  /** Gebäude über mehrere Felder: Halle mit Sheddach, Werkstatt, Gate mit Spuren. */
+  private drawBuildings(g: Graphics, sim: Sim) {
+    for (const p of sim.plants) {
+      const x = p.x * TILE;
+      const y = p.y * TILE;
+      const w = p.w * TILE;
+      const h = p.h * TILE;
+      const roof = p.kind === 'pack' ? 0x7a5cc7 : p.kind === 'cold' ? 0x3b9bd6 : 0xc98a3c;
+      g.roundRect(x + 4, y + 6, w - 5, h - 13, 3).fill({ color: 0x000000, alpha: 0.25 });
+      g.roundRect(x + 2, y + 2.5, w - 5, h - 13, 3).fill(shade(roof, 0.75));
+      g.roundRect(x + 3, y + 3.5, w - 7, h - 15, 2.5).fill(roof);
+      // Sheddach: helle Streifen über die ganze Halle
+      for (let sx = x + 6; sx < x + w - 8; sx += 7) g.rect(sx, y + 5, 3, h - 18).fill(tint(roof, 0.35));
+      // Dachaufbauten: Lüfter und bei der Kühlhalle Kühlaggregate
+      for (let k = 0; k < p.w; k++) {
+        const cx = x + 16 + k * TILE;
+        if (p.kind === 'cold') {
+          g.roundRect(cx - 6, y + 7, 12, 8, 1.5).fill(0xe8eef2);
+          g.circle(cx - 2.5, y + 11, 2.4).fill(0x6d7a87);
+          g.circle(cx + 2.5, y + 11, 2.4).fill(0x6d7a87);
+        } else if (k % 2 === 0) {
+          g.circle(cx, y + 10, 3.2).fill(0x3a424c);
+          g.circle(cx, y + 10, 1.7).fill(0xd8dde2);
+        }
+      }
+      // Laderampen mit Toren zur Straße
+      g.rect(x + 3, y + h - 9, w - 6, 6.5).fill(0x8d949b);
+      g.rect(x + 3, y + h - 9, w - 6, 1.3).fill(C.yellow);
+      for (let k = 0; k < p.w; k++) g.rect(x + 9 + k * TILE, y + h - 13, 14, 4.5).fill(0x4b525c);
+    }
+    for (const sh of sim.shops) {
+      const x = sh.x * TILE;
+      const y = sh.y * TILE;
+      const w = sh.w * TILE;
+      const h = sh.h * TILE;
+      g.roundRect(x + 4, y + 6, w - 5, h - 15, 3).fill({ color: 0x000000, alpha: 0.25 });
+      g.roundRect(x + 2, y + 2.5, w - 5, h - 15, 3).fill(0x4a5868);
+      g.roundRect(x + 3, y + 3.5, w - 7, h - 17, 2.5).fill(0x5b6b82);
+      g.rect(x + 3, y + 3.5, w - 7, 3).fill(0x6f8099);
+      // Werkzeugschild
+      const cx = x + w / 2;
+      const cy = y + 18;
+      g.circle(cx, cy, 8).fill(0xf2c230);
+      g.rect(cx - 5, cy - 1.2, 10, 2.4).fill(0x2b323b);
+      g.circle(cx - 5, cy, 2.6).fill(0x2b323b);
+      g.circle(cx + 5, cy, 2.6).fill(0x2b323b);
+      // Zwei Rolltore
+      for (let k = 0; k < 2; k++) {
+        const dx = x + 6 + k * (w / 2 - 2);
+        g.rect(dx, y + h - 13, w / 2 - 10, 11).fill(0x8d949b);
+        for (let i = 0; i < 5; i++) g.rect(dx, y + h - 12 + i * 2.2, w / 2 - 10, 0.8).fill(0x6d747b);
+      }
+    }
+    for (const gt of sim.gates) {
+      const x = gt.x * TILE;
+      const y = gt.y * TILE;
+      const w = gt.w * TILE;
+      g.rect(x + 1.5, y + 1.5, w - 3, TILE - 3).stroke({ width: 1.3, color: C.roadEdge, alpha: 0.85 });
+      // Trennlinie zwischen den Spuren
+      for (let k = 1; k < gt.w; k++) g.rect(x + k * TILE - 1, y + 3, 2, TILE - 6).fill({ color: 0xffffff, alpha: 0.7 });
+      // Dach über beide Spuren, Häuschen in der Mitte
+      g.roundRect(x + 4.5, y + 7, w - 6, 13, 2).fill({ color: 0x000000, alpha: 0.25 });
+      g.roundRect(x + 3, y + 4, w - 6, 13, 2).fill(C.white);
+      g.rect(x + 3, y + 4, w - 6, 3).fill(0xd9473f);
+      g.rect(x + 3, y + 14, w - 6, 3).fill(0xd9473f);
+      for (let sx = x + 6; sx < x + w - 6; sx += 6.5) g.rect(sx, y + 4, 3, 3).fill(C.white);
+      g.roundRect(x + w / 2 - 5, y + 8, 10, 5, 1.2).fill(0x2f6db0);
+      g.rect(x + w / 2 - 3.5, y + 9.2, 7, 1.6).fill(0xbfe1ff);
+    }
   }
 
   /** Lampen, die nur nachts leuchten. */
@@ -1498,24 +1531,27 @@ export class Renderer {
         g.roundRect(px + 3.2 + k * 6.8, py - 3.8, 4.4, 4.4, 0.7).fill(EXPORT_BOX);
       }
       const open = gt.proc > 0;
-      if (open) {
-        g.rect(px + 4, py + 17.5, 2, 4).fill(C.white);
-      } else {
-        g.rect(px + 4, py + 18.5, 24, 1.8).fill(0xd9473f);
-        for (let i = 0; i < 3; i++) g.rect(px + 8 + i * 8, py + 18.5, 4, 1.8).fill(C.white);
+      for (let lane = 0; lane < gt.w; lane++) {
+        const lx = px + lane * TILE;
+        if (open) {
+          g.rect(lx + 4, py + 17.5, 2, 4).fill(C.white);
+        } else {
+          g.rect(lx + 4, py + 18.5, 24, 1.8).fill(0xd9473f);
+          for (let i = 0; i < 3; i++) g.rect(lx + 8 + i * 8, py + 18.5, 4, 1.8).fill(C.white);
+        }
       }
-      g.circle(px + 26.5, py + 10.5, 1.8).fill(open ? 0x3fe08a : 0xff5a4a);
+      g.circle(px + gt.w * TILE - 5.5, py + 10.5, 1.8).fill(open ? 0x3fe08a : 0xff5a4a);
     }
 
     // Verarbeitung: links wartender Eingang, rechts fertiger Ausgang, Lampe zeigt Arbeit
     for (const p of sim.plants) {
       const px = p.x * TILE;
-      const py = p.y * TILE;
+      const py = (p.y + p.h - 1) * TILE;
       const cin = p.kind === 'pack' ? WARE_BOX : p.kind === 'cold' ? REEFER_BOX : 0x3b7fc8;
       const cout = p.kind === 'pack' ? PREM_BOX : p.kind === 'cold' ? FOOD_BOX : WARE_BOX;
       for (let k = 0; k < Math.min(3, p.inBuf); k++) g.rect(px + 5 + k * 3.4, py + 25.4, 2.8, 3.6).fill(cin);
       for (let k = 0; k < Math.min(3, p.outBuf); k++) g.rect(px + 24.2 - k * 3.4, py + 25.4, 2.8, 3.6).fill(cout);
-      g.circle(px + 7, py + 8, 1.9).fill(p.proc > 0 ? (Math.sin(view.time * 8 + p.id) > 0 ? 0x3fe08a : 0x1f8f55) : p.outBuf >= 6 ? 0xff5a4a : 0x9aa5b1);
+      g.circle(p.x * TILE + 9, p.y * TILE + 9, 2.6).fill(p.proc > 0 ? (Math.sin(view.time * 8 + p.id) > 0 ? 0x3fe08a : 0x1f8f55) : p.outBuf >= 6 ? 0xff5a4a : 0x9aa5b1);
     }
 
     // Gleisanschluss: Füllstand des Bahnsteigs
@@ -1636,8 +1672,9 @@ export class Renderer {
       const { x, y, ok } = view.hover;
       if (x >= 0 && y >= 0 && x < GRID_W && y < GRID_H) {
         const col = view.tool === 'demolish' || !ok ? C.bad : C.good;
-        g.roundRect(x * TILE, y * TILE, TILE, TILE, 3).fill({ color: col, alpha: 0.38 });
-        g.roundRect(x * TILE + 1, y * TILE + 1, TILE - 2, TILE - 2, 3).stroke({ width: 2, color: 0xffffff, alpha: 0.9 });
+        const [fw, fh] = sizeOf(view.tool);
+        g.roundRect(x * TILE, y * TILE, fw * TILE, fh * TILE, 3).fill({ color: col, alpha: 0.38 });
+        g.roundRect(x * TILE + 1, y * TILE + 1, fw * TILE - 2, fh * TILE - 2, 3).stroke({ width: 2, color: 0xffffff, alpha: 0.9 });
         if (view.tool === 'crane' && ok) {
           g.roundRect(x * TILE + 11.5, y * TILE - 60, 9, 82, 1.5).fill({ color: 0xffffff, alpha: 0.35 });
         }
@@ -1725,16 +1762,21 @@ export class Renderer {
       if (!gt) return;
       x = gt.x * TILE;
       y = gt.y * TILE;
+      w = gt.w * TILE;
     } else if (sel.kind === 'plant') {
       const p = sim.plants.find((p) => p.id === sel.id);
       if (!p) return;
       x = p.x * TILE;
       y = p.y * TILE;
+      w = p.w * TILE;
+      h = p.h * TILE;
     } else if (sel.kind === 'shop') {
       const sh = sim.shops.find((q) => q.id === sel.id);
       if (!sh) return;
       x = sh.x * TILE;
       y = sh.y * TILE;
+      w = sh.w * TILE;
+      h = sh.h * TILE;
     } else if (sel.kind === 'rail') {
       const r = sim.rails.find((r) => r.id === sel.id);
       if (!r) return;

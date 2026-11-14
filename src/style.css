@@ -270,3 +270,51 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .decision .opts button { border: 0; border-radius: 14px; padding: 13px; font-weight: 800; font-size: 15px; }
 
 .fin .loanbar { position: sticky; bottom: -22px; background: var(--surface); padding: 10px 0 2px; }
+
+/* Fuhrpark */
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.stats > div { background: #f4f7fb; border-radius: 12px; padding: 8px 10px; display: flex; flex-direction: column; }
+.stats b { font-size: 20px; font-variant-numeric: tabular-nums; }
+.stats span { font-size: 12px; color: var(--muted); }
+.stats .warn { background: #fff4d6; }
+.stats .bad { background: #fdecea; color: #7e211d; }
+.roleList { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 14px; font-size: 14px; }
+.roleList > div { display: flex; align-items: center; gap: 8px; }
+.roleList b { margin-left: auto; font-variant-numeric: tabular-nums; }
+.dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+.dot.hollow { border: 2px solid #9aa5b1; }
+.pm { display: flex; gap: 8px; }
+.pm button { flex: 1; border: 0; border-radius: 12px; padding: 11px; font-weight: 800; font-size: 14px; }
+/* Engpass-Karte */
+.bn { cursor: pointer; }
+.bn .ctitle { margin-bottom: 4px; }
+.bnsum { text-transform: none; letter-spacing: 0; font-size: 14px; color: var(--good); }
+.bnsum.alert { color: var(--bad); }
+
+@media (max-width: 760px) {
+  /* Kompakter auf dem Handy: Karten zugeklappt, Knöpfe kleiner */
+  .left { width: min(300px, calc(100vw - 72px - var(--safe-l) - var(--safe-r))); gap: 6px; }
+  .bn { padding: 8px 12px; }
+  .bn .ctitle { margin: 0; }
+  .bn:not(.open) .rows, .bn:not(.open) .hint { display: none; }
+  .mission { padding: 8px 10px; }
+  .mission .flag { width: 28px; height: 28px; border-radius: 9px; }
+  .mission .flag svg { width: 17px; height: 17px; }
+  .mission .mcount { font-size: 10px; }
+  .mission .mtitle { font-size: 14px; }
+  .side { gap: 6px; top: calc(var(--safe-t) + 60px); }
+  .roundbtn { width: 42px; height: 42px; border-radius: 12px; }
+  .roundbtn svg { width: 22px; height: 22px; }
+  .pill { height: 40px; }
+  .pill.small { height: 28px; font-size: 12.5px; padding: 0 9px; }
+  .left { top: calc(var(--safe-t) + 56px); }
+  .tool { width: 64px; padding: 6px 2px 5px; border-radius: 14px; }
+  .tool .ico { width: 38px; height: 38px; border-radius: 11px; }
+  .tool .ico svg { width: 22px; height: 22px; }
+  .tool b { font-size: 12px; line-height: 1.15; text-align: center; }
+  .tool small { font-size: 11px; }
+  .tab { padding: 6px 11px; font-size: 13px; }
+  .toolbar { gap: 6px; padding-top: 7px; }
+  .sheet { bottom: calc(var(--safe-b) + 140px); }
+  .stats b { font-size: 17px; }
+}

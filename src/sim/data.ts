@@ -70,6 +70,16 @@ export const UPGRADE = {
 };
 export const REFUND = 0.5;
 
+/** Größe von Gebäuden in Feldern (Breite × Höhe). Alles andere ist 1 × 1. */
+export const SIZE: Partial<Record<BuildTool, [number, number]>> = {
+  gate: [2, 1],
+  unpack: [3, 2],
+  pack: [3, 3],
+  cold: [2, 2],
+  workshop: [2, 2],
+};
+export const sizeOf = (tool: string): [number, number] => SIZE[tool as BuildTool] ?? [1, 1];
+
 /** Laufende Kosten pro Spieltag. */
 export const RUN_COST_PER_DAY = {
   // Wartung und Energie. Die Löhne kommen über das Personal dazu.

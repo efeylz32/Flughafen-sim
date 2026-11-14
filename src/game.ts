@@ -228,7 +228,7 @@ export class Game {
   /** Passt die Kamera an den Platz an, den HUD und Werkzeugleiste frei lassen. */
   fitCamera() {
     const wide = window.innerWidth >= 760;
-    this.renderer.fitCamera({ left: wide ? 350 : 0, top: wide ? 70 : 300, right: wide ? 70 : 0, bottom: 164 });
+    this.renderer.fitCamera({ left: wide ? 350 : 0, top: wide ? 70 : 190, right: wide ? 70 : 0, bottom: 150 });
   }
 
   hasSave(): boolean {
@@ -337,6 +337,12 @@ export class Game {
     this.sound.play('upgrade');
     this.renderer.addPop(x, y, 'build');
     this.ui.toast(sel.kind === 'crane' ? 'Containerbrücke in Betrieb: 40 Moves pro Stunde' : 'Der Truck fährt jetzt fahrerlos', 'good');
+  }
+
+  setAllRoles(role: TruckRole) {
+    for (const t of this.sim.trucks) this.sim.setRole(t.id, role);
+    this.ui.toast(`Alle Trucks: ${ROLE_NAMES[role].name}`, 'info');
+    this.sound.play('click');
   }
 
   /** Vergibt die gewählte Aufgabe an alle Trucks im Rahmen. */
@@ -498,7 +504,7 @@ export class Game {
       else if (g) this.selected = { kind: 'gate', id: g.id };
       else if (r) this.selected = { kind: 'rail', id: r.id };
       else if (sim.plantAt(tx, ty)) this.selected = { kind: 'plant', id: sim.plantAt(tx, ty)!.id };
-      else if (k === T.Shop) this.selected = { kind: 'shop', id: sim.shops.find((q) => q.x === tx && q.y === ty)!.id };
+      else if (k === T.Shop) this.selected = { kind: 'shop', id: sim.shopAt(tx, ty)!.id };
       else if (k === T.Yard) this.selected = { kind: 'yard', id: sim.idx(tx, ty) };
       else if (k === T.Reefer) this.selected = { kind: 'reefer', id: sim.idx(tx, ty) };
     }

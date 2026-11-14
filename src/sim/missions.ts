@@ -50,7 +50,7 @@ export const MISSIONS: Mission[] = [
   {
     title: 'Baue ein Gate',
     text: 'Das Gate muss ebenfalls an der Straße liegen.',
-    done: (s) => connectedTo(s, s.gates.map((g) => s.idx(g.x, g.y))),
+    done: (s) => connectedTo(s, s.gates.flatMap((g) => s.footprintOf(g))),
   },
   {
     title: 'Kaufe einen Truck',

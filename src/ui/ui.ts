@@ -91,14 +91,14 @@ const TOOLS: ToolDef[] = [
   { cat: 'gear', tool: 'crane', label: 'Kran', sub: '80k', color: '#e2582c' },
   { cat: 'land', tool: 'road', label: 'Straße', sub: '500 €', color: '#59606a' },
   { cat: 'store', tool: 'yard', label: 'Stapel', sub: '1k', color: '#c9b88a' },
-  { cat: 'build', tool: 'gate', label: 'Gate', sub: '20k', color: '#d9534f' },
+  { cat: 'build', tool: 'gate', label: 'Gate', sub: '20k · 2×1', color: '#d9534f' },
   { cat: 'gear', tool: 'assign', label: 'Aufgaben', sub: 'Rahmen', color: '#2a6fdb' },
   { cat: 'gear', tool: 'truck', label: 'Truck', sub: '25k', color: '#e0a030' },
-  { cat: 'build', tool: 'unpack', label: 'Packhalle', sub: '60k', color: '#c98a3c' },
-  { cat: 'build', tool: 'pack', label: 'Veredeln', sub: '90k', color: '#7a5cc7' },
+  { cat: 'build', tool: 'unpack', label: 'Packhalle', sub: '60k · 3×2', color: '#c98a3c' },
+  { cat: 'build', tool: 'pack', label: 'Veredeln', sub: '90k · 3×3', color: '#7a5cc7' },
   { cat: 'store', tool: 'reefer', label: 'Kühlplatz', sub: '4k', color: '#3b9bd6' },
-  { cat: 'build', tool: 'cold', label: 'Kühlhalle', sub: '80k', color: '#3b9bd6' },
-  { cat: 'build', tool: 'workshop', label: 'Werkstatt', sub: '40k', color: '#5b6b82' },
+  { cat: 'build', tool: 'cold', label: 'Kühlhalle', sub: '80k · 2×2', color: '#3b9bd6' },
+  { cat: 'build', tool: 'workshop', label: 'Werkstatt', sub: '40k · 2×2', color: '#5b6b82' },
   { cat: 'build', tool: 'rail', label: 'Gleis', sub: '150k', color: '#5f6f82' },
   { cat: 'land', tool: 'oneway', label: 'Einbahn', sub: 'Gratis', color: '#4b525c' },
   { cat: 'land', tool: 'buyland', label: 'Land kaufen', sub: '60k', color: '#6aa953' },
@@ -112,6 +112,9 @@ const STAGES: { key: 'crane' | 'trucks' | 'yard' | 'gate'; label: string; hint: 
   { key: 'yard', label: 'Stapelplatz', hint: 'Der Stapelplatz läuft voll. Baue mehr Stapelplatz oder mehr Ausgänge, damit Container abfließen.' },
   { key: 'gate', label: 'Gate', hint: 'Das Gate ist der Engpass. Baue ein weiteres Gate an die Straße.' },
 ];
+
+/** Farben der Truck-Aufgaben, wie auf der Karte */
+const ROLE_DOT: Partial<Record<TruckRole, string>> = { crane: '#e2582c', out: '#2f9e6b', export: '#2f6db0', plant: '#7a5cc7' };
 
 const utilClass = (u: number) => (u < 0.6 ? 'ok' : u < 0.85 ? 'mid' : 'hi');
 const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
@@ -262,7 +265,8 @@ export class UI {
     this.missionCard.addEventListener('click', () => this.missionCard.classList.toggle('open'));
 
     this.bnCard = el('div', 'card bn');
-    this.bnCard.innerHTML = `<div class="ctitle">Engpass-Überblick</div><div class="rows"></div><div class="hint"></div>`;
+    this.bnCard.innerHTML = `<div class="ctitle"><span>Engpass</span><span class="bnsum"></span></div><div class="rows"></div><div class="hint"></div>`;
+    this.bnCard.addEventListener('click', () => this.bnCard.classList.toggle('open'));
     const rows = this.bnCard.querySelector('.rows')!;
     for (const s of STAGES) {
       const r = el('div', 'row');
@@ -306,7 +310,7 @@ export class UI {
     });
     this.dealBadge = el('span', 'badge hidden');
     this.dealBtn.appendChild(this.dealBadge);
-    this.staffBtn = mk(ICONS.people, 'Personal', () => {
+    this.staffBtn = mk(ICONS.people, 'Fuhrpark und Personal', () => {
       this.staffModal.classList.remove('hidden');
       this.renderStaff(true);
       click();
@@ -485,12 +489,14 @@ export class UI {
 
     // Personal
     this.staffModal = el('div', 'modal hidden');
-    this.staffModal.innerHTML = `<div class="dialog deals"><div class="dhead"><h2>Personal</h2><button class="x" aria-label="Schließen">${ICONS.close}</button></div><div class="body"></div></div>`;
+    this.staffModal.innerHTML = `<div class="dialog deals"><div class="dhead"><h2>Fuhrpark und Personal</h2><button class="x" aria-label="Schließen">${ICONS.close}</button></div><div class="body"></div></div>`;
     this.staffBody = this.staffModal.querySelector('.body')!;
     this.staffModal.querySelector('.x')!.addEventListener('click', () => this.staffModal.classList.add('hidden'));
     this.staffModal.addEventListener('click', (e) => {
       const t = e.target as HTMLElement;
       if (t === this.staffModal) return this.staffModal.classList.add('hidden');
+      const fl = t.closest<HTMLElement>('[data-fleet]');
+      if (fl) this.game.setAllRoles(fl.dataset.fleet as TruckRole);
       const h = t.closest<HTMLElement>('[data-hire]');
       const f = t.closest<HTMLElement>('[data-fire]');
       if (h) this.game.hire(h.dataset.hire as Role);
@@ -719,6 +725,9 @@ export class UI {
     const b = sim.bottleneck();
     this.bnHint.textContent = b ? STAGES.find((s) => s.key === b)!.hint : sim.weather === 'storm' ? 'Sturm: Die Kräne stehen still.' : 'Kein Engpass erkennbar.';
     this.bnHint.classList.toggle('alert', b !== null);
+    const sum = this.bnCard.querySelector('.bnsum')!;
+    sum.textContent = b ? `${STAGES.find((s) => s.key === b)!.label} ${Math.round(sim.stats[b] * 100)} %` : 'keiner';
+    sum.className = `bnsum ${b ? 'alert' : ''}`;
 
     if (!this.finCard.classList.contains('hidden')) this.renderFinance(sim);
     this.updateSheet();
@@ -788,11 +797,40 @@ export class UI {
   private renderStaff(force: boolean) {
     const sim = this.game.sim;
     const roles = Object.keys(ROLES) as Role[];
-    const key = roles.map((r) => `${sim.staff[r]}:${sim.sick[r].length}:${sim.staffNeed(r)}`).join('|');
+    const tr = sim.trucks;
+    const byRole = (Object.keys(ROLE_NAMES) as TruckRole[]).map((r) => [r, tr.filter((t) => t.role === r).length] as const);
+    const fleet = {
+      total: tr.length,
+      agv: tr.filter((t) => t.agv).length,
+      broken: tr.filter((t) => t.wear >= 1).length,
+      worn: tr.filter((t) => t.wear > 0.75 && t.wear < 1).length,
+      idle: tr.filter((t) => !t.job && t.wait <= 0 && t.wear < 1).length,
+      jam: tr.filter((t) => t.stuck > 0).length,
+      noDriver: tr.filter((t) => !t.staffed).length,
+      cranes: sim.cranes.length,
+      big: sim.cranes.filter((c) => c.big).length,
+      cranesBroken: sim.cranes.filter((c) => c.wear >= 1).length,
+    };
+    const key = roles.map((r) => `${sim.staff[r]}:${sim.sick[r].length}:${sim.staffNeed(r)}`).join('|') + JSON.stringify(fleet) + byRole.join();
     if (!force && key === this.lastStaff) return;
     this.lastStaff = key;
     const total = roles.reduce((n, r) => n + sim.staff[r] * sim.wagePerHour(r), 0);
+    const dot = (r: TruckRole) => (ROLE_DOT[r] ? `<span class="dot" style="background:${ROLE_DOT[r]}"></span>` : '<span class="dot hollow"></span>');
     this.staffBody.innerHTML = `
+      <h3>Fuhrpark</h3>
+      <div class="stats">
+        <div><b>${fleet.total}</b><span>Trucks</span></div>
+        <div><b>${fleet.agv}</b><span>fahrerlos</span></div>
+        <div><b>${fleet.idle}</b><span>ohne Auftrag</span></div>
+        <div class="${fleet.jam ? 'warn' : ''}"><b>${fleet.jam}</b><span>im Stau</span></div>
+        <div class="${fleet.broken ? 'bad' : ''}"><b>${fleet.broken}</b><span>ausgefallen</span></div>
+        <div class="${fleet.noDriver ? 'bad' : ''}"><b>${fleet.noDriver}</b><span>ohne Fahrer</span></div>
+      </div>
+      <div class="roleList">${byRole.map(([r, n]) => `<div>${dot(r)}<span>${ROLE_NAMES[r].name}</span><b>${n}</b></div>`).join('')}</div>
+      ${fleet.worn ? `<p class="sub">${fleet.worn} Trucks sind über 75 % abgenutzt.</p>` : ''}
+      <div class="pm"><button class="secondary" data-fleet="auto">Alle auf Automatik</button></div>
+      <p class="sub">Kräne: ${fleet.cranes}, davon ${fleet.big} Containerbrücken${fleet.cranesBroken ? `, <span class="neg">${fleet.cranesBroken} ausgefallen</span>` : ''}.</p>
+      <h3>Personal</h3>
       <p class="sub">Wer einen Truck, Kran oder ein Gate kauft, stellt automatisch jemanden dafür ein. Jeden Morgen können sich Leute für ein bis zwei Tage krankmelden. Sie bekommen weiter Lohn, ihre Maschine steht aber still. Stelle Ersatz ein, wenn du das abfedern willst.</p>
       ${roles
         .map((r) => {
