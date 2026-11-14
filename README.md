@@ -31,7 +31,11 @@ Im Menü gibt es zwei Startarten:
 | Zoomen | zwei Finger spreizen | Mausrad |
 | Info | „Ansehen“ wählen, Schiff oder Gebäude antippen | Klick |
 
-Tasten: Leertaste Pause, `1` `2` `3` Tempo 1×/3×/8×, `O` Engpass-Anzeige, `V` `K` `C` `R` `Y` `G` `T` `X` Werkzeuge, `Esc` abbrechen.
+Tasten: Leertaste Pause, `1` `2` `3` Tempo 1×/3×/8×, `Strg+Z` rückgängig, `O` Engpass auf der Karte einfärben, `M` Ton,
+`V` `K` `C` `R` `Y` `G` `T` `X` Werkzeuge, `Esc` abbrechen.
+
+**Rückgängig** nimmt den letzten Bauschritt zurück (ein gezogener Strich zählt als ein Schritt) und erstattet die vollen Kosten.
+Das geht 4 Spielstunden lang, danach bleibt nur der Abriss mit 50 % Erstattung.
 
 Der Spielstand wird automatisch im Browser gespeichert (`localStorage`).
 
@@ -43,7 +47,8 @@ src/sim/      Simulation in reinem TypeScript, kein Browser-Code (testbar, headl
   sim.ts        Spielzustand, Bauen, Ticks, Jobs der Trucks, Speichern
   missions.ts   Tutorial-Missionen
   demo.ts       Demo-Hafen
-src/render/   PixiJS-Darstellung und Kamera
+src/render/   PixiJS-Darstellung und Kamera (Gelände, Schiffe, Kräne, Trucks, Tag und Nacht)
+src/audio/    Klänge, im Browser erzeugt (Web Audio, keine Audiodateien)
 src/ui/       HUD (DOM) und Eingabe (Maus, Touch)
 src/game.ts   Spielschleife und Zustand zwischen UI und Simulation
 tests/        Vitest

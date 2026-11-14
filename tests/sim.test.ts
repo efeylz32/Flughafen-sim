@@ -118,6 +118,78 @@ describe('Engpass', () => {
   });
 });
 
+describe('Rückgängig', () => {
+  it('Bau zurücknehmen erstattet die vollen Kosten', () => {
+    const sim = new Sim();
+    const start = sim.money;
+    sim.build('kai', 5, k);
+    sim.build('crane', 5, k);
+    expect(sim.undoBuild({ tool: 'crane', x: 5, y: k }).ok).toBe(true);
+    expect(sim.undoBuild({ tool: 'kai', x: 5, y: k }).ok).toBe(true);
+    expect(sim.cranes.length).toBe(0);
+    expect(sim.canBuild('kai', 5, k).ok).toBe(true);
+    expect(sim.money).toBe(start);
+  });
+
+  it('ein Truck wird über seine ID zurückgenommen, auch wenn er gefahren ist', () => {
+    const sim = basicPort(0, 1);
+    const before = sim.money;
+    const res = sim.build('truck', 7, k + 1);
+    run(sim, 2);
+    expect(sim.undoBuild({ tool: 'truck', x: 7, y: k + 1, truckId: res.truckId }).ok).toBe(true);
+    expect(sim.trucks.length).toBe(0);
+    expect(sim.money).toBeGreaterThanOrEqual(before);
+  });
+
+  it('Kai mit Kran lässt sich nicht einzeln zurücknehmen', () => {
+    const sim = new Sim();
+    sim.build('kai', 5, k);
+    sim.build('crane', 5, k);
+    expect(sim.undoBuild({ tool: 'kai', x: 5, y: k })).toMatchObject({ ok: false });
+  });
+
+  it('Abriss zurücknehmen stellt Straße, Trucks und Geld wieder her', () => {
+    const sim = new Sim();
+    sim.build('road', 5, k + 1);
+    sim.build('truck', 5, k + 1);
+    const before = sim.money;
+    const res = sim.demolish(5, k + 1); // nimmt zuerst den Truck
+    const res2 = sim.demolish(5, k + 1); // dann die Straße
+    expect(sim.trucks.length).toBe(0);
+    expect(sim.undoDemolish(res2.removed).ok).toBe(true);
+    expect(sim.undoDemolish(res.removed).ok).toBe(true);
+    expect(sim.trucks.length).toBe(1);
+    expect(sim.canBuild('truck', 5, k + 1).ok).toBe(true);
+    expect(sim.money).toBe(before);
+  });
+
+  it('Abriss eines Stapelplatzes merkt sich die Container', () => {
+    const sim = new Sim();
+    sim.build('yard', 5, k + 2);
+    sim.stock[sim.idx(5, k + 2)] = 4;
+    const res = sim.demolish(5, k + 2);
+    expect(sim.undoDemolish(res.removed).ok).toBe(true);
+    expect(sim.stock[sim.idx(5, k + 2)]).toBe(4);
+  });
+});
+
+describe('Ereignisse', () => {
+  it('melden Container, Ankunft und Abfertigung mit Ort und Betrag', () => {
+    const sim = basicPort(4, 1);
+    const tags = new Set<string>();
+    for (let i = 0; i < 2400; i++) {
+      sim.tick();
+      for (const e of sim.drainEvents()) {
+        if (e.tag) tags.add(e.tag);
+        if (e.tag === 'container') expect(e.amount).toBeGreaterThan(0);
+      }
+    }
+    expect(tags.has('ship-arrived')).toBe(true);
+    expect(tags.has('container')).toBe(true);
+    expect(tags.has('ship-done')).toBe(true);
+  });
+});
+
 describe('Speichern', () => {
   it('Roundtrip erhält Gebäude, Geld und Fortschritt', () => {
     const sim = new Sim(9);

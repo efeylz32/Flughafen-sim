@@ -13,6 +13,12 @@ async function boot() {
   await game.start(host);
   setupInput(game, host);
 
+  // Ton darf erst nach einer Nutzeraktion starten
+  const unlock = () => game.sound.unlock();
+  window.addEventListener('pointerdown', unlock, { capture: true });
+  window.addEventListener('keydown', unlock, { capture: true });
+  document.addEventListener('visibilitychange', () => game.sound.setHidden(document.hidden));
+
   // Letzten Spielstand laden, sonst Menü zeigen
   if (game.hasSave() && game.load()) {
     game.setSpeed(1);

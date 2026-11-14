@@ -21,6 +21,9 @@ const ICONS: Record<string, string> = {
   menu: svg('<path d="M4 7h16M4 12h16M4 17h16"/>'),
   pause: svg('<path d="M8 5v14M16 5v14"/>'),
   close: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
+  undo: svg('<path d="M8 5.5L3.5 10 8 14.5"/><path d="M3.5 10H14a5.5 5.5 0 0 1 0 11h-3.5"/>'),
+  sound: svg('<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M15.5 9a4.5 4.5 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11"/>'),
+  mute: svg('<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/>'),
   star: svg('<path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 16.9l-5.2 2.8 1-5.9L3.5 9.7l5.9-.8z"/>'),
 };
 
@@ -77,6 +80,8 @@ export class UI {
   private sheetBody!: HTMLElement;
   private toasts!: HTMLElement;
   private overlayBtn!: HTMLButtonElement;
+  private undoBtn!: HTMLButtonElement;
+  private soundBtn!: HTMLButtonElement;
   private menu!: HTMLElement;
   private resumeBtn!: HTMLButtonElement;
 
@@ -112,7 +117,10 @@ export class UI {
       const b = el('button', 'spd');
       b.innerHTML = label === 'pause' ? ICONS.pause : label;
       b.setAttribute('aria-label', v === 0 ? 'Pause' : `Geschwindigkeit ${label}`);
-      b.addEventListener('click', () => this.game.setSpeed(v));
+      b.addEventListener('click', () => {
+        this.game.setSpeed(v);
+        this.game.sound.play('click');
+      });
       b.dataset.v = String(v);
       this.speedBtns.push(b);
       speed.appendChild(b);
@@ -123,10 +131,23 @@ export class UI {
 
     // Rechte Knopfleiste
     const side = el('div', 'side');
+    this.undoBtn = el('button', 'roundbtn');
+    this.undoBtn.innerHTML = ICONS.undo;
+    this.undoBtn.title = 'Rückgängig (Strg+Z)';
+    this.undoBtn.setAttribute('aria-label', 'Rückgängig');
+    this.undoBtn.addEventListener('click', () => this.game.undo());
+    this.soundBtn = el('button', 'roundbtn');
+    this.soundBtn.title = 'Ton an/aus (M)';
+    this.soundBtn.setAttribute('aria-label', 'Ton an oder aus');
+    this.soundBtn.addEventListener('click', () => this.game.toggleSound());
     this.overlayBtn = el('button', 'roundbtn');
     this.overlayBtn.innerHTML = ICONS.eye;
-    this.overlayBtn.title = 'Engpass-Anzeige (O)';
-    this.overlayBtn.addEventListener('click', () => this.game.toggleOverlay());
+    this.overlayBtn.title = 'Engpass auf der Karte einfärben (O)';
+    this.overlayBtn.setAttribute('aria-label', 'Engpass auf der Karte einfärben');
+    this.overlayBtn.addEventListener('click', () => {
+      this.game.toggleOverlay();
+      this.game.sound.play('click');
+    });
     const finBtn = el('button', 'roundbtn');
     finBtn.innerHTML = ICONS.coins;
     finBtn.title = 'Finanzen';
@@ -135,7 +156,7 @@ export class UI {
     menuBtn.innerHTML = ICONS.menu;
     menuBtn.title = 'Menü';
     menuBtn.addEventListener('click', () => this.showMenu());
-    side.append(this.overlayBtn, finBtn, menuBtn);
+    side.append(this.undoBtn, this.overlayBtn, finBtn, this.soundBtn, menuBtn);
 
     // Karten links
     const cards = el('div', 'cards');
@@ -183,7 +204,10 @@ export class UI {
     for (const t of TOOLS) {
       const b = el('button', 'tool');
       b.innerHTML = `<span class="ico" style="--c:${t.color}">${ICONS[t.tool]}</span><b>${t.label}</b><small>${t.sub}</small>`;
-      b.addEventListener('click', () => this.game.setTool(t.tool));
+      b.addEventListener('click', () => {
+        this.game.setTool(t.tool);
+        this.game.sound.play('click');
+      });
       b.title = `${t.label}`;
       this.toolBtns.set(t.tool, b);
       bar.appendChild(b);
@@ -204,7 +228,8 @@ export class UI {
           <ul>
             <li><b>Handy:</b> Werkzeug unten wählen, tippen oder ziehen zum Bauen. Mit zwei Fingern verschieben und zoomen, mit „Ansehen" auch mit einem Finger.</li>
             <li><b>PC:</b> Linksklick baut, Rechtsklick oder Mittelklick verschiebt, Mausrad zoomt.</li>
-            <li><b>Tasten:</b> Leertaste Pause, 1/2/3 Tempo, O Engpass-Anzeige, V K C R Y G T X Werkzeuge, Esc Abbrechen.</li>
+            <li><b>Rückgängig:</b> Der Pfeil-Knopf oder Strg+Z nimmt den letzten Bauschritt zurück, mit voller Erstattung. Das geht 4 Spielstunden lang, danach hilft nur der Abriss (50 %).</li>
+            <li><b>Tasten:</b> Leertaste Pause, 1/2/3 Tempo, O Engpass einfärben, M Ton, V K C R Y G T X Werkzeuge, Esc Abbrechen.</li>
             <li><b>Ziel:</b> Finde den Engpass und beseitige ihn, bevor die Schiffe zu lange liegen.</li>
           </ul>
         </details>
@@ -228,6 +253,7 @@ export class UI {
     this.refreshSpeed();
     this.refreshTools();
     this.refreshOverlay();
+    this.refreshSound();
   }
 
   // ───────────────────────── Sichtbarkeit ─────────────────────────
@@ -257,7 +283,10 @@ export class UI {
   }
   refreshOverlay() {
     this.overlayBtn.classList.toggle('on', this.game.overlay);
-    this.bnCard.classList.toggle('hidden', !this.game.overlay);
+  }
+  refreshSound() {
+    this.soundBtn.innerHTML = this.game.sound.enabled ? ICONS.sound : ICONS.mute;
+    this.soundBtn.classList.toggle('off', !this.game.sound.enabled);
   }
 
   toast(text: string, kind: 'info' | 'good' | 'bad' = 'info') {
@@ -292,8 +321,10 @@ export class UI {
       this.missionCard.classList.add('hidden');
     }
 
+    this.undoBtn.classList.toggle('off', !this.game.canUndo);
+
     // Engpass
-    if (this.game.overlay) {
+    {
       for (const s of STAGES) {
         const v = sim.stats[s.key];
         const r = this.bnRows.get(s.key)!;
@@ -347,7 +378,7 @@ export class UI {
       html = `<h3>${s.name} <span class="tag">Containerschiff</span></h3>
         <div class="progress"><span style="width:${Math.round((done / s.total) * 100)}%"></span></div>
         <div class="meta">${done} von ${s.total} Containern abgeladen</div>
-        <div class="why ${s.state === 'unloading' && s.reason !== 'Wird entladen.' ? 'alert' : ''}"><b>Warum steht das Schiff?</b><br>${s.reason || '–'}</div>
+        <div class="why ${s.blocked ? 'alert' : ''}"><b>Warum steht das Schiff?</b><br>${s.reason || '–'}</div>
         ${s.state === 'unloading' ? `<div class="meta ${late ? 'neg' : ''}">Liegezeit ${hours.toFixed(1).replace('.', ',')} h (Ziel: ${SHIP_DWELL_TARGET_GM / 60} h)</div>` : ''}`;
     } else if (sel.kind === 'crane') {
       const c = sim.cranes.find((c) => c.id === sel.id);

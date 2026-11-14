@@ -99,11 +99,21 @@ export interface Ship {
   queuedFor: number;
   atBerth: number;
   reason: string;
+  /** Das Schiff kommt nicht voran und braucht die Aufmerksamkeit des Spielers. */
+  blocked: boolean;
 }
 
+export type EventTag = 'container' | 'ship-arrived' | 'ship-done' | 'ship-late' | 'ship-cancel' | 'mission' | 'day';
+
 export interface GameEvent {
-  text: string;
+  /** Text für eine Meldung. Fehlt er, ist das Ereignis nur für Ton und Effekte da. */
+  text?: string;
   kind: 'info' | 'good' | 'bad';
+  tag?: EventTag;
+  /** Ort in Feldern und Betrag in Euro, falls vorhanden. */
+  x?: number;
+  y?: number;
+  amount?: number;
 }
 
 export interface DayBook {
@@ -124,6 +134,25 @@ export interface BuildCheck {
   ok: boolean;
   reason?: string;
   cost: number;
+}
+
+export interface BuildResult extends BuildCheck {
+  /** ID des neuen Trucks, damit ein Kauf rückgängig gemacht werden kann. */
+  truckId?: number;
+}
+
+/** Ein abgerissenes Objekt mit allem, was zum Wiederherstellen nötig ist. */
+export interface Removed {
+  tool: BuildTool;
+  x: number;
+  y: number;
+  refund: number;
+  stock?: number;
+  served?: number;
+}
+
+export interface DemolishResult extends BuildCheck {
+  removed: Removed[];
 }
 
 export interface SaveData {
@@ -148,6 +177,7 @@ export interface SaveData {
 
 const SHIP_COLORS = [0xd9534f, 0x3b82c4, 0x2f9e6b, 0xe0a030, 0x7a5cc7, 0x2a9d9d];
 const SHIP_PREFIX = ['NV', 'KM', 'OR', 'TL'];
+const UNLOADING = 'Wird entladen.';
 const emptyBook = (): DayBook => ({ fees: 0, berth: 0, running: 0, building: 0 });
 
 export class Sim {
@@ -213,8 +243,8 @@ export class Sim {
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   }
-  private emit(text: string, kind: GameEvent['kind'] = 'info') {
-    this.events.push({ text, kind });
+  private emit(text: string | undefined, kind: GameEvent['kind'] = 'info', extra: Partial<GameEvent> = {}) {
+    this.events.push({ text, kind, ...extra });
   }
   drainEvents(): GameEvent[] {
     const e = this.events;
@@ -384,49 +414,43 @@ export class Sim {
     return { ok: !reason, reason, cost };
   }
 
-  build(tool: BuildTool, x: number, y: number): BuildCheck {
-    const chk = this.canBuild(tool, x, y);
-    if (!chk.ok) return chk;
+  /** Setzt ein Objekt ohne Prüfung und ohne Kosten. Liefert bei Trucks die neue ID. */
+  private place(tool: BuildTool, x: number, y: number): number | undefined {
     const i = this.idx(x, y);
-    this.money -= chk.cost;
-    this.today.building += chk.cost;
     switch (tool) {
       case 'kai':
         this.kind[i] = T.Kai;
-        break;
+        return undefined;
       case 'crane':
         this.cranes.push({ id: this.nextId++, x, y, buffer: 0, reserved: 0, cd: CRANE_MOVE_GM, state: 'idle' });
-        break;
+        return undefined;
       case 'road':
         this.kind[i] = T.Road;
-        break;
+        return undefined;
       case 'yard':
         this.kind[i] = T.Yard;
         this.stock[i] = 0;
-        break;
+        return undefined;
       case 'gate':
         this.kind[i] = T.Gate;
         this.gates.push({ id: this.nextId++, x, y, apron: 0, reservedIn: 0, proc: 0, served: 0 });
-        break;
-      case 'truck':
-        this.trucks.push({
-          id: this.nextId++,
-          tile: i,
-          next: -1,
-          prog: 0,
-          fx: x,
-          fy: y,
-          px: x,
-          py: y,
-          wait: 0,
-          load: 0,
-          job: null,
-          angle: 0,
-        });
-        break;
+        return undefined;
+      case 'truck': {
+        const id = this.nextId++;
+        this.trucks.push({ id, tile: i, next: -1, prog: 0, fx: x, fy: y, px: x, py: y, wait: 0, load: 0, job: null, angle: 0 });
+        return id;
+      }
     }
+  }
+
+  build(tool: BuildTool, x: number, y: number): BuildResult {
+    const chk = this.canBuild(tool, x, y);
+    if (!chk.ok) return chk;
+    this.money -= chk.cost;
+    this.today.building += chk.cost;
+    const truckId = this.place(tool, x, y);
     this.touch();
-    return chk;
+    return { ...chk, truckId };
   }
 
   canDemolish(x: number, y: number): BuildCheck {
@@ -436,72 +460,142 @@ export class Sim {
     if (k === T.Water || k === T.Land) {
       return this.truckAtTile(i) ? { ok: true, cost: 0 } : { ok: false, reason: 'Hier ist nichts', cost: 0 };
     }
-    if (k === T.Kai && !this.craneAt(x, y) && this.ships.some((s) => s.state !== 'queued' && s.berthX <= x && x < s.berthX + SHIP_LEN && s.state !== 'leaving')) {
+    if (k === T.Kai && !this.craneAt(x, y) && this.shipUsesKai(x)) {
       return { ok: false, reason: 'Ein Schiff liegt am Kai', cost: 0 };
     }
     return { ok: true, cost: 0 };
   }
 
-  demolish(x: number, y: number): BuildCheck {
+  private shipUsesKai(x: number): boolean {
+    return this.ships.some((s) => (s.state === 'sailing' || s.state === 'unloading') && s.berthX <= x && x < s.berthX + SHIP_LEN);
+  }
+
+  /** Entfernt, was auf dem Feld steht (Truck vor Kran vor Feld). `factor` ist der erstattete Anteil der Baukosten. */
+  demolish(x: number, y: number, factor = REFUND): DemolishResult {
     const chk = this.canDemolish(x, y);
-    if (!chk.ok) return chk;
+    if (!chk.ok) return { ...chk, removed: [] };
     const i = this.idx(x, y);
-    const refund = (tool: BuildTool) => {
-      const r = Math.round(COST[tool] * REFUND);
-      this.money += r;
-      this.today.building -= r;
-    };
-    // Trucks zuerst
-    const t = this.truckAtTile(i);
-    if (t) {
-      this.removeTruck(t);
-      refund('truck');
-      this.touch();
-      return chk;
-    }
+    const removed: Removed[] = [];
+    const truck = this.truckAtTile(i);
     const crane = this.craneAt(x, y);
-    if (crane) {
-      this.cranes = this.cranes.filter((c) => c !== crane);
-      refund('crane');
-    } else {
-      switch (this.kind[i]) {
-        case T.Kai:
-          refund('kai');
-          this.kind[i] = T.Land;
-          break;
-        case T.Road:
-          // Trucks auf oder vor diesem Feld entfernen
-          for (const tr of [...this.trucks]) {
-            if (tr.tile === i || tr.next === i) {
-              this.removeTruck(tr);
-              refund('truck');
-            }
-          }
-          refund('road');
-          this.kind[i] = T.Land;
-          break;
-        case T.Yard:
-          refund('yard');
-          this.kind[i] = T.Land;
-          this.stock[i] = 0;
-          this.yardRes[i] = 0;
-          this.yardOut[i] = 0;
-          break;
-        case T.Gate:
-          refund('gate');
-          this.kind[i] = T.Land;
-          this.gates = this.gates.filter((g) => !(g.x === x && g.y === y));
-          break;
+    if (truck) this.takeTruck(truck, factor, removed);
+    else if (crane) this.takeCrane(crane, factor, removed);
+    else this.takeTile(i, factor, removed);
+    this.touch();
+    this.invalidateJobs();
+    return { ...chk, removed };
+  }
+
+  private give(tool: BuildTool, factor: number): number {
+    const r = Math.round(COST[tool] * factor);
+    this.money += r;
+    this.today.building -= r;
+    return r;
+  }
+
+  private takeTruck(t: Truck, factor: number, out: Removed[]) {
+    if (t.job) this.cancelJob(t);
+    this.trucks = this.trucks.filter((x) => x !== t);
+    out.push({ tool: 'truck', x: t.tile % GRID_W, y: (t.tile / GRID_W) | 0, refund: this.give('truck', factor) });
+  }
+
+  private takeCrane(c: Crane, factor: number, out: Removed[]) {
+    this.cranes = this.cranes.filter((x) => x !== c);
+    out.push({ tool: 'crane', x: c.x, y: c.y, refund: this.give('crane', factor) });
+  }
+
+  private takeTile(i: number, factor: number, out: Removed[]) {
+    const x = i % GRID_W;
+    const y = (i / GRID_W) | 0;
+    switch (this.kind[i]) {
+      case T.Kai:
+        out.push({ tool: 'kai', x, y, refund: this.give('kai', factor) });
+        break;
+      case T.Road:
+        // Trucks auf diesem Feld oder auf dem Weg dorthin gehen mit
+        for (const tr of [...this.trucks]) {
+          if (tr.tile === i || tr.next === i) this.takeTruck(tr, factor, out);
+        }
+        out.push({ tool: 'road', x, y, refund: this.give('road', factor) });
+        break;
+      case T.Yard:
+        out.push({ tool: 'yard', x, y, refund: this.give('yard', factor), stock: this.stock[i] });
+        this.stock[i] = 0;
+        this.yardRes[i] = 0;
+        this.yardOut[i] = 0;
+        break;
+      case T.Gate: {
+        const g = this.gateAt(x, y);
+        out.push({ tool: 'gate', x, y, refund: this.give('gate', factor), served: g?.served ?? 0 });
+        this.gates = this.gates.filter((q) => q !== g);
+        break;
       }
+      default:
+        return;
+    }
+    this.kind[i] = T.Land;
+  }
+
+  /** Macht einen Bau rückgängig. Die Baukosten werden voll erstattet. */
+  undoBuild(a: { tool: BuildTool; x: number; y: number; truckId?: number }): DemolishResult {
+    const fail = (reason: string): DemolishResult => ({ ok: false, reason, cost: 0, removed: [] });
+    const removed: Removed[] = [];
+    if (a.tool === 'truck') {
+      const t = this.trucks.find((t) => t.id === a.truckId);
+      if (!t) return fail('Der Truck existiert nicht mehr');
+      this.takeTruck(t, 1, removed);
+    } else if (a.tool === 'crane') {
+      const c = this.craneAt(a.x, a.y);
+      if (!c) return fail('Der Kran existiert nicht mehr');
+      this.takeCrane(c, 1, removed);
+    } else {
+      const want = { kai: T.Kai, road: T.Road, yard: T.Yard, gate: T.Gate }[a.tool];
+      const i = this.idx(a.x, a.y);
+      if (this.kind[i] !== want) return fail('Das Feld wurde inzwischen geändert');
+      if (a.tool === 'kai') {
+        if (this.craneAt(a.x, a.y)) return fail('Auf dem Kai steht ein Kran');
+        if (this.shipUsesKai(a.x)) return fail('Ein Schiff liegt am Kai');
+      }
+      this.takeTile(i, 1, removed);
     }
     this.touch();
     this.invalidateJobs();
-    return chk;
+    return { ok: true, cost: 0, removed };
   }
 
-  private removeTruck(t: Truck) {
-    if (t.job) this.cancelJob(t);
-    this.trucks = this.trucks.filter((x) => x !== t);
+  /** Macht einen Abriss rückgängig: baut alles wieder auf und zieht die Erstattung wieder ab. */
+  undoDemolish(removed: Removed[]): BuildCheck {
+    const total = removed.reduce((n, r) => n + r.refund, 0);
+    const fail = (reason: string): BuildCheck => ({ ok: false, reason, cost: total });
+    if (this.money < total) return fail('Zu wenig Geld');
+    // In umgekehrter Reihenfolge: erst das Feld, dann was darauf stand
+    const order = [...removed].reverse();
+    const tileKind = { kai: T.Kai, road: T.Road, yard: T.Yard, gate: T.Gate };
+    const willBe = new Map<number, T>();
+    for (const r of order) {
+      const i = this.idx(r.x, r.y);
+      const k = willBe.get(i) ?? this.kind[i];
+      if (r.tool === 'truck') {
+        if (k !== T.Road) return fail('Die Straße fehlt inzwischen');
+      } else if (r.tool === 'crane') {
+        if (k !== T.Kai || this.craneAt(r.x, r.y)) return fail('Der Platz am Kai ist belegt');
+      } else {
+        if (k !== T.Land) return fail('Das Feld ist inzwischen belegt');
+        willBe.set(i, tileKind[r.tool]);
+      }
+    }
+    for (const r of order) {
+      this.place(r.tool, r.x, r.y);
+      if (r.tool === 'yard' && r.stock) this.stock[this.idx(r.x, r.y)] = r.stock;
+      if (r.tool === 'gate' && r.served) {
+        const g = this.gateAt(r.x, r.y);
+        if (g) g.served = r.served;
+      }
+    }
+    this.money -= total;
+    this.today.building += total;
+    this.touch();
+    return { ok: true, cost: total };
   }
 
   // ───────────────────────── Jobs ─────────────────────────
@@ -763,6 +857,7 @@ export class Sim {
       queuedFor: 0,
       atBerth: 0,
       reason: '',
+      blocked: false,
     });
     const base = Math.min(300, Math.max(120, 300 - this.rep * 1.5));
     this.nextShipIn = base * (0.8 + this.rnd() * 0.4);
@@ -799,12 +894,13 @@ export class Sim {
           this.moveToward(s, 1 + qi * 6, 2.5, step);
           qi++;
           s.queuedFor += dt;
+          s.blocked = s.queuedFor > 60;
           s.reason = this.hasBerth()
             ? 'Wartet auf einen freien Liegeplatz. Baue einen weiteren Liegeplatz (4 Kai-Felder in einer Reihe).'
             : 'Kein Liegeplatz: Baue 4 Kai-Felder in einer Reihe.';
           if (s.queuedFor > SHIP_PATIENCE_GM) {
             this.rep = Math.max(0, this.rep - 3);
-            this.emit(`${s.name} hat den Anlauf abgesagt (zu lange gewartet). Ruf −3`, 'bad');
+            this.emit(`${s.name} hat den Anlauf abgesagt (zu lange gewartet). Ruf −3`, 'bad', { tag: 'ship-cancel' });
             s.state = 'leaving';
             s.berthX = -100; // belegt keinen Liegeplatz
           }
@@ -814,17 +910,21 @@ export class Sim {
           if (this.moveToward(s, s.berthX, COAST_ROW - 2, step)) {
             s.state = 'unloading';
             s.atBerth = 0;
+            this.emit(undefined, 'info', { tag: 'ship-arrived', x: s.x, y: s.y });
           }
+          s.blocked = false;
           s.reason = 'Läuft in den Hafen ein.';
           break;
         case 'unloading':
           s.atBerth += dt;
           s.reason = this.unloadReason(s);
+          s.blocked = s.reason !== UNLOADING;
           if (s.containers <= 0) this.finishShip(s);
           break;
         case 'leaving':
           if (this.moveToward(s, GRID_W + 6, s.y, step)) this.ships = this.ships.filter((x) => x !== s);
           s.reason = 'Läuft aus.';
+          s.blocked = false;
           break;
       }
     }
@@ -841,7 +941,7 @@ export class Sim {
       if (this.trucks.every((t) => t.job !== null || t.wait > 0)) return 'Alle Trucks sind unterwegs. Kaufe mehr Trucks oder kürze die Wege.';
       return 'Wartet auf einen Truck am Kran. Prüfe, ob eine Straße Kran und Stapelplatz verbindet.';
     }
-    return 'Wird entladen.';
+    return UNLOADING;
   }
 
   private finishShip(s: Ship) {
@@ -852,10 +952,15 @@ export class Sim {
     if (onTime) {
       this.shipsOnTime++;
       this.rep = Math.min(REP_MAX, this.rep + 1);
-      this.emit(`${s.name} abgefertigt: +${BERTH_FEE.toLocaleString('de-DE')} € Liegegebühr, Ruf +1`, 'good');
+      this.emit(`${s.name} abgefertigt: +${BERTH_FEE.toLocaleString('de-DE')} € Liegegebühr, Ruf +1`, 'good', {
+        tag: 'ship-done',
+        x: s.x + SHIP_LEN / 2,
+        y: s.y,
+        amount: BERTH_FEE,
+      });
     } else {
       this.rep = Math.max(0, this.rep - 1);
-      this.emit(`${s.name} hat zu lange gelegen (${Math.round(s.atBerth / 60)} h). Ruf −1`, 'bad');
+      this.emit(`${s.name} hat zu lange gelegen (${Math.round(s.atBerth / 60)} h). Ruf −1`, 'bad', { tag: 'ship-late' });
     }
     s.state = 'leaving';
   }
@@ -909,6 +1014,7 @@ export class Sim {
           this.containersDone++;
           this.money += FEE_PER_CONTAINER;
           this.today.fees += FEE_PER_CONTAINER;
+          this.emit(undefined, 'good', { tag: 'container', x: g.x, y: g.y, amount: FEE_PER_CONTAINER });
         }
       }
       if (g.proc <= 0 && g.apron > 0) {
@@ -950,7 +1056,7 @@ export class Sim {
 
   updateMissions(silent = false) {
     while (this.mission < MISSIONS.length && MISSIONS[this.mission].done(this)) {
-      if (!silent) this.emit(`Mission geschafft: ${MISSIONS[this.mission].title}`, 'good');
+      if (!silent) this.emit(`Mission geschafft: ${MISSIONS[this.mission].title}`, 'good', { tag: 'mission' });
       this.mission++;
     }
   }
@@ -970,7 +1076,7 @@ export class Sim {
     this.history.push(this.today);
     if (this.history.length > 7) this.history.shift();
     this.today = emptyBook();
-    this.emit(`Tagesabschluss: Betriebskosten −${cost.toLocaleString('de-DE')} €`, 'info');
+    this.emit(`Tagesabschluss: Betriebskosten −${cost.toLocaleString('de-DE')} €`, 'info', { tag: 'day' });
   }
 
   private countKind(k: T): number {

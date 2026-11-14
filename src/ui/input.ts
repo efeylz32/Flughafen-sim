@@ -17,9 +17,6 @@ interface Ptr {
   y: number;
   sx: number;
   sy: number;
-  t0: number;
-  type: string;
-  button: number;
 }
 
 /** Zeigerbedienung für Maus und Touch: Tippen, Malen, Ziehen, Zoomen. */
@@ -67,14 +64,24 @@ export function setupInput(game: Game, el: HTMLElement) {
     }
   }
 
+  /** Beendet einen Malzug: ein Rückgängig-Schritt, und eine Meldung, falls gar nichts ging. */
+  function finishPaint() {
+    game.endStroke();
+    if (okCount === 0 && failReason) game.fail(failReason);
+    failReason = null;
+    okCount = 0;
+  }
+
   el.addEventListener('contextmenu', (e) => e.preventDefault());
 
   el.addEventListener('pointerdown', (e) => {
     el.setPointerCapture(e.pointerId);
     const p = rel(e);
-    ptrs.set(e.pointerId, { x: p.x, y: p.y, sx: p.x, sy: p.y, t0: performance.now(), type: e.pointerType, button: e.button });
+    ptrs.set(e.pointerId, { x: p.x, y: p.y, sx: p.x, sy: p.y });
     if (ptrs.size === 2) {
+      if (mode === 'paint') finishPaint();
       mode = 'pinch';
+      game.hover = null;
       const [a, b] = [...ptrs.values()];
       pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
       return;
@@ -87,9 +94,10 @@ export function setupInput(game: Game, el: HTMLElement) {
       mode = 'pan';
     } else if (PAINT_TOOLS.includes(game.tool)) {
       mode = 'paint';
+      game.beginStroke();
       last = tileOf(p);
-      game.hover = { ...last, ok: game.previewOk(last.x, last.y) };
       paintLine(last, last);
+      game.hover = { ...last, ok: game.previewOk(last.x, last.y) };
     } else {
       mode = 'tap';
       const t = tileOf(p);
@@ -115,27 +123,23 @@ export function setupInput(game: Game, el: HTMLElement) {
     if (mode === 'pinch' && ptrs.size >= 2) {
       const [a, b] = [...ptrs.values()];
       const d = Math.hypot(a.x - b.x, a.y - b.y);
-      const cx = (a.x + b.x) / 2;
-      const cy = (a.y + b.y) / 2;
-      if (pinchDist > 0) game.renderer.zoomAt(cx, cy, d / pinchDist);
+      if (pinchDist > 0) game.renderer.zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, d / pinchDist);
       pinchDist = d;
       game.renderer.panBy(dx / 2, dy / 2);
       return;
     }
     if (mode === 'paint') {
       const t = tileOf(p);
-      game.hover = { ...t, ok: game.previewOk(t.x, t.y) };
       if (last && (t.x !== last.x || t.y !== last.y)) {
         paintLine(last, t, true);
         last = t;
       }
+      game.hover = { ...t, ok: game.previewOk(t.x, t.y) };
       return;
     }
-    if (mode === 'tap') {
-      if (Math.hypot(p.x - ptr.sx, p.y - ptr.sy) > 8) {
-        mode = 'pan';
-        game.hover = null;
-      }
+    if (mode === 'tap' && Math.hypot(p.x - ptr.sx, p.y - ptr.sy) > 8) {
+      mode = 'pan';
+      game.hover = null;
     }
     if (mode === 'pan') game.renderer.panBy(dx, dy);
   });
@@ -151,10 +155,10 @@ export function setupInput(game: Game, el: HTMLElement) {
         game.pick(w.x, w.y);
       } else {
         const r = game.applyTool(t.x, t.y);
-        if (r) game.ui.toast(r, 'bad');
+        if (r) game.fail(r);
       }
-    } else if (mode === 'paint' && okCount === 0 && failReason) {
-      game.ui.toast(failReason, 'bad');
+    } else if (mode === 'paint') {
+      finishPaint();
     }
     if (ptrs.size === 0) {
       mode = 'none';
@@ -182,16 +186,23 @@ export function setupInput(game: Game, el: HTMLElement) {
 
   window.addEventListener('keydown', (e) => {
     if (e.target instanceof HTMLElement && /INPUT|TEXTAREA/.test(e.target.tagName)) return;
+    const k = e.key.toLowerCase();
+    if ((e.ctrlKey || e.metaKey) && k === 'z') {
+      e.preventDefault();
+      game.undo();
+      return;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.code === 'Space') {
       game.togglePause();
       e.preventDefault();
       return;
     }
-    const k = e.key.toLowerCase();
     if (k === '1') game.setSpeed(1);
     else if (k === '2') game.setSpeed(3);
     else if (k === '3') game.setSpeed(8);
     else if (k === 'o') game.toggleOverlay();
+    else if (k === 'm') game.toggleSound();
     else if (k === 'escape') {
       game.setTool('view');
       game.selected = null;
