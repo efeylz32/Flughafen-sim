@@ -318,3 +318,5 @@ button { font: inherit; color: inherit; cursor: pointer; }
   .sheet { bottom: calc(var(--safe-b) + 140px); }
   .stats b { font-size: 17px; }
 }
+
+.zdot { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }

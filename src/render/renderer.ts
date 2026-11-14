@@ -1,5 +1,5 @@
 import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture, TilingSprite } from 'pixi.js';
-import { COAST_ROW, CRANE_BUFFER, CRANE_EXP_BUFFER, GRID_H, GRID_W, MapId, MIN_PER_DAY, PLOT_W, RAIL_CAP, RAIL_TRAVEL_GM, sizeOf, T, TICK_GM, TILE, YARD_CAP_PER_TILE } from '../sim/data';
+import { ZONES, COAST_ROW, CRANE_BUFFER, CRANE_EXP_BUFFER, GRID_H, GRID_W, MapId, MIN_PER_DAY, PLOT_W, RAIL_CAP, RAIL_TRAVEL_GM, sizeOf, T, TICK_GM, TILE, YARD_CAP_PER_TILE } from '../sim/data';
 import type { Crane, Rail, Ship, Sim, Truck } from '../sim/sim';
 
 export interface View {
@@ -724,6 +724,22 @@ export class Renderer {
     }
     this.drawBuildings(g, sim);
 
+    // Zonen: Lagerfelder mit farbigem Rand, Gebäude mit farbiger Ecke
+    for (let i = 0; i < sim.zone.length; i++) {
+      const z = sim.zone[i];
+      if (!z || (sim.kind[i] !== T.Yard && sim.kind[i] !== T.Reefer)) continue;
+      const px = (i % GRID_W) * TILE;
+      const py = ((i / GRID_W) | 0) * TILE;
+      g.rect(px + 2.5, py + 2.5, TILE - 5, TILE - 5).stroke({ width: 2.2, color: ZONES[z].color });
+      g.poly([px + 2, py + 2, px + 11, py + 2, px + 2, py + 11]).fill(ZONES[z].color);
+    }
+    const tag = (x: number, y: number, z: number) => {
+      if (!z) return;
+      g.roundRect(x * TILE + 1, y * TILE + 1, 11, 11, 2.5).fill(0xffffff);
+      g.roundRect(x * TILE + 2.5, y * TILE + 2.5, 8, 8, 2).fill(ZONES[z].color);
+    };
+    for (const e of [...sim.gates, ...sim.plants, ...sim.rails]) tag(e.x, e.y, e.zone);
+
     // Einbahnstraßen: weiße Pfeile in Fahrtrichtung
     for (let i = 0; i < sim.oneway.length; i++) {
       const ow = sim.oneway[i];
@@ -1160,11 +1176,12 @@ export class Renderer {
         (t.py + (t.fy - t.py) * a + 0.5) * TILE + Math.cos(v.rot) * v.lat,
       );
       v.brake.visible = t.stuck > 0;
-      const key = t.load + t.cargo + t.role;
+      const key = t.load + t.cargo + t.role + t.zone;
       if (key !== v.key) {
         v.key = key;
-        // Farbpunkt für die feste Aufgabe
+        // Farbpunkt für die feste Aufgabe, dahinter ein Quadrat in Zonenfarbe
         v.badge.clear();
+        if (t.zone) v.badge.roundRect(-5.2, -5.2, 10.4, 10.4, 2).fill(0xffffff).roundRect(-4, -4, 8, 8, 1.5).fill(ZONES[t.zone].color);
         const rc = ROLE_COLOR[t.role];
         if (rc) v.badge.circle(0, 0, 3.6).fill(0xffffff).circle(0, 0, 2.6).fill(rc);
         for (let k = 0; k < v.load.length; k++) {
@@ -1597,6 +1614,12 @@ export class Renderer {
           g.rect(x * TILE + 2.5, COAST + 2.5, TILE - 5, TILE - 5).stroke({ width: 1.5, color: 0xffffff, alpha: 0.55 + 0.2 * Math.sin(view.time * 4) });
         }
       }
+    }
+
+    // Kräne mit Zone: farbiger Balken am Fuß
+    for (const c of sim.cranes) {
+      if (!c.zone) continue;
+      g.roundRect(c.x * TILE + 3, c.y * TILE + TILE - 4, TILE - 6, 4, 2).fill(ZONES[c.zone].color);
     }
 
     // Ausgefallene Geräte: Schraubenschlüssel-Zeichen, abgenutzte Geräte: kleiner gelber Punkt

@@ -712,6 +712,38 @@ describe('Entscheidungen', () => {
   });
 });
 
+describe('Zonen', () => {
+  it('ein Kran mit Zone liefert nur in Lager derselben Zone', () => {
+    const sim = basicPort(4, 1);
+    for (let x = 12; x <= 16; x++) sim.setZone(x, k + 2, 1);
+    sim.setZone(7, k, 2);
+    run(sim, 4);
+    expect(sim.yardStock).toBe(0);
+    expect(sim.cranes[0].state).toBe('blocked');
+    sim.setZone(7, k, 1);
+    sim.setZone(18, k + 2, 1);
+    run(sim, 6);
+    expect(sim.containersDone).toBeGreaterThan(0);
+  });
+
+  it('ein Truck mit Zone fährt nur Fahrten seiner Zone', () => {
+    const sim = basicPort(2, 1);
+    for (const t of sim.trucks) sim.setZone(t.tile % GRID_W, Math.floor(t.tile / GRID_W), 3);
+    expect(sim.trucks.every((t) => t.zone === 3)).toBe(true);
+    run(sim, 4);
+    expect(sim.trucks.every((t) => t.job === null)).toBe(true);
+  });
+
+  it('Zonen bleiben beim Speichern erhalten', () => {
+    const sim = basicPort(2, 1);
+    sim.setZone(12, k + 2, 4);
+    sim.setZone(7, k, 4);
+    const copy = Sim.deserialize(JSON.parse(JSON.stringify(sim.serialize())));
+    expect(copy.zone[copy.idx(12, k + 2)]).toBe(4);
+    expect(copy.cranes[0].zone).toBe(4);
+  });
+});
+
 describe('Verkehr', () => {
   it('in einer Spur steht pro Feld nur ein fahrender Truck, der Rest staut sich', () => {
     const sim = bigPort(1, 24);

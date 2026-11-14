@@ -32,6 +32,7 @@ Das Spielkonzept steht im Doc „Hafen-Imperium: Spielkonzept“.
 - **Kühlhalle (ab Stufe 3):** Kühlcontainer zu Lebensmitteln für 750 €.
 - **Karten:** Küste, Insel (keine Bahn, mehr Schiffe), Felsen (Sprengen kostet).
 - **Konkurrenz und Entscheidungen (ab Stufe 2):** Hafen Nordstadt wirbt Reedereien ab, wenn du unpünktlicher bist. Ereignisse wie Streik oder Zollverdacht verlangen eine Entscheidung.
+- **Zonen:** Lagerflächen, Kräne, Gates, Hallen, Gleise und Trucks in einer von vier Farben anmalen. Fahrten verbinden nur gleiche Zonen, Trucks mit Zone fahren nur dort.
 - **Aufrüsten:** Kran oder Truck mit „Ansehen“ antippen und im Info-Blatt aufrüsten.
 
 Alle Werte stehen in `src/sim/data.ts`. Das Balancing ist grob und noch nicht durch Spielen abgestimmt.
@@ -41,7 +42,8 @@ Alle Werte stehen in `src/sim/data.ts`. Das Balancing ist grob und noch nicht du
 ```bash
 npm install
 npm run dev      # Entwicklungsserver, auch im lokalen Netz erreichbar (z. B. vom Handy)
-npm test         # Simulationstests (ohne Grafik)
+npm test         # Simulationstests und Zufallstests (ohne Grafik)
+npm run playtest # Bot spielt Leicht, Normal, Schwer durch und berichtet (dauert etwa eine Minute)
 npm run build    # Typprüfung und Produktions-Build nach dist/
 npm run build:single  # zusätzlich eine einzelne, selbstständige Datei dist/hafen-imperium.html
 ```

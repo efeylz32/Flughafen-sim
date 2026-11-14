@@ -6,7 +6,7 @@ import { GameEvent, Removed, Sim } from './sim/sim';
 import type { UI } from './ui/ui';
 
 const SAVE_KEY = 'hafen-imperium-save-v1';
-export const PAINT_TOOLS: Tool[] = ['kai', 'road', 'yard', 'reefer', 'dredge', 'demolish'];
+export const PAINT_TOOLS: Tool[] = ['kai', 'road', 'yard', 'reefer', 'dredge', 'zone', 'demolish'];
 
 /** So lange (in Spielminuten) lässt sich eine Bauaktion rückgängig machen. */
 const UNDO_WINDOW_GM = 240;
@@ -36,6 +36,8 @@ export class Game {
   hover: View['hover'] = null;
   /** Aufgabe, die die Sammelzuweisung vergibt */
   assignRole: TruckRole = 'crane';
+  /** Zone, die das Zonen-Werkzeug vergibt (0 = entfernen) */
+  zonePick = 1;
   rect: View['rect'] = null;
 
   private acc = 0;
@@ -290,6 +292,12 @@ export class Game {
   /** Wendet das aktive Werkzeug auf ein Feld an. Liefert den Fehlergrund oder null bei Erfolg. */
   applyTool(x: number, y: number): string | null {
     if (this.tool === 'view' || this.tool === 'assign') return null;
+    if (this.tool === 'zone') {
+      const r = this.sim.setZone(x, y, this.zonePick);
+      if (!r.ok) return r.reason ?? 'Nicht möglich';
+      this.sound.play('click');
+      return null;
+    }
     if (this.tool === 'oneway') {
       const r = this.sim.toggleOneway(x, y);
       if (!r.ok) return r.reason ?? 'Nicht möglich';
@@ -466,6 +474,11 @@ export class Game {
 
   previewOk(x: number, y: number): boolean {
     if (this.tool === 'view' || this.tool === 'assign') return true;
+    if (this.tool === 'zone') {
+      const i = this.sim.idx(x, y);
+      const k = this.sim.kind[i];
+      return k === T.Yard || k === T.Reefer || !!(this.sim.craneAt(x, y) ?? this.sim.gateAt(x, y) ?? this.sim.plantAt(x, y) ?? this.sim.railAt(x, y) ?? this.sim.truckAtTile(i));
+    }
     if (this.tool === 'oneway') return this.sim.kind[this.sim.idx(x, y)] === T.Road;
     if (this.tool === 'buyland') return x >= 0 && x < GRID_W && !this.sim.owned[x];
     if (this.tool === 'demolish') return this.sim.canDemolish(x, y).ok;

@@ -28,8 +28,8 @@ export enum T {
   Rock = 10,
 }
 
-export type Tool = 'view' | 'kai' | 'crane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'assign' | 'oneway' | 'buyland' | 'demolish';
-export type BuildTool = Exclude<Tool, 'view' | 'demolish' | 'assign' | 'oneway' | 'buyland'>;
+export type Tool = 'view' | 'kai' | 'crane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'assign' | 'zone' | 'oneway' | 'buyland' | 'demolish';
+export type BuildTool = Exclude<Tool, 'view' | 'demolish' | 'assign' | 'zone' | 'oneway' | 'buyland'>;
 
 export const COST: Record<BuildTool, number> = {
   kai: 5_000,
@@ -230,6 +230,15 @@ export const ROLE_NAMES: Record<TruckRole, { name: string; text: string }> = {
 };
 /** Funkzeit der Automatik vor jeder Fahrt in Spielminuten */
 export const DISPATCH_GM = 0.6;
+
+/** Zonen trennen Kreisläufe. 0 = keine Zone. */
+export const ZONES = [
+  { name: 'Keine', color: 0x9aa5b1 },
+  { name: 'A', color: 0xf0b429 },
+  { name: 'B', color: 0x27a5ad },
+  { name: 'C', color: 0xd6589a },
+  { name: 'D', color: 0x8d6e4a },
+];
 /** Trucks mit fester Aufgabe kennen ihre Strecke: Sie fahren schneller und laden zügiger. */
 export const ROUTINE_SPEED = 1.25;
 export const ROUTINE_HANDLE = 0.5;

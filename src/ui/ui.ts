@@ -7,6 +7,7 @@ import {
   MAPS,
   MapId,
   RIVAL_NAME,
+  ZONES,
   ROLES,
   Role,
   CRANE_EXP_BUFFER,
@@ -48,6 +49,7 @@ const ICONS: Record<string, string> = {
   unpack: svg('<path d="M3 20V9l4.5 3V9l4.5 3V9l4.5 3V5h4.5v15z"/><path d="M7 16h3M13 16h3"/>'),
   pack: svg('<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>'),
   assign: svg('<rect x="3.5" y="5" width="17" height="14" rx="1.5" stroke-dasharray="3 2.4"/><path d="M8 12.5l2.6 2.6L16 9.5"/>'),
+  zone: svg('<rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.5"/><rect x="13" y="3.5" width="7.5" height="7.5" rx="1.5"/><rect x="3.5" y="13" width="7.5" height="7.5" rx="1.5"/><path d="M13 16.8h7.5M16.8 13v7.5"/>'),
   chart: svg('<path d="M4 20V4M4 20h16"/><rect x="7" y="12" width="3" height="6" rx=".6"/><rect x="12" y="8" width="3" height="10" rx=".6"/><rect x="17" y="10.5" width="3" height="7.5" rx=".6"/>'),
   oneway: svg('<path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M3 5h18M3 19h18" opacity=".5"/>'),
   buyland: svg('<path d="M4 20V9l8-5 8 5v11z"/><path d="M9 20v-6h6v6"/><path d="M12 4v-1"/>'),
@@ -93,6 +95,7 @@ const TOOLS: ToolDef[] = [
   { cat: 'store', tool: 'yard', label: 'Stapel', sub: '1k', color: '#c9b88a' },
   { cat: 'build', tool: 'gate', label: 'Gate', sub: '20k · 2×1', color: '#d9534f' },
   { cat: 'gear', tool: 'assign', label: 'Aufgaben', sub: 'Rahmen', color: '#2a6fdb' },
+  { cat: 'gear', tool: 'zone', label: 'Zonen', sub: 'Farbe', color: '#f0b429' },
   { cat: 'gear', tool: 'truck', label: 'Truck', sub: '25k', color: '#e0a030' },
   { cat: 'build', tool: 'unpack', label: 'Packhalle', sub: '60k · 3×2', color: '#c98a3c' },
   { cat: 'build', tool: 'pack', label: 'Veredeln', sub: '90k · 3×3', color: '#7a5cc7' },
@@ -178,6 +181,7 @@ export class UI {
   private decision!: HTMLElement;
   private decisionBody!: HTMLElement;
   private rolePick!: HTMLElement;
+  private zonePick!: HTMLElement;
   private alertEl!: HTMLElement;
   private lastFin = '';
   private endModal!: HTMLElement;
@@ -370,7 +374,18 @@ export class UI {
       });
       this.rolePick.appendChild(b);
     }
-    bar.append(this.rolePick, tabs, row);
+    this.zonePick = el('div', 'rolepick zonepick hidden');
+    ZONES.forEach((z, i) => {
+      const b = el('button', '', `<span class="zdot" style="background:${hex(z.color)}"></span>${i ? `Zone ${z.name}` : 'Keine'}`);
+      b.dataset.zone = String(i);
+      b.addEventListener('click', () => {
+        this.game.zonePick = i;
+        this.refreshTools();
+        click();
+      });
+      this.zonePick.appendChild(b);
+    });
+    bar.append(this.rolePick, this.zonePick, tabs, row);
     for (const t of TOOLS) {
       const b = el('button', 'tool');
       b.innerHTML = `<span class="ico" style="--c:${t.color}">${ICONS[t.tool]}<span class="lk">${ICONS.lock}</span></span><b>${t.label}</b><small>${t.sub}</small>`;
@@ -409,6 +424,7 @@ export class UI {
           <ul>
             <li><b>Handy:</b> Werkzeug unten wählen, tippen oder ziehen zum Bauen. Mit zwei Fingern verschieben und zoomen, mit „Ansehen" auch mit einem Finger.</li>
             <li><b>PC:</b> Linksklick baut, Rechtsklick oder Mittelklick verschiebt, Mausrad zoomt.</li>
+            <li><b>Zonen:</b> Unter Geräte „Zonen“ wählen, eine Farbe antippen und Lagerflächen, Kräne, Gates, Hallen, Gleise oder Trucks anmalen. Fahrten verbinden dann nur Dinge derselben Zone, Trucks mit Zone fahren nur dort. Ohne Zone bleibt alles wie bisher.</li>
             <li><b>Aufrüsten:</b> Mit „Ansehen" einen Kran oder Truck antippen, dann im Info-Blatt aufrüsten.</li>
             <li><b>Rückgängig:</b> Der Pfeil-Knopf oder Strg+Z nimmt den letzten Bauschritt zurück, mit voller Erstattung. Das geht 4 Spielstunden lang, danach hilft nur der Abriss (50 %).</li>
             <li><b>Tasten:</b> Leertaste Pause, 1/2/3 Tempo, O Engpass einfärben, M Ton, V K C R Y G T X Werkzeuge, Esc Abbrechen.</li>
@@ -622,6 +638,8 @@ export class UI {
     if (cur && cur !== 'always') this.cat = cur;
     for (const [id, b] of this.catBtns) b.classList.toggle('on', id === this.cat);
     this.rolePick.classList.toggle('hidden', this.game.tool !== 'assign');
+    this.zonePick.classList.toggle('hidden', this.game.tool !== 'zone');
+    for (const b of this.zonePick.querySelectorAll<HTMLElement>('button')) b.classList.toggle('on', Number(b.dataset.zone) === this.game.zonePick);
     for (const b of this.rolePick.querySelectorAll<HTMLElement>('button')) b.classList.toggle('on', b.dataset.role === this.game.assignRole);
     for (const [t, v] of this.toolBtns) {
       v.btn.classList.toggle('on', t === this.game.tool);
@@ -1008,6 +1026,18 @@ export class UI {
         .map((r) => `<button data-role="${r}" class="${t.role === r ? 'on' : ''}">${ROLE_NAMES[r].name}</button>`)
         .join('')}</div><div class="meta">${ROLE_NAMES[t.role].text}${t.role === 'auto' ? '' : ' Feste Aufgabe: 25 % schneller, lädt doppelt so schnell.'}</div>`;
       if (!t.agv) actions += upgradeBtn('truck', 'Fahrerlos machen');
+    }
+    // Zone anzeigen, wo es eine gibt
+    {
+      const sel2 = this.game.selected!;
+      let z = 0;
+      if (sel2.kind === 'yard' || sel2.kind === 'reefer') z = sim.zone[sel2.id];
+      else if (sel2.kind === 'crane') z = sim.cranes.find((c) => c.id === sel2.id)?.zone ?? 0;
+      else if (sel2.kind === 'gate') z = sim.gates.find((g) => g.id === sel2.id)?.zone ?? 0;
+      else if (sel2.kind === 'plant') z = sim.plants.find((p) => p.id === sel2.id)?.zone ?? 0;
+      else if (sel2.kind === 'rail') z = sim.rails.find((r) => r.id === sel2.id)?.zone ?? 0;
+      else if (sel2.kind === 'truck') z = sim.trucks.find((t) => t.id === sel2.id)?.zone ?? 0;
+      if (z) html += `<div class="meta"><span class="zdot" style="background:${hex(ZONES[z].color)}"></span>Zone ${ZONES[z].name}: arbeitet nur mit Zone ${ZONES[z].name}</div>`;
     }
     // Nur bei Änderung neu setzen, damit Knöpfe beim Antippen nicht verschwinden
     if (html !== this.lastSheet) {
