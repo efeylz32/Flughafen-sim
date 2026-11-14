@@ -1,6 +1,6 @@
 import { Sound } from './audio/sound';
 import { Renderer, View } from './render/renderer';
-import { BuildTool, GRID_H, GRID_W, T, TICKS_PER_SEC, TILE, Tool } from './sim/data';
+import { BuildTool, DiffId, GRID_H, GRID_W, Role, T, TICKS_PER_SEC, TILE, Tool } from './sim/data';
 import { buildDemo } from './sim/demo';
 import { GameEvent, Removed, Sim } from './sim/sim';
 import type { UI } from './ui/ui';
@@ -183,8 +183,8 @@ export class Game {
     this.ui.refreshSound();
   }
 
-  newGame(mode: 'empty' | 'demo') {
-    this.sim = new Sim(Math.floor(Math.random() * 1e9));
+  newGame(mode: 'empty' | 'demo', diff: DiffId = 'normal') {
+    this.sim = new Sim(Math.floor(Math.random() * 1e9), diff);
     if (mode === 'demo') buildDemo(this.sim);
     this.resetTransient();
     this.setTool('view');
@@ -302,6 +302,17 @@ export class Game {
     this.sound.play('upgrade');
     this.renderer.addPop(x, y, 'build');
     this.ui.toast(sel.kind === 'crane' ? 'Containerbrücke in Betrieb: 40 Moves pro Stunde' : 'Der Truck fährt jetzt fahrerlos', 'good');
+  }
+
+  hire(role: Role) {
+    this.sim.hire(role);
+    this.sound.play('click');
+  }
+
+  fire(role: Role) {
+    const res = this.sim.fire(role);
+    if (!res.ok) this.fail(res.reason ?? 'Nicht möglich');
+    else this.sound.play('undo');
   }
 
   acceptContract(id: number) {

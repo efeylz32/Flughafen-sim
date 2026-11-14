@@ -7,6 +7,8 @@ import {
   CRANE_BUFFER,
   CRANE_EXP_BUFFER,
   CRANE_MOVE_GM,
+  DIFFS,
+  DiffId,
   EXPORT_FEE,
   EXPORT_PRESTOCK,
   EXPORT_SHARE,
@@ -28,6 +30,8 @@ import {
   REEFER_SPOIL_PENALTY,
   REFUND,
   REP_MAX,
+  ROLES,
+  Role,
   RUN_COST_PER_DAY,
   SHIP_LEN,
   SHIP_MAX_STAY_GM,
@@ -36,7 +40,6 @@ import {
   SHIP_TYPES,
   ShipTypeId,
   START_GM,
-  START_MONEY,
   START_REP,
   T,
   TICK_GM,
@@ -71,6 +74,8 @@ export interface Crane {
   state: 'idle' | 'working' | 'blocked' | 'storm';
   /** Letzter Zug war ein Beladen (für abwechselndes Ent- und Beladen) */
   lastLoad: boolean;
+  /** Ein Kranführer ist im Dienst */
+  staffed: boolean;
 }
 
 export interface Gate {
@@ -88,6 +93,7 @@ export interface Gate {
   procFee: number;
   lastIn: boolean;
   served: number;
+  staffed: boolean;
 }
 
 export interface Rail {
@@ -139,6 +145,8 @@ export interface Truck {
   dir: number;
   /** Spielminuten, die der Truck gerade im Stau steht */
   stuck: number;
+  /** Ein Fahrer ist im Dienst (fahrerlose Fahrzeuge brauchen keinen) */
+  staffed: boolean;
 }
 
 export type ShipState = 'queued' | 'sailing' | 'unloading' | 'leaving';
@@ -234,6 +242,7 @@ export interface DayBook {
   bonus: number;
   penalty: number;
   running: number;
+  wages: number;
   building: number;
 }
 
@@ -302,6 +311,9 @@ export interface SaveData {
   contracts?: Contract[];
   offers?: Contract[];
   contractsDone?: number;
+  diff?: DiffId;
+  staff?: Record<Role, number>;
+  sick?: Record<Role, number[]>;
   today: Partial<DayBook>;
   history: Partial<DayBook>[];
 }
@@ -318,7 +330,7 @@ const LINES: { line: string; prefix: string; color: number }[] = [
 ];
 const UNLOADING = 'Wird entladen.';
 const LOADING = 'Wird beladen.';
-const emptyBook = (): DayBook => ({ fees: 0, exportFees: 0, rail: 0, berth: 0, bonus: 0, penalty: 0, running: 0, building: 0 });
+const emptyBook = (): DayBook => ({ fees: 0, exportFees: 0, rail: 0, berth: 0, bonus: 0, penalty: 0, running: 0, wages: 0, building: 0 });
 const TILE_OF: Partial<Record<BuildTool, T>> = { kai: T.Kai, road: T.Road, yard: T.Yard, reefer: T.Reefer, gate: T.Gate, rail: T.Rail };
 const eur = (n: number) => `${Math.round(n).toLocaleString('de-DE')} €`;
 
@@ -346,7 +358,11 @@ export class Sim {
   contracts: Contract[] = [];
   offers: Contract[] = [];
 
-  money = START_MONEY;
+  money: number;
+  /** Angestellte je Aufgabe */
+  staff: Record<Role, number> = { driver: 0, crane: 0, gate: 0 };
+  /** Krankmeldungen je Aufgabe: verbleibende Tage */
+  sick: Record<Role, number[]> = { driver: [], crane: [], gate: [] };
   rep = START_REP;
   gm = START_GM;
   tickCount = 0;
@@ -389,8 +405,12 @@ export class Sim {
   private exportNeed = 0;
   private spoilNote = 0;
 
-  constructor(seed = 1234) {
+  constructor(
+    seed = 1234,
+    readonly diff: DiffId = 'normal',
+  ) {
     this.seed = seed >>> 0;
+    this.money = DIFFS[diff].money;
     this.lastDay = Math.floor(this.gm / MIN_PER_DAY);
     for (let y = 0; y < GRID_H; y++) {
       for (let x = 0; x < GRID_W; x++) {
@@ -690,11 +710,14 @@ export class Sim {
           cd: CRANE_MOVE_GM,
           state: 'idle',
           lastLoad: false,
+          staffed: true,
         });
+        this.staff.crane++;
         return undefined;
       case 'gate':
         this.kind[i] = T.Gate;
-        this.gates.push({ id: this.nextId++, x, y, apron: [], resIn: 0, inApron: 0, resOut: 0, proc: 0, procIn: false, procFee: 0, lastIn: false, served: 0 });
+        this.gates.push({ id: this.nextId++, x, y, apron: [], resIn: 0, inApron: 0, resOut: 0, proc: 0, procIn: false, procFee: 0, lastIn: false, served: 0, staffed: true });
+        this.staff.gate++;
         return undefined;
       case 'rail':
         this.kind[i] = T.Rail;
@@ -705,7 +728,8 @@ export class Sim {
         return undefined;
       case 'truck': {
         const id = this.nextId++;
-        this.trucks.push({ id, tile: i, next: -1, prog: 0, fx: x, fy: y, px: x, py: y, wait: 0, load: 0, cargo: 'imp', agv: false, job: null, angle: 0, dir: -1, stuck: 0 });
+        this.trucks.push({ id, tile: i, next: -1, prog: 0, fx: x, fy: y, px: x, py: y, wait: 0, load: 0, cargo: 'imp', agv: false, job: null, angle: 0, dir: -1, stuck: 0, staffed: true });
+        this.staff.driver++;
         return id;
       }
     }
@@ -764,6 +788,7 @@ export class Sim {
   private takeTruck(t: Truck, factor: number, out: Removed[]) {
     if (t.job) this.cancelJob(t);
     this.trucks = this.trucks.filter((x) => x !== t);
+    if (!t.agv) this.staff.driver = Math.max(0, this.staff.driver - 1);
     out.push({
       tool: 'truck',
       x: t.tile % GRID_W,
@@ -775,6 +800,7 @@ export class Sim {
 
   private takeCrane(c: Crane, factor: number, out: Removed[]) {
     this.cranes = this.cranes.filter((x) => x !== c);
+    this.staff.crane = Math.max(0, this.staff.crane - 1);
     out.push({ tool: 'crane', x: c.x, y: c.y, refund: this.give(COST.crane + (c.big ? UPGRADE.crane.cost : 0), factor), upgraded: c.big });
   }
 
@@ -808,6 +834,7 @@ export class Sim {
         const g = this.gateAt(x, y);
         out.push({ tool: 'gate', x, y, refund: this.give(COST.gate, factor), served: g?.served ?? 0 });
         this.gates = this.gates.filter((q) => q !== g);
+        this.staff.gate = Math.max(0, this.staff.gate - 1);
         break;
       }
       case T.Rail: {
@@ -1340,6 +1367,7 @@ export class Sim {
     }
 
     this.updateWeather(dt);
+    this.updateStaff(dt);
     this.spawnShips(dt);
     this.updateShips(dt);
     this.updateCranes(dt);
@@ -1351,6 +1379,65 @@ export class Sim {
     this.updateLevel();
     this.updateMissions();
     this.rollDay();
+  }
+
+  // ───────────────────────── Personal ─────────────────────────
+
+  /** So viele Leute braucht der jetzige Ausbau. */
+  staffNeed(role: Role): number {
+    if (role === 'driver') return this.trucks.filter((t) => !t.agv).length;
+    return role === 'crane' ? this.cranes.length : this.gates.length;
+  }
+  /** Angestellt und nicht krank */
+  staffAvail(role: Role): number {
+    return Math.max(0, this.staff[role] - this.sick[role].length);
+  }
+  wagePerHour(role: Role): number {
+    return Math.round(ROLES[role].wage * DIFFS[this.diff].wage);
+  }
+  hire(role: Role) {
+    this.staff[role]++;
+  }
+  fire(role: Role): BuildCheck {
+    if (this.staff[role] <= 0) return { ok: false, reason: 'Niemand angestellt', cost: 0 };
+    this.staff[role]--;
+    // Wer krank ist und entlassen wird, zählt nicht mehr als krank
+    if (this.sick[role].length > this.staff[role]) this.sick[role].pop();
+    return { ok: true, cost: 0 };
+  }
+
+  /** Verteilt die anwesenden Leute und zahlt den Lohn. Kranke bekommen weiter Lohn. */
+  private updateStaff(dt: number) {
+    let n = this.staffAvail('driver');
+    for (const t of this.trucks) t.staffed = t.agv || n-- > 0;
+    n = this.staffAvail('crane');
+    for (const c of this.cranes) c.staffed = n-- > 0;
+    n = this.staffAvail('gate');
+    for (const g of this.gates) g.staffed = n-- > 0;
+    let perHour = 0;
+    for (const r of Object.keys(ROLES) as Role[]) perHour += this.staff[r] * this.wagePerHour(r);
+    const pay = (perHour * dt) / 60;
+    this.money -= pay;
+    this.today.wages += pay;
+  }
+
+  /** Jeden Morgen: Kranke werden gesund, neue melden sich krank. */
+  private rollSickness() {
+    const p = DIFFS[this.diff].sick;
+    for (const r of Object.keys(ROLES) as Role[]) {
+      this.sick[r] = this.sick[r].map((d) => d - 1).filter((d) => d > 0);
+      let fresh = 0;
+      for (let i = this.sick[r].length; i < this.staff[r]; i++) {
+        if (this.rnd() < p) {
+          this.sick[r].push(1 + Math.floor(this.rnd() * 2));
+          fresh++;
+        }
+      }
+      if (fresh) {
+        const short = this.staffAvail(r) < this.staffNeed(r);
+        this.emit(`${fresh} ${ROLES[r].plural} krank gemeldet.${short ? ' Es fehlen Leute: Stelle im Personal Ersatz ein.' : ''}`, short ? 'bad' : 'info', { tag: 'spoil' });
+      }
+    }
   }
 
   // ───────────────────────── Wetter ─────────────────────────
@@ -1426,7 +1513,7 @@ export class Sim {
       loaded: 0,
       queuedFor: 0,
       atBerth: 0,
-      dwellTarget: c ? c.dwell : st.dwell,
+      dwellTarget: c ? c.dwell : Math.round(st.dwell * DIFFS[this.diff].dwell),
       contractId: c ? c.id : 0,
       reason: '',
       blocked: false,
@@ -1509,7 +1596,7 @@ export class Sim {
           } else {
             s.reason = 'Kein Liegeplatz: Baue 4 Kai-Felder in einer Reihe.';
           }
-          if (s.queuedFor > SHIP_PATIENCE_GM) {
+          if (s.queuedFor > SHIP_PATIENCE_GM * DIFFS[this.diff].patience) {
             this.rep = Math.max(0, this.rep - 3);
             this.emit(`${s.name} hat den Anlauf abgesagt (zu lange gewartet). Ruf −3`, 'bad', { tag: 'ship-cancel' });
             this.settleContract(s, false);
@@ -1552,6 +1639,7 @@ export class Sim {
     if (this.weather === 'storm') return { text: 'Sturm: Die Kräne stehen still. Die Liegezeit läuft nicht weiter.', blocked: false };
     const cr = this.cranesAtBerth(s.berthX, s.len);
     if (cr.length === 0) return bad('Kein Kran am Liegeplatz. Setze einen Kran auf eines der Kai-Felder am Schiff.');
+    if (cr.every((c) => !c.staffed)) return bad('Kein Kranführer im Dienst. Stelle im Personal jemanden ein.');
     const imports = s.containers + s.reefers;
     if (imports > 0 && cr.every((c) => c.state === 'blocked')) {
       if (this.trucks.length === 0) return bad('Es gibt keinen Truck. Kaufe einen Truck.');
@@ -1567,6 +1655,7 @@ export class Sim {
       if (cr.some((c) => c.buffer > 0) && !this.hasFreeStore(T.Yard)) {
         return bad('Stapelplatz voll. Baue mehr Stapelplatz oder mehr Gates, damit Container abfließen.');
       }
+      if (this.trucks.some((t) => !t.staffed)) return bad('Es fehlen Fahrer: Trucks stehen still. Stelle im Personal jemanden ein.');
       if (this.trucks.every((t) => t.job !== null || t.wait > 0)) return bad('Alle Trucks sind unterwegs. Kaufe mehr Trucks oder kürze die Wege.');
       return bad('Wartet auf einen Truck am Kran. Prüfe, ob eine Straße Kran und Stapelplatz verbindet.');
     }
@@ -1644,7 +1733,7 @@ export class Sim {
         c.state = 'storm';
         continue;
       }
-      if (!ship) {
+      if (!ship || !c.staffed) {
         c.state = 'idle';
         c.cd = mt;
         continue;
@@ -1709,6 +1798,8 @@ export class Sim {
       }
       if (!t.job) {
         t.stuck = 0;
+        // Ohne Fahrer bleibt der Truck stehen
+        if (!t.staffed) continue;
         this.assignJob(t);
         if (!t.job) continue;
       }
@@ -1754,7 +1845,7 @@ export class Sim {
           }
         }
       }
-      if (g.proc > 0) continue;
+      if (g.proc > 0 || !g.staffed) continue;
       const wantOut = g.apron.length > 0;
       const wantIn = this.exportNeed > 0 && g.inApron < GATE_IN_CAP;
       if (!wantOut && !wantIn) continue;
@@ -1882,7 +1973,7 @@ export class Sim {
     const reefer = this.level >= 3 && !big && roll > 0.65;
     const ship: ShipTypeId = big ? 'panamax' : 'feeder';
     const interval = big ? this.pick([480, 600, 720]) : this.pick([240, 300, 360, 480]);
-    const dwell = big ? this.pick([600, 720]) : this.pick([360, 420, 480]);
+    const dwell = Math.round((big ? this.pick([600, 720]) : this.pick([360, 420, 480])) * DIFFS[this.diff].dwell);
     const calls = 4 + Math.floor(this.rnd() * 6);
     const tight = (SHIP_TYPES[ship].dwell - dwell) / 60;
     const raw = (big ? 12_000 : 2_500) + tight * 1_500 + this.rnd() * (big ? 8_000 : 2_000) + (reefer ? 2_000 : 0);
@@ -1899,7 +1990,7 @@ export class Sim {
       callsTotal: calls,
       dwell,
       bonus,
-      penalty: Math.round((bonus * 0.8) / 500) * 500,
+      penalty: Math.round((bonus * 0.8 * DIFFS[this.diff].penalty) / 500) * 500,
       next: 30 + this.rnd() * 30,
     };
   }
@@ -1972,6 +2063,7 @@ export class Sim {
     this.today = emptyBook();
     this.makeOffers();
     this.planWeather();
+    this.rollSickness();
     this.emit(`Tagesabschluss: Betriebskosten −${eur(cost)}`, 'info', { tag: 'day' });
   }
 
@@ -2006,13 +2098,16 @@ export class Sim {
       contracts: this.contracts,
       offers: this.offers,
       contractsDone: this.contractsDone,
+      diff: this.diff,
+      staff: this.staff,
+      sick: this.sick,
       today: this.today,
       history: this.history,
     };
   }
 
   static deserialize(d: SaveData): Sim {
-    const s = new Sim(d.seed);
+    const s = new Sim(d.seed, d.diff ?? 'normal');
     s.kind.set(d.kind);
     s.stock.set(d.stock);
     if (d.stockExp) s.stockExp.set(d.stockExp);
@@ -2053,6 +2148,9 @@ export class Sim {
     s.contracts = d.contracts ?? [];
     s.offers = d.offers ?? [];
     s.contractsDone = d.contractsDone ?? 0;
+    if (d.staff) s.staff = { ...d.staff };
+    else s.staff.driver = s.trucks.filter((t) => !t.agv).length;
+    if (d.sick) s.sick = { driver: [...d.sick.driver], crane: [...d.sick.crane], gate: [...d.sick.gate] };
     s.nextId = Math.max(s.nextId, ...s.contracts.map((c) => c.id + 1), ...s.offers.map((c) => c.id + 1));
     s.today = { ...emptyBook(), ...d.today };
     s.history = d.history.map((h) => ({ ...emptyBook(), ...h }));

@@ -2,6 +2,10 @@ import type { Game } from '../game';
 import {
   BuildTool,
   CRANE_BUFFER,
+  DIFFS,
+  DiffId,
+  ROLES,
+  Role,
   CRANE_EXP_BUFFER,
   GATE_APRON_CAP,
   LEVELS,
@@ -46,6 +50,7 @@ const ICONS: Record<string, string> = {
   sound: svg('<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M15.5 9a4.5 4.5 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11"/>'),
   mute: svg('<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/>'),
   star: svg('<path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 16.9l-5.2 2.8 1-5.9L3.5 9.7l5.9-.8z"/>'),
+  people: svg('<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.6"/><path d="M16 14.2c2.9.2 5 2.6 5 5.8"/>'),
   lock: svg('<rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>'),
   trophy: svg('<path d="M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M7 6H4v1.5A3.5 3.5 0 0 0 7.5 11M17 6h3v1.5a3.5 3.5 0 0 1-3.5 3.5M12 14v4M8 20h8"/>'),
 };
@@ -129,6 +134,12 @@ export class UI {
   private resumeBtn!: HTMLButtonElement;
   private deals!: HTMLElement;
   private dealsBody!: HTMLElement;
+  private staffModal!: HTMLElement;
+  private staffBody!: HTMLElement;
+  private staffBtn!: HTMLButtonElement;
+  private staffBadge!: HTMLElement;
+  private lastStaff = '';
+  private diff: DiffId = 'normal';
   private levelUp!: HTMLElement;
   private levelUpBody!: HTMLElement;
   private speedBeforeModal = 1;
@@ -242,6 +253,13 @@ export class UI {
     });
     this.dealBadge = el('span', 'badge hidden');
     this.dealBtn.appendChild(this.dealBadge);
+    this.staffBtn = mk(ICONS.people, 'Personal', () => {
+      this.staffModal.classList.remove('hidden');
+      this.renderStaff(true);
+      click();
+    });
+    this.staffBadge = el('span', 'badge hidden', '!');
+    this.staffBtn.appendChild(this.staffBadge);
     this.overlayBtn = mk(ICONS.eye, 'Engpass auf der Karte einfärben', () => {
       this.game.toggleOverlay();
       click();
@@ -252,7 +270,7 @@ export class UI {
     });
     this.soundBtn = mk(ICONS.sound, 'Ton an oder aus', () => this.game.toggleSound());
     const menuBtn = mk(ICONS.menu, 'Menü', () => this.showMenu());
-    side.append(this.undoBtn, this.dealBtn, this.overlayBtn, finBtn, this.soundBtn, menuBtn);
+    side.append(this.undoBtn, this.dealBtn, this.staffBtn, this.overlayBtn, finBtn, this.soundBtn, menuBtn);
 
     // Info-Blatt
     this.sheet = el('div', 'sheet hidden');
@@ -292,6 +310,9 @@ export class UI {
         <h1>Hafen-Imperium</h1>
         <p class="sub">Vom Anleger zum Weltklasse-Hafen</p>
         <button class="primary resume">Weiterspielen</button>
+        <div class="difflabel">Schwierigkeit für ein neues Spiel</div>
+        <div class="diff">${(Object.keys(DIFFS) as DiffId[]).map((d) => `<button data-diff="${d}">${DIFFS[d].name}</button>`).join('')}</div>
+        <p class="sub difftext"></p>
         <button class="primary demo">Demo-Hafen mit Engpass</button>
         <button class="secondary empty">Neuer leerer Hafen</button>
         <details><summary>Bedienung</summary>
@@ -316,12 +337,26 @@ export class UI {
     this.resumeBtn.addEventListener('click', () => {
       if (this.game.load()) this.hideMenu();
     });
+    const diffText = this.menu.querySelector('.difftext')!;
+    const showDiff = () => {
+      for (const b of this.menu.querySelectorAll<HTMLElement>('[data-diff]')) b.classList.toggle('on', b.dataset.diff === this.diff);
+      const d = DIFFS[this.diff];
+      diffText.textContent = `${d.text}. Startgeld ${eur(d.money)}.`;
+    };
+    for (const b of this.menu.querySelectorAll<HTMLElement>('[data-diff]')) {
+      b.addEventListener('click', () => {
+        this.diff = b.dataset.diff as DiffId;
+        showDiff();
+        click();
+      });
+    }
+    showDiff();
     this.menu.querySelector('.demo')!.addEventListener('click', () => {
-      this.game.newGame('demo');
+      this.game.newGame('demo', this.diff);
       this.hideMenu();
     });
     this.menu.querySelector('.empty')!.addEventListener('click', () => {
-      this.game.newGame('empty');
+      this.game.newGame('empty', this.diff);
       this.hideMenu();
     });
     this.menu.querySelector('.close-menu')!.addEventListener('click', () => this.hideMenu());
@@ -349,6 +384,21 @@ export class UI {
       this.renderDeals(true);
     });
 
+    // Personal
+    this.staffModal = el('div', 'modal hidden');
+    this.staffModal.innerHTML = `<div class="dialog deals"><div class="dhead"><h2>Personal</h2><button class="x" aria-label="Schließen">${ICONS.close}</button></div><div class="body"></div></div>`;
+    this.staffBody = this.staffModal.querySelector('.body')!;
+    this.staffModal.querySelector('.x')!.addEventListener('click', () => this.staffModal.classList.add('hidden'));
+    this.staffModal.addEventListener('click', (e) => {
+      const t = e.target as HTMLElement;
+      if (t === this.staffModal) return this.staffModal.classList.add('hidden');
+      const h = t.closest<HTMLElement>('[data-hire]');
+      const f = t.closest<HTMLElement>('[data-fire]');
+      if (h) this.game.hire(h.dataset.hire as Role);
+      else if (f) this.game.fire(f.dataset.fire as Role);
+      this.renderStaff(true);
+    });
+
     // Neue Stufe
     this.levelUp = el('div', 'modal hidden');
     this.levelUp.innerHTML = `<div class="dialog levelup"><div class="body"></div><button class="primary go">Weiter</button></div>`;
@@ -358,7 +408,7 @@ export class UI {
       this.game.setSpeed(this.speedBeforeModal);
     });
 
-    root.append(top, left, side, this.sheet, bar, this.toasts, this.menu, this.deals, this.levelUp);
+    root.append(top, left, side, this.sheet, bar, this.toasts, this.menu, this.deals, this.staffModal, this.levelUp);
     this.refreshSpeed();
     this.refreshTools();
     this.refreshOverlay();
@@ -476,6 +526,11 @@ export class UI {
     this.dealBadge.textContent = String(open);
     if (!this.deals.classList.contains('hidden')) this.renderDeals(false);
 
+    // Personal: Warnung am Knopf, wenn Leute fehlen
+    const short = (Object.keys(ROLES) as Role[]).some((r) => sim.staffAvail(r) < sim.staffNeed(r));
+    this.staffBadge.classList.toggle('hidden', !short);
+    if (!this.staffModal.classList.contains('hidden')) this.renderStaff(false);
+
     // Mission
     const m = MISSIONS[sim.mission];
     if (m) {
@@ -506,7 +561,7 @@ export class UI {
   private renderFinance(sim: Sim) {
     const d = sim.today;
     const inc = d.fees + d.rail + d.exportFees + d.berth + d.bonus;
-    const exp = d.running + d.building + d.penalty;
+    const exp = d.running + d.building + d.penalty + d.wages;
     const y = sim.history.at(-1);
     const row = (label: string, v: number) => (v ? `<div class="fl sub"><span>${label}</span><span>${eur(v)}</span></div>` : '');
     this.finBody.innerHTML = `
@@ -514,11 +569,40 @@ export class UI {
       ${row('Container am Gate', d.fees)}${row('Container per Bahn', d.rail)}${row('Export aufs Schiff', d.exportFees)}
       ${row('Liegegebühren', d.berth)}${row('Vertrags- und Stufenbonus', d.bonus)}
       <div class="fl"><b>Ausgaben</b><b>${eur(exp)}</b></div>
-      ${row('Bau und Aufrüstung', d.building)}${row('Strafen', d.penalty)}${row('Betrieb (Tagesabschluss)', d.running)}
+      ${row('Löhne', d.wages)}${row('Bau und Aufrüstung', d.building)}${row('Strafen', d.penalty)}${row('Betrieb (Tagesabschluss)', d.running)}
       <div class="fl total"><b>Ergebnis heute</b><b class="${inc - exp >= 0 ? 'pos' : 'neg'}">${eur(inc - exp)}</b></div>
-      ${y ? `<div class="fl sub"><span>Gestern</span><span>${eur(y.fees + y.rail + y.exportFees + y.berth + y.bonus - y.running - y.building - y.penalty)}</span></div>` : ''}
-      <div class="fl sub"><span>Betriebskosten pro Tag</span><span>${eur(sim.runningCost())}</span></div>
+      ${y ? `<div class="fl sub"><span>Gestern</span><span>${eur(y.fees + y.rail + y.exportFees + y.berth + y.bonus - y.running - y.building - y.penalty - y.wages)}</span></div>` : ''}
+      <div class="fl sub"><span>Wartung pro Tag</span><span>${eur(sim.runningCost())}</span></div>
+      <div class="fl sub"><span>Löhne pro Tag</span><span>${eur((Object.keys(ROLES) as Role[]).reduce((n, r) => n + sim.staff[r] * sim.wagePerHour(r) * 24, 0))}</span></div>
       <div class="fl sub"><span>Schiffe / Container gesamt</span><span>${num(sim.shipsDone)} / ${num(sim.handled)}</span></div>`;
+  }
+
+  private renderStaff(force: boolean) {
+    const sim = this.game.sim;
+    const roles = Object.keys(ROLES) as Role[];
+    const key = roles.map((r) => `${sim.staff[r]}:${sim.sick[r].length}:${sim.staffNeed(r)}`).join('|');
+    if (!force && key === this.lastStaff) return;
+    this.lastStaff = key;
+    const total = roles.reduce((n, r) => n + sim.staff[r] * sim.wagePerHour(r), 0);
+    this.staffBody.innerHTML = `
+      <p class="sub">Wer einen Truck, Kran oder ein Gate kauft, stellt automatisch jemanden dafür ein. Jeden Morgen können sich Leute für ein bis zwei Tage krankmelden. Sie bekommen weiter Lohn, ihre Maschine steht aber still. Stelle Ersatz ein, wenn du das abfedern willst.</p>
+      ${roles
+        .map((r) => {
+          const need = sim.staffNeed(r);
+          const sick = sim.sick[r].length;
+          const avail = sim.staffAvail(r);
+          const miss = Math.max(0, need - avail);
+          return `<div class="deal">
+            <div class="dl"><b>${ROLES[r].name}</b><span class="tag">${sim.wagePerHour(r)} € pro Stunde</span></div>
+            <div class="terms"><span>Angestellt ${sim.staff[r]}</span><span>Gebraucht ${need}</span>${sick ? `<span class="neg">Krank ${sick}</span>` : ''}${
+              miss ? `<span class="neg">Es fehlen ${miss}</span>` : avail > need ? `<span class="pos">Reserve ${avail - need}</span>` : ''
+            }</div>
+            <div class="meta">${ROLES[r].need}</div>
+            <div class="pm"><button class="secondary" data-fire="${r}">Entlassen</button><button class="primary" data-hire="${r}">Einstellen</button></div>
+          </div>`;
+        })
+        .join('')}
+      <p class="sub">Löhne gesamt: ${eur(total)} pro Stunde, ${eur(total * 24)} pro Tag.</p>`;
   }
 
   private contractCard(c: Contract, active: boolean, canAccept: boolean): string {

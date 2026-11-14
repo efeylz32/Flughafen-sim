@@ -1,4 +1,4 @@
-import { COAST_ROW, START_MONEY } from './data';
+import { COAST_ROW, DIFFS } from './data';
 import { Sim } from './sim';
 
 /**
@@ -7,6 +7,7 @@ import { Sim } from './sim';
  */
 export function buildDemo(sim: Sim): void {
   const k = COAST_ROW;
+  sim.money = 10_000_000;
   for (let x = 6; x < 14; x++) sim.build('kai', x, k);
   sim.build('crane', 7, k);
   sim.build('crane', 11, k);
@@ -15,7 +16,8 @@ export function buildDemo(sim: Sim): void {
   sim.build('gate', 24, k + 2);
   sim.build('truck', 8, k + 1);
   sim.build('truck', 9, k + 1);
-  sim.money = START_MONEY * 0.5;
+  // Der Demo-Hafen kostet die Hälfte des Startgelds
+  sim.money = DIFFS[sim.diff].money * 0.5;
   sim.today.building = 0;
   sim.updateMissions(true);
   sim.nextShipIn = 5;

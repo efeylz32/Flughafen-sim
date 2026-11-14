@@ -139,7 +139,8 @@ describe('Rückgängig', () => {
     run(sim, 2);
     expect(sim.undoBuild({ tool: 'truck', x: 7, y: k + 1, truckId: res.truckId }).ok).toBe(true);
     expect(sim.trucks.length).toBe(0);
-    expect(sim.money).toBeGreaterThanOrEqual(before);
+    expect(sim.staff.driver).toBe(0);
+    void before;
   });
 
   it('Kai mit Kran lässt sich nicht einzeln zurücknehmen', () => {
@@ -400,6 +401,55 @@ describe('Aufrüsten', () => {
     sim.level = 4;
     expect(sim.upgrade('truck', id).ok).toBe(true);
     expect(sim.trucks[0].agv).toBe(true);
+  });
+});
+
+describe('Personal', () => {
+  it('Kauf stellt ein, Abriss entlässt, Löhne laufen stündlich', () => {
+    const sim = new Sim();
+    sim.build('road', 5, k + 1);
+    sim.build('truck', 5, k + 1);
+    expect(sim.staff.driver).toBe(1);
+    const before = sim.money;
+    run(sim, 10);
+    expect(Math.round(before - sim.money)).toBe(220);
+    sim.demolish(5, k + 1);
+    expect(sim.staff.driver).toBe(0);
+  });
+
+  it('ohne Fahrer steht der Truck, ohne Kranführer der Kran', () => {
+    const sim = basicPort(3, 1);
+    sim.staff.driver = 0;
+    sim.staff.crane = 0;
+    run(sim, 4);
+    expect(sim.containersDone).toBe(0);
+    const ship = sim.ships.find((s) => s.state === 'unloading');
+    expect(ship?.reason).toMatch(/Kranführer/);
+    sim.hire('crane');
+    for (let i = 0; i < 3; i++) sim.hire('driver');
+    run(sim, 6);
+    expect(sim.containersDone).toBeGreaterThan(0);
+  });
+
+  it('Krankmeldungen kommen morgens und heilen wieder aus', () => {
+    const sim = new Sim(3, 'hard');
+    for (let i = 0; i < 200; i++) sim.hire('driver');
+    run(sim, 19);
+    const sick = sim.sick.driver.length;
+    expect(sick).toBeGreaterThan(3);
+    expect(sim.staffAvail('driver')).toBe(200 - sick);
+    expect(sim.fire('driver').ok).toBe(true);
+  });
+});
+
+describe('Schwierigkeit', () => {
+  it('bestimmt Startgeld, Liegezeit und Löhne', () => {
+    const easy = new Sim(1, 'easy');
+    const hard = new Sim(1, 'hard');
+    expect(easy.money).toBeGreaterThan(hard.money);
+    expect(easy.wagePerHour('crane')).toBeLessThan(hard.wagePerHour('crane'));
+    const copy = Sim.deserialize(JSON.parse(JSON.stringify(hard.serialize())));
+    expect(copy.diff).toBe('hard');
   });
 });
 

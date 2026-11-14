@@ -61,18 +61,35 @@ export const REFUND = 0.5;
 
 /** Laufende Kosten pro Spieltag. */
 export const RUN_COST_PER_DAY = {
-  crane: 3_000,
-  craneBig: 5_500,
-  truck: 600,
+  // Wartung und Energie. Die Löhne kommen über das Personal dazu.
+  crane: 1_200,
+  craneBig: 2_500,
+  truck: 150,
   agv: 250,
-  gate: 1_500,
+  gate: 400,
   rail: 2_500,
   yardTile: 15,
   reeferTile: 80,
   kaiTile: 10,
 };
 
-export const START_MONEY = 500_000;
+export const START_MONEY = 400_000;
+
+export type DiffId = 'easy' | 'normal' | 'hard';
+/** Schwierigkeitsgrade: Startgeld, Geduld der Schiffe, zugesagte Liegezeit, Strafen, Löhne, Krankenstand */
+export const DIFFS: Record<DiffId, { name: string; text: string; money: number; patience: number; dwell: number; penalty: number; wage: number; sick: number }> = {
+  easy: { name: 'Leicht', text: 'Viel Startgeld, geduldige Schiffe, milde Strafen', money: 650_000, patience: 1.5, dwell: 1.25, penalty: 0.5, wage: 0.8, sick: 0.02 },
+  normal: { name: 'Normal', text: 'Knappes Startgeld, Löhne und Fristen wie geplant', money: 400_000, patience: 1, dwell: 1, penalty: 1, wage: 1, sick: 0.04 },
+  hard: { name: 'Schwer', text: 'Wenig Startgeld, ungeduldige Schiffe, enge Fristen, hohe Löhne und Strafen', money: 250_000, patience: 0.6, dwell: 0.8, penalty: 1.6, wage: 1.3, sick: 0.07 },
+};
+
+export type Role = 'driver' | 'crane' | 'gate';
+/** Personal: Stundenlohn und wofür die Stelle gebraucht wird */
+export const ROLES: Record<Role, { name: string; plural: string; wage: number; need: string }> = {
+  driver: { name: 'Fahrer', plural: 'Fahrer', wage: 22, need: 'einer pro Truck, fahrerlose Fahrzeuge brauchen keinen' },
+  crane: { name: 'Kranführer', plural: 'Kranführer', wage: 60, need: 'einer pro Kran' },
+  gate: { name: 'Gate-Personal', plural: 'Gate-Kräfte', wage: 30, need: 'eine Kraft pro Gate' },
+};
 export const START_REP = 50;
 export const REP_MAX = 100;
 
