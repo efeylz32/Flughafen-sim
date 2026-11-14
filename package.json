@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "build:single": "npm run build && node scripts/inline.mjs",
     "preview": "vite preview --host",
-    "test": "vitest run"
+    "test": "vitest run",
+    "playtest": "PLAYTEST=1 vitest run tests/playtest.test.ts --disableConsoleIntercept"
   },
   "dependencies": {
     "pixi.js": "^8.23.0"

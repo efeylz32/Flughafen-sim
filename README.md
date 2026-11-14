@@ -10,10 +10,10 @@ Das Spielkonzept steht im Doc „Hafen-Imperium: Spielkonzept“.
 | Stufe | Name | Ab umgeschlagenen Containern | Neu |
 |---|---|---|---|
 | 1 | Anleger | 0 | Kai, Kran, Straße, Stapelplatz, Gate, Trucks |
-| 2 | Regionalhafen | 1.200 | Export (Schiffe beladen), Verträge mit Reedereien, Containerbrücke, Wetter |
-| 3 | Handelshafen | 6.000 | Kühlfracht mit Kühlplätzen, Gleisanschluss, Baggern für große Schiffe |
-| 4 | Seehafen | 18.000 | Fahrerlose Fahrzeuge, 4 Verträge |
-| 5 | Weltklasse-Hafen | 45.000 | 5 Verträge |
+| 2 | Regionalhafen | 1.000 | Export (Schiffe beladen), Verträge mit Reedereien, Containerbrücke, Wetter |
+| 3 | Handelshafen | 4.500 | Kühlfracht mit Kühlplätzen, Gleisanschluss, Baggern für große Schiffe |
+| 4 | Seehafen | 11.000 | Fahrerlose Fahrzeuge, 4 Verträge |
+| 5 | Weltklasse-Hafen | 24.000 | 5 Verträge |
 
 - **Export:** Schiffe wollen auch beladen werden. Export-Container kommen über das Gate, Trucks bringen sie zum Kran (250 € pro Stück).
 - **Verträge:** Feste Anläufe einer Reederei. Pünktlich abgefertigt gibt es Bonus, sonst Strafe.
@@ -24,7 +24,7 @@ Das Spielkonzept steht im Doc „Hafen-Imperium: Spielkonzept“.
 - **Verarbeitung (ab Stufe 2):** Die Packhalle packt Container aus, die Veredelung macht aus zwei davon Fertigware für 900 €. Trucks fahren die Ware dazwischen.
 - **Aufgaben für Trucks:** Jeder Truck fährt auf Automatik oder bekommt eine feste Aufgabe (Kran räumen, Ausgang, Export, Verarbeitung). Feste Aufgaben sind 25 % schneller und sparen die Funkzeit der Leitstelle.
 - **Personal und Schwierigkeit:** Fahrer, Kranführer und Gate-Kräfte kosten Stundenlohn und können krank werden. Drei Schwierigkeitsgrade im Menü.
-- **Ziel und Pleite:** Weltklasse-Hafen bis Tag 45/35/25 (je Schwierigkeit). Ist das Konto 5/3/2 Tagesabschlüsse in Folge im Minus, ist es die Pleite.
+- **Ziel und Pleite:** Weltklasse-Hafen bis Tag 50/40/32 (je Schwierigkeit). Ist das Konto 5/3/2 Tagesabschlüsse in Folge im Minus, ist es die Pleite.
 - **Kredit und Bilanz:** Kredit in Schritten von 100.000 €, Grenze wächst mit der Stufe, Zinsen täglich. Die Bilanz zeigt Tagesfinanzen und den Verlauf der letzten Tage.
 - **Sammelzuweisung:** Werkzeug „Aufgaben“, Rahmen über Trucks ziehen.
 - **Einbahnstraßen und Land:** Straßen auf eine Richtung schalten. Land ist in Streifen geteilt und muss gekauft werden.

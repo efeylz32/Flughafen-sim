@@ -104,9 +104,9 @@ export const DIFFS: Record<
   DiffId,
   { name: string; text: string; money: number; patience: number; dwell: number; penalty: number; wage: number; sick: number; debtDays: number; goalDays: number; rate: number }
 > = {
-  easy: { name: 'Leicht', text: 'Viel Startgeld, geduldige Schiffe, milde Strafen', money: 650_000, patience: 1.5, dwell: 1.25, penalty: 0.5, wage: 0.8, sick: 0.02, debtDays: 5, goalDays: 45, rate: 0.7 },
-  normal: { name: 'Normal', text: 'Knappes Startgeld, Löhne und Fristen wie geplant', money: 400_000, patience: 1, dwell: 1, penalty: 1, wage: 1, sick: 0.04, debtDays: 3, goalDays: 35, rate: 1 },
-  hard: { name: 'Schwer', text: 'Wenig Startgeld, ungeduldige Schiffe, enge Fristen, hohe Löhne und Strafen', money: 250_000, patience: 0.6, dwell: 0.8, penalty: 1.6, wage: 1.3, sick: 0.07, debtDays: 2, goalDays: 25, rate: 1.4 },
+  easy: { name: 'Leicht', text: 'Viel Startgeld, geduldige Schiffe, milde Strafen', money: 650_000, patience: 1.5, dwell: 1.25, penalty: 0.5, wage: 0.8, sick: 0.02, debtDays: 5, goalDays: 50, rate: 0.7 },
+  normal: { name: 'Normal', text: 'Knappes Startgeld, Löhne und Fristen wie geplant', money: 400_000, patience: 1, dwell: 1, penalty: 1, wage: 1, sick: 0.04, debtDays: 3, goalDays: 40, rate: 1 },
+  hard: { name: 'Schwer', text: 'Wenig Startgeld, ungeduldige Schiffe, enge Fristen, hohe Löhne und Strafen', money: 250_000, patience: 0.6, dwell: 0.8, penalty: 1.6, wage: 1.3, sick: 0.07, debtDays: 2, goalDays: 32, rate: 1.4 },
 };
 
 // Kredit
@@ -239,10 +239,10 @@ export const EXPORT_FEE = 250;
 // Hafenstufen: `need` ist die Zahl der insgesamt umgeschlagenen Container
 export const LEVELS = [
   { name: 'Anleger', need: 0, bonus: 0, contracts: 0 },
-  { name: 'Regionalhafen', need: 1_200, bonus: 100_000, contracts: 2 },
-  { name: 'Handelshafen', need: 6_000, bonus: 250_000, contracts: 3 },
-  { name: 'Seehafen', need: 18_000, bonus: 500_000, contracts: 4 },
-  { name: 'Weltklasse-Hafen', need: 45_000, bonus: 1_000_000, contracts: 5 },
+  { name: 'Regionalhafen', need: 1_000, bonus: 100_000, contracts: 2 },
+  { name: 'Handelshafen', need: 4_500, bonus: 250_000, contracts: 3 },
+  { name: 'Seehafen', need: 11_000, bonus: 500_000, contracts: 4 },
+  { name: 'Weltklasse-Hafen', need: 24_000, bonus: 1_000_000, contracts: 5 },
 ];
 /** Was jede Stufe neu bringt (für die Anzeige beim Aufstieg). */
 export const LEVEL_NEWS: { title: string; text: string }[][] = [

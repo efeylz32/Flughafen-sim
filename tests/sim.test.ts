@@ -228,7 +228,7 @@ describe('Hafenstufen', () => {
       for (const e of sim.drainEvents()) if (e.tag) tags.push(e.tag);
     }
     expect(sim.level).toBe(2);
-    expect(sim.handled).toBeGreaterThanOrEqual(1200);
+    expect(sim.handled).toBeGreaterThanOrEqual(1000);
     expect(tags).toContain('level');
     expect(sim.offers.length).toBe(3);
   });
@@ -535,7 +535,7 @@ describe('Ziel, Pleite, Kredit', () => {
     run(win, 0.1);
     expect(win.status).toBe('won');
     const late = new Sim(1, 'hard');
-    late.gm += 25 * 1440;
+    late.gm += 32 * 1440;
     run(late, 24);
     expect(late.status).toBe('lost');
     expect(late.endReason).toMatch(/Ziel verpasst/);

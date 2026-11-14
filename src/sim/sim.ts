@@ -507,6 +507,8 @@ export class Sim {
   today: DayBook = emptyBook();
   history: DayBook[] = [];
   stats: Stats = { crane: 0, trucks: 0, yard: 0, gate: 0 };
+  /** Anteil der Trucks, die im Stau stehen (geglättet) */
+  jamShare = 0;
   events: GameEvent[] = [];
   /** Wird bei jeder Bauänderung erhöht, damit der Renderer neu zeichnet. */
   version = 0;
@@ -1927,7 +1929,8 @@ export class Sim {
       loaded: 0,
       queuedFor: 0,
       atBerth: 0,
-      dwellTarget: c ? c.dwell : Math.round(st.dwell * DIFFS[this.diff].dwell),
+      // Export verlängert die Liegezeit: Beladen dauert genauso lange wie Entladen
+      dwellTarget: Math.round((c ? c.dwell : st.dwell * DIFFS[this.diff].dwell) * (1 + (exp / st.containers) * 0.5)),
       contractId: c ? c.id : 0,
       reason: '',
       blocked: false,
@@ -2380,8 +2383,11 @@ export class Sim {
     const busy = this.cranes.filter((c) => c.state === 'working' || c.state === 'blocked');
     const working = busy.filter((c) => c.state === 'working').length;
     this.stats.crane = ema(this.stats.crane, busy.length ? working / busy.length : 0);
-    const busyT = this.trucks.filter((t) => t.job !== null || t.wait > 0).length;
+    // Trucks im Stau zählen nicht als ausgelastet: Sie warten auf etwas anderes (Gate, Kreuzung)
+    const busyT = this.trucks.filter((t) => (t.job !== null || t.wait > 0) && t.stuck <= 0).length;
     this.stats.trucks = ema(this.stats.trucks, this.trucks.length ? busyT / this.trucks.length : 0);
+    const jammed = this.trucks.filter((t) => t.stuck > 0).length;
+    this.jamShare = ema(this.jamShare, this.trucks.length ? jammed / this.trucks.length : 0);
     const cap = this.yardCapacity;
     this.stats.yard = cap ? this.yardStock / cap : 0;
     const busyG = this.gates.filter((g) => g.proc > 0).length;
