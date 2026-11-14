@@ -95,11 +95,11 @@ describe('Container-Fluss', () => {
   it('Erhalt der Container: nichts geht verloren oder entsteht neu', () => {
     const sim = basicPort(3, 1);
     run(sim, 9);
-    const onShips = sim.ships.reduce((n, s) => n + s.containers, 0);
+    const onShips = sim.ships.reduce((n, s) => n + (s.state === 'leaving' ? 0 : s.containers), 0);
     const onCranes = sim.cranes.reduce((n, c) => n + c.buffer, 0);
     const onTrucks = sim.trucks.reduce((n, t) => n + t.load, 0);
     const onGates = sim.gates.reduce((n, g) => n + g.apron.length + (g.proc > 0 ? 1 : 0), 0);
-    const total = sim.ships.length ? 120 * (sim.shipsDone + sim.ships.length) : 120 * sim.shipsDone;
+    const total = 120 * (sim.shipsDone + sim.ships.filter((s) => s.state !== 'leaving').length);
     expect(onShips + onCranes + onTrucks + sim.yardStock + onGates + sim.containersDone).toBe(total);
   });
 });
@@ -252,7 +252,7 @@ describe('Export', () => {
 
 describe('Verträge', () => {
   it('Annahme bringt Schiffe der Reederei und Bonus bei pünktlicher Abfertigung', () => {
-    const sim = bigPort(2);
+    const sim = bigPort(2, 10);
     run(sim, 0.1);
     (sim as unknown as { makeOffers(): void }).makeOffers();
     const offer = sim.offers.find((o) => o.ship === 'feeder')!;
@@ -450,6 +450,41 @@ describe('Schwierigkeit', () => {
     expect(easy.wagePerHour('crane')).toBeLessThan(hard.wagePerHour('crane'));
     const copy = Sim.deserialize(JSON.parse(JSON.stringify(hard.serialize())));
     expect(copy.diff).toBe('hard');
+  });
+});
+
+describe('Verarbeitung und Aufgaben', () => {
+  function plantPort(): Sim {
+    const sim = bigPort(2, 10);
+    sim.build('unpack', 20, k + 2);
+    sim.build('unpack', 21, k + 2);
+    sim.build('pack', 26, k + 2);
+    return sim;
+  }
+
+  it('Packhalle und Veredelung machen aus zwei Containern Fertigware für 900 €', () => {
+    const sim = plantPort();
+    run(sim, 30);
+    expect(sim.premiumDone).toBeGreaterThan(5);
+    expect(sim.plants.find((p) => p.kind === 'pack')!.made).toBeGreaterThanOrEqual(sim.premiumDone);
+  });
+
+  it('ein Truck mit fester Aufgabe fährt nur diese Fahrten', () => {
+    const sim = plantPort();
+    for (const t of sim.trucks) sim.setRole(t.id, 'crane');
+    run(sim, 10);
+    expect(sim.containersDone).toBe(0);
+    expect(sim.yardStock).toBeGreaterThan(0);
+    for (const t of sim.trucks) if (t.job) expect(t.job.srcKind).toBe('crane');
+  });
+
+  it('feste Aufgaben sind schneller als die Automatik', () => {
+    const auto = bigPort(1, 6);
+    const fixed = bigPort(1, 6);
+    fixed.trucks.forEach((t, i) => fixed.setRole(t.id, i < 3 ? 'crane' : 'out'));
+    run(auto, 24);
+    run(fixed, 24);
+    expect(fixed.containersDone).toBeGreaterThan(auto.containersDone);
   });
 });
 

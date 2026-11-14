@@ -21,6 +21,9 @@ Das Spielkonzept steht im Doc „Hafen-Imperium: Spielkonzept“.
 - **Kühlfracht:** Kühlcontainer brauchen Kühlplätze und verderben dort nach 10 Stunden. Sie bringen 400 €.
 - **Bahn:** Gleisanschluss am rechten Kartenrand. Alle 6 Stunden holt ein Zug bis zu 40 Container.
 - **Große Schiffe:** 300 Container, brauchen 6 Kai-Felder in einer Reihe und ausgebaggertes Wasser davor.
+- **Verarbeitung (ab Stufe 2):** Die Packhalle packt Container aus, die Veredelung macht aus zwei davon Fertigware für 900 €. Trucks fahren die Ware dazwischen.
+- **Aufgaben für Trucks:** Jeder Truck fährt auf Automatik oder bekommt eine feste Aufgabe (Kran räumen, Ausgang, Export, Verarbeitung). Feste Aufgaben sind 25 % schneller und sparen die Funkzeit der Leitstelle.
+- **Personal und Schwierigkeit:** Fahrer, Kranführer und Gate-Kräfte kosten Stundenlohn und können krank werden. Drei Schwierigkeitsgrade im Menü.
 - **Aufrüsten:** Kran oder Truck mit „Ansehen“ antippen und im Info-Blatt aufrüsten.
 
 Alle Werte stehen in `src/sim/data.ts`. Das Balancing ist grob und noch nicht durch Spielen abgestimmt.

@@ -6,7 +6,7 @@ export interface View {
   overlay: boolean;
   tool: string;
   hover: { x: number; y: number; ok: boolean } | null;
-  selected: { kind: 'ship' | 'crane' | 'gate' | 'yard' | 'reefer' | 'rail' | 'truck'; id: number } | null;
+  selected: { kind: 'ship' | 'crane' | 'gate' | 'yard' | 'reefer' | 'rail' | 'plant' | 'truck'; id: number } | null;
   /** Anteil zwischen letztem und nächstem Tick (0..1) für weiche Bewegung. */
   alpha: number;
   /** Laufzeit in Sekunden (Echtzeit) für Animationen. */
@@ -61,6 +61,10 @@ const CAB = [0xf2b632, 0xe8542f, 0x2f7fd0, 0xf4f5f7];
 /** Export-Container sind einheitlich dunkel, Kühlcontainer weiß. */
 const EXPORT_BOX = 0x4a607c;
 const REEFER_BOX = 0xf4f9fd;
+/** Ausgepackte Ware ist braun (Kisten), Fertigware gold. */
+const WARE_BOX = 0xb98a52;
+const PREM_BOX = 0xf4c430;
+const CARGO_TINT: Record<string, number> = { reef: REEFER_BOX, exp: EXPORT_BOX, ware: WARE_BOX, prem: PREM_BOX };
 
 function hash(x: number, y: number): number {
   let h = Math.imul(x + 374761393, 668265263) ^ Math.imul(y + 1274126177, 2246822519);
@@ -634,6 +638,24 @@ export class Renderer {
             if (!same(1, 0)) g.rect(px + TILE - 2, py, 2, TILE).fill(C.yellow);
             break;
           }
+          case T.Plant: {
+            const pack = sim.plantAt(x, y)?.kind === 'pack';
+            const roof = pack ? 0x7a5cc7 : 0xc98a3c;
+            g.rect(px, py, TILE, TILE).fill(0xc9c4b8);
+            g.roundRect(px + 3.5, py + 5, 27, 20, 2.5).fill({ color: 0x000000, alpha: 0.25 });
+            g.roundRect(px + 2, py + 2.5, 27, 20, 2.5).fill(shade(roof, 0.75));
+            g.roundRect(px + 3, py + 3.5, 25, 18, 2).fill(roof);
+            // Sheddach
+            for (let i = 0; i < 4; i++) g.rect(px + 4.5 + i * 6, py + 4.5, 2.6, 16).fill(tint(roof, 0.35));
+            if (pack) {
+              g.circle(px + 24, py + 8, 2.6).fill(0x3a424c);
+              g.circle(px + 24, py + 8, 1.4).fill(0xd8dde2);
+            }
+            // Rampe zur Straße
+            g.rect(px + 4, py + 24, 24, 5.5).fill(0x8d949b);
+            g.rect(px + 4, py + 24, 24, 1.2).fill(C.yellow);
+            break;
+          }
           case T.Reefer: {
             g.rect(px, py, TILE, TILE).fill(0xdde8ef);
             const line = { color: 0x3b9bd6, alpha: 0.45 };
@@ -1025,7 +1047,7 @@ export class Renderer {
         v.key = key;
         for (let k = 0; k < v.load.length; k++) {
           v.load[k].visible = k < t.load;
-          v.load[k].tint = t.cargo === 'reef' ? REEFER_BOX : t.cargo === 'exp' ? EXPORT_BOX : BOX[hash(t.id, k + 40) % BOX.length];
+          v.load[k].tint = CARGO_TINT[t.cargo] ?? BOX[hash(t.id, k + 40) % BOX.length];
         }
       }
     }
@@ -1395,6 +1417,16 @@ export class Renderer {
       g.circle(px + 26.5, py + 10.5, 1.8).fill(open ? 0x3fe08a : 0xff5a4a);
     }
 
+    // Verarbeitung: links wartender Eingang, rechts fertiger Ausgang, Lampe zeigt Arbeit
+    for (const p of sim.plants) {
+      const px = p.x * TILE;
+      const py = p.y * TILE;
+      const pack = p.kind === 'pack';
+      for (let k = 0; k < Math.min(3, p.inBuf); k++) g.rect(px + 5 + k * 3.4, py + 25.4, 2.8, 3.6).fill(pack ? WARE_BOX : 0x3b7fc8);
+      for (let k = 0; k < Math.min(3, p.outBuf); k++) g.rect(px + 24.2 - k * 3.4, py + 25.4, 2.8, 3.6).fill(pack ? PREM_BOX : WARE_BOX);
+      g.circle(px + 7, py + 8, 1.9).fill(p.proc > 0 ? (Math.sin(view.time * 8 + p.id) > 0 ? 0x3fe08a : 0x1f8f55) : p.outBuf >= 6 ? 0xff5a4a : 0x9aa5b1);
+    }
+
     // Gleisanschluss: Füllstand des Bahnsteigs
     for (const r of sim.rails) {
       const px = r.x * TILE;
@@ -1549,6 +1581,11 @@ export class Renderer {
       if (!gt) return;
       x = gt.x * TILE;
       y = gt.y * TILE;
+    } else if (sel.kind === 'plant') {
+      const p = sim.plants.find((p) => p.id === sel.id);
+      if (!p) return;
+      x = p.x * TILE;
+      y = p.y * TILE;
     } else if (sel.kind === 'rail') {
       const r = sim.rails.find((r) => r.id === sel.id);
       if (!r) return;

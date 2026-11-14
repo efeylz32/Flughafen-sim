@@ -10,6 +10,10 @@ import {
   GATE_APRON_CAP,
   LEVELS,
   LEVEL_NEWS,
+  PLANTS,
+  PLANT_BUF,
+  ROLE_NAMES,
+  TruckRole,
   RAIL_CAP,
   RAIL_TRAVEL_GM,
   SHIP_TYPES,
@@ -38,6 +42,8 @@ const ICONS: Record<string, string> = {
   gate: svg('<path d="M3 20h18"/><path d="M5 20V9h14v11"/><path d="M5 13h14M9 9v4M14 9v4"/>'),
   rail: svg('<path d="M7 3v18M17 3v18"/><path d="M7 6h10M7 10h10M7 14h10M7 18h10"/>'),
   truck: svg('<rect x="2" y="7" width="12" height="9" rx="1.2"/><path d="M14 10h4l3 3.5V16h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>'),
+  unpack: svg('<path d="M3 20V9l4.5 3V9l4.5 3V9l4.5 3V5h4.5v15z"/><path d="M7 16h3M13 16h3"/>'),
+  pack: svg('<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>'),
   dredge: svg('<path d="M3 8c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/><path d="M12 11v9M8.5 16.5L12 20l3.5-3.5"/>'),
   demolish: svg('<path d="M5 5l14 14M19 5L5 19"/>'),
   eye: svg('<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'),
@@ -69,6 +75,8 @@ const TOOLS: ToolDef[] = [
   { tool: 'yard', label: 'Stapel', sub: '1k', color: '#c9b88a' },
   { tool: 'gate', label: 'Gate', sub: '20k', color: '#d9534f' },
   { tool: 'truck', label: 'Truck', sub: '25k', color: '#e0a030' },
+  { tool: 'unpack', label: 'Packhalle', sub: '60k', color: '#c98a3c' },
+  { tool: 'pack', label: 'Veredeln', sub: '90k', color: '#7a5cc7' },
   { tool: 'reefer', label: 'Kühlplatz', sub: '4k', color: '#3b9bd6' },
   { tool: 'rail', label: 'Gleis', sub: '150k', color: '#5f6f82' },
   { tool: 'dredge', label: 'Baggern', sub: '15k', color: '#1f5f95' },
@@ -95,10 +103,10 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''):
 function jobText(j: Job | null): string {
   if (!j) return 'Wartet auf einen Auftrag';
   const store = j.cargo === 'reef' ? 'Kühlplatz' : 'Stapelplatz';
-  const cargo = j.cargo === 'reef' ? 'Kühlcontainer' : j.cargo === 'exp' ? 'Export-Container' : 'Container';
-  if (j.stage === 0) return `Fährt zum ${j.srcKind === 'crane' ? 'Kran' : j.srcKind === 'gate' ? 'Gate' : store}`;
-  const dst = j.dstKind === 'store' ? store : j.dstKind === 'gate' ? 'Gate' : j.dstKind === 'rail' ? 'Gleisanschluss' : 'Kran';
-  return `Bringt ${cargo} zum ${dst}`;
+  const cargo = { imp: 'Container', reef: 'Kühlcontainer', exp: 'Export-Container', ware: 'ausgepackte Ware', prem: 'Fertigware' }[j.cargo];
+  if (j.stage === 0) return `Fährt zu: ${j.srcKind === 'crane' ? 'Kran' : j.srcKind === 'gate' ? 'Gate' : j.srcKind === 'plant' ? 'Verarbeitung' : store}`;
+  const dst = j.dstKind === 'store' ? store : j.dstKind === 'gate' ? 'Gate' : j.dstKind === 'rail' ? 'Gleisanschluss' : j.dstKind === 'plant' ? 'Verarbeitung' : 'Kran';
+  return `Bringt ${cargo} zu: ${dst}`;
 }
 
 export class UI {
@@ -279,7 +287,10 @@ export class UI {
     this.sheetActions = this.sheet.querySelector('.actions')!;
     this.sheet.querySelector('.x')!.addEventListener('click', () => (this.game.selected = null));
     this.sheetActions.addEventListener('click', (e) => {
-      if ((e.target as HTMLElement).closest('[data-upgrade]')) this.game.upgradeSelected();
+      const t = e.target as HTMLElement;
+      const role = t.closest<HTMLElement>('[data-role]');
+      if (role) this.game.setTruckRole(role.dataset.role as TruckRole);
+      else if (t.closest('[data-upgrade]')) this.game.upgradeSelected();
     });
 
     // Werkzeugleiste
@@ -713,6 +724,15 @@ export class UI {
       html = `<h3>Kühlplatz <span class="tag">mit Strom</span></h3>
         <div class="meta">Dieses Feld: ${sim.stock[sel.id]} von ${YARD_CAP_PER_TILE} · Gesamt: ${sim.reeferStock} von ${sim.reeferCapacity}</div>
         <div class="meta ${left !== null && left < 120 ? 'neg' : ''}">${left === null ? 'Kein Kühlcontainer auf diesem Feld' : `Der älteste Container verdirbt in ${hours(Math.max(0, left))}`}</div>`;
+    } else if (sel.kind === 'plant') {
+      const p = sim.plants.find((p) => p.id === sel.id);
+      if (!p) return gone();
+      const cfg = PLANTS[p.kind];
+      const pack = p.kind === 'pack';
+      html = `<h3>${cfg.name} <span class="tag">${Math.round(60 / cfg.time)} pro Stunde</span></h3>
+        <div class="meta">${pack ? 'Macht aus 2 Einheiten ausgepackter Ware 1 Container Fertigware (900 €).' : 'Packt Import-Container vom Stapelplatz aus. Die Ware geht weiter zur Veredelung.'}</div>
+        <div class="meta">Eingang: ${p.inBuf} von ${PLANT_BUF} · Ausgang: ${p.outBuf} von ${PLANT_BUF} · Hergestellt: ${num(p.made)}</div>
+        <div class="meta ${p.outBuf >= PLANT_BUF ? 'neg' : ''}">${p.proc > 0 ? 'Arbeitet' : p.outBuf >= PLANT_BUF ? 'Ausgang voll: Es fehlt ein Truck, der abholt' : p.inBuf < cfg.needs ? 'Wartet auf Nachschub' : 'Bereit'}</div>`;
     } else if (sel.kind === 'rail') {
       const r = sim.rails.find((r) => r.id === sel.id);
       if (!r) return gone();
@@ -734,7 +754,11 @@ export class UI {
       html = `<h3>${t.agv ? 'Fahrerloses Fahrzeug' : 'Truck'} <span class="tag">2 Container pro Fahrt</span></h3>
         <div class="meta">${jobText(t.job)}</div>
         <div class="meta">Geladen: ${t.load}</div>`;
-      if (!t.agv) actions = upgradeBtn('truck', 'Fahrerlos machen');
+      const roles = (Object.keys(ROLE_NAMES) as TruckRole[]).filter((r) => r !== 'plant' || sim.level >= 2).filter((r) => r !== 'export' || sim.level >= 2);
+      actions = `<div class="rolelabel">Aufgabe</div><div class="roles">${roles
+        .map((r) => `<button data-role="${r}" class="${t.role === r ? 'on' : ''}">${ROLE_NAMES[r].name}</button>`)
+        .join('')}</div><div class="meta">${ROLE_NAMES[t.role].text}${t.role === 'auto' ? '' : ' Feste Aufgabe: 25 % schneller, lädt doppelt so schnell.'}</div>`;
+      if (!t.agv) actions += upgradeBtn('truck', 'Fahrerlos machen');
     }
     // Nur bei Änderung neu setzen, damit Knöpfe beim Antippen nicht verschwinden
     if (html !== this.lastSheet) {

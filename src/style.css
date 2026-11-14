@@ -231,3 +231,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .dialog .diff button { flex: 1; padding: 10px 4px; border-radius: 11px; background: transparent; color: var(--muted); font-size: 15px; }
 .dialog .diff button.on { background: #fff; color: var(--ink); box-shadow: 0 1px 4px rgba(20,40,70,.18); }
 .dialog .difftext { margin: 0; min-height: 2.6em; }
+
+/* Aufgaben für Trucks */
+.rolelabel { font-size: 12px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+.roles { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.sheet .actions .roles button { width: auto; flex: 1 1 auto; padding: 9px 10px; font-size: 14px; background: #eef2f7; color: var(--ink); border-radius: 10px; }
+.sheet .actions .roles button.on { background: var(--accent); color: #fff; }
+.sheet .actions .meta { font-size: 13px; color: var(--muted); margin: 4px 0 8px; }
+.sheet { max-height: calc(100% - 300px); overflow-y: auto; }

@@ -23,9 +23,10 @@ export enum T {
   Gate = 5,
   Reefer = 6,
   Rail = 7,
+  Plant = 8,
 }
 
-export type Tool = 'view' | 'kai' | 'crane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'demolish';
+export type Tool = 'view' | 'kai' | 'crane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'demolish';
 export type BuildTool = Exclude<Tool, 'view' | 'demolish'>;
 
 export const COST: Record<BuildTool, number> = {
@@ -38,6 +39,8 @@ export const COST: Record<BuildTool, number> = {
   rail: 150_000,
   truck: 25_000,
   dredge: 15_000,
+  unpack: 60_000,
+  pack: 90_000,
 };
 /** Ab welcher Hafenstufe ein Werkzeug verfügbar ist. */
 export const UNLOCK: Record<BuildTool, number> = {
@@ -50,6 +53,8 @@ export const UNLOCK: Record<BuildTool, number> = {
   reefer: 3,
   rail: 3,
   dredge: 3,
+  unpack: 2,
+  pack: 2,
 };
 export const UPGRADE = {
   /** Mobilkran zur Containerbrücke: doppelt so schnell */
@@ -68,6 +73,7 @@ export const RUN_COST_PER_DAY = {
   agv: 250,
   gate: 400,
   rail: 2_500,
+  plant: 1_800,
   yardTile: 15,
   reeferTile: 80,
   kaiTile: 10,
@@ -145,6 +151,31 @@ export const REEFER_SHARE = 0.25;
 
 // Einnahmen
 export const FEE_PER_CONTAINER = 200;
+/** Veredelte Ware: zwei ausgepackte Container werden zu einem Container Fertigware */
+export const PREMIUM_FEE = 900;
+
+/** Verarbeitung im Hafen: Packhalle packt Container aus, die Veredelung macht daraus Fertigware. */
+export type PlantKind = 'unpack' | 'pack';
+export const PLANTS: Record<PlantKind, { name: string; needs: number; time: number }> = {
+  unpack: { name: 'Packhalle', needs: 1, time: 4 },
+  pack: { name: 'Veredelung', needs: 2, time: 6 },
+};
+export const PLANT_BUF = 6;
+
+/** Feste Aufgabe eines Trucks. Automatik wählt selbst, braucht aber vor jeder Fahrt Funkzeit. */
+export type TruckRole = 'auto' | 'crane' | 'out' | 'export' | 'plant';
+export const ROLE_NAMES: Record<TruckRole, { name: string; text: string }> = {
+  auto: { name: 'Automatik', text: 'Die Leitstelle teilt jede Fahrt neu zu. Das kostet vor jeder Fahrt Funkzeit.' },
+  crane: { name: 'Kran räumen', text: 'Fährt nur entladene Container vom Kran ins Lager.' },
+  out: { name: 'Ausgang', text: 'Fährt nur vom Lager und von der Veredelung zu Gate und Bahn.' },
+  export: { name: 'Export', text: 'Holt Export am Gate ab und bringt ihn zum Kran.' },
+  plant: { name: 'Verarbeitung', text: 'Versorgt Packhalle und Veredelung und fährt die Fertigware raus.' },
+};
+/** Funkzeit der Automatik vor jeder Fahrt in Spielminuten */
+export const DISPATCH_GM = 0.6;
+/** Trucks mit fester Aufgabe kennen ihre Strecke: Sie fahren schneller und laden zügiger. */
+export const ROUTINE_SPEED = 1.25;
+export const ROUTINE_HANDLE = 0.5;
 export const REEFER_FEE = 400;
 export const EXPORT_FEE = 250;
 
@@ -163,6 +194,7 @@ export const LEVEL_NEWS: { title: string; text: string }[][] = [
     { title: 'Export', text: 'Schiffe wollen jetzt auch beladen werden. Export-Container kommen über das Gate und bringen 250 € pro Stück.' },
     { title: 'Verträge', text: 'Reedereien bieten feste Anläufe mit Bonus an. Bis zu 2 Verträge gleichzeitig.' },
     { title: 'Containerbrücke', text: 'Tippe einen Kran an und rüste ihn auf. Er arbeitet dann doppelt so schnell.' },
+    { title: 'Verarbeitung', text: 'Die Packhalle packt Container aus, die Veredelung macht aus zwei davon Fertigware für 900 €. Trucks fahren die Ware dazwischen.' },
     { title: 'Wetter', text: 'Bei Sturm stehen die Kräne still, bei Nebel ist die Einfahrt gesperrt. Es gibt eine Vorwarnung.' },
   ],
   [

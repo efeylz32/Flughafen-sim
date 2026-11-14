@@ -8,6 +8,7 @@ import {
   CRANE_EXP_BUFFER,
   CRANE_MOVE_GM,
   DIFFS,
+  DISPATCH_GM,
   DiffId,
   EXPORT_FEE,
   EXPORT_PRESTOCK,
@@ -20,6 +21,10 @@ import {
   GRID_W,
   LEVELS,
   MIN_PER_DAY,
+  PLANTS,
+  PLANT_BUF,
+  PREMIUM_FEE,
+  PlantKind,
   RAIL_CAP,
   RAIL_INTERVAL_GM,
   RAIL_STAY_GM,
@@ -32,6 +37,8 @@ import {
   REP_MAX,
   ROLES,
   Role,
+  ROUTINE_HANDLE,
+  ROUTINE_SPEED,
   RUN_COST_PER_DAY,
   SHIP_LEN,
   SHIP_MAX_STAY_GM,
@@ -46,6 +53,7 @@ import {
   TRUCK_CAP,
   TRUCK_HANDLE_GM,
   TRUCK_PATIENCE_GM,
+  TruckRole,
   TRUCK_SPEED,
   UNLOCK,
   UPGRADE,
@@ -54,7 +62,20 @@ import {
 import { MISSIONS } from './missions';
 
 /** Import, Kühlfracht (Import) oder Export */
-export type Cargo = 'imp' | 'reef' | 'exp';
+export type Cargo = 'imp' | 'reef' | 'exp' | 'ware' | 'prem';
+
+export interface Plant {
+  id: number;
+  x: number;
+  y: number;
+  kind: PlantKind;
+  inBuf: number;
+  outBuf: number;
+  resIn: number;
+  resOut: number;
+  proc: number;
+  made: number;
+}
 
 export interface Crane {
   id: number;
@@ -112,10 +133,10 @@ export interface Rail {
 export interface Job {
   cargo: Cargo;
   stage: 0 | 1;
-  srcKind: 'crane' | 'store' | 'gate';
+  srcKind: 'crane' | 'store' | 'gate' | 'plant';
   /** Kran-ID, Lagerfeld oder Gate-ID */
   src: number;
-  dstKind: 'store' | 'gate' | 'rail' | 'crane';
+  dstKind: 'store' | 'gate' | 'rail' | 'crane' | 'plant';
   dst: number;
   /** Zielfeld (Straße) für Stufe 0 und Stufe 1 */
   tgt: [number, number];
@@ -147,6 +168,7 @@ export interface Truck {
   stuck: number;
   /** Ein Fahrer ist im Dienst (fahrerlose Fahrzeuge brauchen keinen) */
   staffed: boolean;
+  role: TruckRole;
 }
 
 export type ShipState = 'queued' | 'sailing' | 'unloading' | 'leaving';
@@ -292,7 +314,9 @@ export interface SaveData {
   cranes: { x: number; y: number; big?: boolean }[];
   gates: { x: number; y: number; served: number }[];
   rails?: { x: number; y: number; platform: number; value: number }[];
-  trucks: { tile: number; agv?: boolean }[];
+  trucks: { tile: number; agv?: boolean; role?: TruckRole }[];
+  plants?: { x: number; y: number; kind: PlantKind }[];
+  premiumDone?: number;
   money: number;
   rep: number;
   gm: number;
@@ -331,7 +355,7 @@ const LINES: { line: string; prefix: string; color: number }[] = [
 const UNLOADING = 'Wird entladen.';
 const LOADING = 'Wird beladen.';
 const emptyBook = (): DayBook => ({ fees: 0, exportFees: 0, rail: 0, berth: 0, bonus: 0, penalty: 0, running: 0, wages: 0, building: 0 });
-const TILE_OF: Partial<Record<BuildTool, T>> = { kai: T.Kai, road: T.Road, yard: T.Yard, reefer: T.Reefer, gate: T.Gate, rail: T.Rail };
+const TILE_OF: Partial<Record<BuildTool, T>> = { kai: T.Kai, road: T.Road, yard: T.Yard, reefer: T.Reefer, gate: T.Gate, rail: T.Rail, unpack: T.Plant, pack: T.Plant };
 const eur = (n: number) => `${Math.round(n).toLocaleString('de-DE')} €`;
 
 export class Sim {
@@ -353,6 +377,8 @@ export class Sim {
   cranes: Crane[] = [];
   gates: Gate[] = [];
   rails: Rail[] = [];
+  plants: Plant[] = [];
+  premiumDone = 0;
   trucks: Truck[] = [];
   ships: Ship[] = [];
   contracts: Contract[] = [];
@@ -555,6 +581,13 @@ export class Sim {
   gateAt(x: number, y: number): Gate | undefined {
     return this.gates.find((g) => g.x === x && g.y === y);
   }
+  plantAt(x: number, y: number): Plant | undefined {
+    return this.plants.find((p) => p.x === x && p.y === y);
+  }
+  setRole(id: number, role: TruckRole) {
+    const t = this.trucks.find((t) => t.id === id);
+    if (t) t.role = role;
+  }
   railAt(x: number, y: number): Rail | undefined {
     return this.rails.find((r) => r.x === x && r.y === y);
   }
@@ -659,6 +692,8 @@ export class Sim {
       case 'yard':
       case 'reefer':
       case 'gate':
+      case 'unpack':
+      case 'pack':
         if (k !== T.Land) reason = k === T.Water ? 'Nicht auf dem Wasser' : 'Das Feld ist belegt';
         break;
       case 'rail':
@@ -726,9 +761,14 @@ export class Sim {
       case 'dredge':
         this.depth[x] = 1;
         return undefined;
+      case 'unpack':
+      case 'pack':
+        this.kind[i] = T.Plant;
+        this.plants.push({ id: this.nextId++, x, y, kind: tool, inBuf: 0, outBuf: 0, resIn: 0, resOut: 0, proc: 0, made: 0 });
+        return undefined;
       case 'truck': {
         const id = this.nextId++;
-        this.trucks.push({ id, tile: i, next: -1, prog: 0, fx: x, fy: y, px: x, py: y, wait: 0, load: 0, cargo: 'imp', agv: false, job: null, angle: 0, dir: -1, stuck: 0, staffed: true });
+        this.trucks.push({ id, tile: i, next: -1, prog: 0, fx: x, fy: y, px: x, py: y, wait: 0, load: 0, cargo: 'imp', agv: false, job: null, angle: 0, dir: -1, stuck: 0, staffed: true, role: 'auto' });
         this.staff.driver++;
         return id;
       }
@@ -837,6 +877,13 @@ export class Sim {
         this.staff.gate = Math.max(0, this.staff.gate - 1);
         break;
       }
+      case T.Plant: {
+        const p = this.plantAt(x, y);
+        const tool: BuildTool = p?.kind ?? 'unpack';
+        out.push({ tool, x, y, refund: this.give(COST[tool], factor) });
+        this.plants = this.plants.filter((q) => q !== p);
+        break;
+      }
       case T.Rail: {
         const r = this.railAt(x, y);
         out.push({ tool: 'rail', x, y, refund: this.give(COST.rail, factor), platform: r?.platform ?? 0, value: r?.value ?? 0 });
@@ -871,6 +918,7 @@ export class Sim {
     } else {
       const i = this.idx(a.x, a.y);
       if (this.kind[i] !== TILE_OF[a.tool]) return fail('Das Feld wurde inzwischen geändert');
+      if ((a.tool === 'unpack' || a.tool === 'pack') && this.plantAt(a.x, a.y)?.kind !== a.tool) return fail('Das Feld wurde inzwischen geändert');
       if (a.tool === 'kai') {
         if (this.craneAt(a.x, a.y)) return fail('Auf dem Kai steht ein Kran');
         if (this.shipUsesKai(a.x)) return fail('Ein Schiff liegt am Kai');
@@ -1032,6 +1080,9 @@ export class Sim {
     } else if (j.srcKind === 'store') {
       if (j.cargo === 'exp') this.resOutExp[j.src] = Math.max(0, this.resOutExp[j.src] + d);
       else this.resOut[j.src] = Math.max(0, this.resOut[j.src] + d);
+    } else if (j.srcKind === 'plant') {
+      const p = this.plants.find((p) => p.id === j.src);
+      if (p) p.resOut = Math.max(0, p.resOut + d);
     } else {
       const g = this.gates.find((g) => g.id === j.src);
       if (g) g.resOut = Math.max(0, g.resOut + d);
@@ -1046,6 +1097,9 @@ export class Sim {
     } else if (j.dstKind === 'rail') {
       const r = this.rails.find((r) => r.id === j.dst);
       if (r) r.resIn = Math.max(0, r.resIn + d);
+    } else if (j.dstKind === 'plant') {
+      const p = this.plants.find((p) => p.id === j.dst);
+      if (p) p.resIn = Math.max(0, p.resIn + d);
     } else {
       const c = this.cranes.find((c) => c.id === j.dst);
       if (c) c.resExpIn = Math.max(0, c.resExpIn + d);
@@ -1071,10 +1125,12 @@ export class Sim {
       if (j.srcKind === 'crane' && !this.cranes.some((c) => c.id === j.src)) return false;
       if (j.srcKind === 'store' && this.kind[j.src] !== storeKind) return false;
       if (j.srcKind === 'gate' && !this.gates.some((g) => g.id === j.src)) return false;
+      if (j.srcKind === 'plant' && !this.plants.some((p) => p.id === j.src)) return false;
     }
     if (j.dstKind === 'store') return this.kind[j.dst] === storeKind;
     if (j.dstKind === 'gate') return this.gates.some((g) => g.id === j.dst);
     if (j.dstKind === 'rail') return this.rails.some((r) => r.id === j.dst);
+    if (j.dstKind === 'plant') return this.plants.some((p) => p.id === j.dst);
     return this.cranes.some((c) => c.id === j.dst);
   }
 
@@ -1087,8 +1143,9 @@ export class Sim {
   private assignJob(t: Truck) {
     let bestScore = 0;
     let best: Job | null = null;
-    const offer = (weight: number, dist: number, job: Job) => {
-      if (job.n <= 0) return;
+    // Jede Fahrt gehört zu einer Aufgabe. Trucks mit fester Aufgabe nehmen nur die passenden.
+    const offer = (tag: string, weight: number, dist: number, job: Job) => {
+      if (job.n <= 0 || (t.role !== 'auto' && !tag.includes(t.role))) return;
       const score = weight / (1 + dist / 15);
       if (score > bestScore) {
         bestScore = score;
@@ -1114,7 +1171,7 @@ export class Sim {
         if (!acc) continue;
         const slot = this.findSlot(cargo === 'imp' ? T.Yard : T.Reefer, acc.access);
         if (!slot) continue;
-        offer(full ? 3 : 2, acc.d + slot.d, {
+        offer('crane', full ? 3 : 2, acc.d + slot.d, {
           cargo,
           stage: 0,
           srcKind: 'crane',
@@ -1135,7 +1192,7 @@ export class Sim {
           const src = this.findSource(T.Yard, 'exp', t.tile);
           const acc = src ? this.nearestAccess(ci, src.access) : null;
           if (src && acc) {
-            offer(2.6, src.d + acc.d, {
+            offer('export', 2.6, src.d + acc.d, {
               cargo: 'exp',
               stage: 0,
               srcKind: 'store',
@@ -1160,7 +1217,7 @@ export class Sim {
           const src = this.findSource(cargo === 'imp' ? T.Yard : T.Reefer, cargo, t.tile);
           const acc = src ? this.nearestAccess(gi, src.access) : null;
           if (!src || !acc) continue;
-          offer((starving ? 2.4 : 1.2) * (cargo === 'reef' ? 1.3 : press), src.d + acc.d, {
+          offer('out', (starving ? 2.4 : 1.2) * (cargo === 'reef' ? 1.3 : press), src.d + acc.d, {
             cargo,
             stage: 0,
             srcKind: 'store',
@@ -1178,7 +1235,7 @@ export class Sim {
         const acc = this.nearestAccess(gi, t.tile);
         const slot = acc ? this.findSlot(T.Yard, acc.access) : null;
         if (acc && slot) {
-          offer(waiting >= TRUCK_CAP ? 1.8 : 1.3, acc.d + slot.d, {
+          offer('export', waiting >= TRUCK_CAP ? 1.8 : 1.3, acc.d + slot.d, {
             cargo: 'exp',
             stage: 0,
             srcKind: 'gate',
@@ -1192,6 +1249,67 @@ export class Sim {
       }
     }
 
+    // 6. Verarbeitung: Lager → Packhalle → Veredelung → Ausgang
+    for (const p of this.plants) {
+      const pi = this.idx(p.x, p.y);
+      const room = PLANT_BUF - p.inBuf - p.resIn;
+      const hungry = p.inBuf + p.resIn < PLANTS[p.kind].needs;
+      if (room > 0 && p.kind === 'unpack') {
+        const src = this.findSource(T.Yard, 'imp', t.tile);
+        const acc = src ? this.nearestAccess(pi, src.access) : null;
+        if (src && acc) {
+          offer('plant', hungry ? 1.9 : 1.3, src.d + acc.d, {
+            cargo: 'imp',
+            stage: 0,
+            srcKind: 'store',
+            src: src.tile,
+            dstKind: 'plant',
+            dst: p.id,
+            tgt: [src.access, acc.access],
+            n: Math.min(TRUCK_CAP, src.avail, room),
+          });
+        }
+      }
+      if (room > 0 && p.kind === 'pack') {
+        for (const q of this.plants) {
+          const avail = q.outBuf - q.resOut;
+          if (q.kind !== 'unpack' || avail <= 0) continue;
+          const a1 = this.nearestAccess(this.idx(q.x, q.y), t.tile);
+          const a2 = a1 ? this.nearestAccess(pi, a1.access) : null;
+          if (!a1 || !a2) continue;
+          offer('plant', hungry ? 2.1 : 1.5, a1.d + a2.d, {
+            cargo: 'ware',
+            stage: 0,
+            srcKind: 'plant',
+            src: q.id,
+            dstKind: 'plant',
+            dst: p.id,
+            tgt: [a1.access, a2.access],
+            n: Math.min(TRUCK_CAP, avail, room),
+          });
+        }
+      }
+      const done = p.kind === 'pack' ? p.outBuf - p.resOut : 0;
+      if (done > 0) {
+        const a1 = this.nearestAccess(pi, t.tile);
+        if (!a1) continue;
+        for (const g of this.gates) {
+          const gr = GATE_APRON_CAP - g.apron.length - g.resIn;
+          const a2 = gr > 0 ? this.nearestAccess(this.idx(g.x, g.y), a1.access) : null;
+          if (a2) {
+            offer('plant out', 2.2, a1.d + a2.d, { cargo: 'prem', stage: 0, srcKind: 'plant', src: p.id, dstKind: 'gate', dst: g.id, tgt: [a1.access, a2.access], n: Math.min(TRUCK_CAP, done, gr) });
+          }
+        }
+        for (const r of this.rails) {
+          const rr = RAIL_CAP - r.platform - r.resIn;
+          const a2 = rr > 0 ? this.nearestAccess(this.idx(r.x, r.y), a1.access) : null;
+          if (a2) {
+            offer('plant out', 1.8, a1.d + a2.d, { cargo: 'prem', stage: 0, srcKind: 'plant', src: p.id, dstKind: 'rail', dst: r.id, tgt: [a1.access, a2.access], n: Math.min(TRUCK_CAP, done, rr) });
+          }
+        }
+      }
+    }
+
     // 5. Import-Container vom Lager zum Gleisanschluss
     for (const r of this.rails) {
       const room = RAIL_CAP - r.platform - r.resIn;
@@ -1201,7 +1319,7 @@ export class Sim {
         const src = this.findSource(cargo === 'imp' ? T.Yard : T.Reefer, cargo, t.tile);
         const acc = src ? this.nearestAccess(ri, src.access) : null;
         if (!src || !acc) continue;
-        offer(1.5 * (cargo === 'reef' ? 1.3 : press), src.d + acc.d, {
+        offer('out', 1.5 * (cargo === 'reef' ? 1.3 : press), src.d + acc.d, {
           cargo,
           stage: 0,
           srcKind: 'store',
@@ -1242,6 +1360,10 @@ export class Sim {
         this.stock[j.src] -= j.n;
         if (j.cargo === 'reef') this.reefTimes.get(j.src)?.splice(0, j.n);
       }
+    } else if (j.srcKind === 'plant') {
+      const p = this.plants.find((p) => p.id === j.src);
+      if (!p || p.outBuf < j.n) return false;
+      p.outBuf -= j.n;
     } else {
       const g = this.gates.find((g) => g.id === j.src);
       if (!g || g.inApron < j.n) return false;
@@ -1255,7 +1377,7 @@ export class Sim {
   }
 
   private dropOff(t: Truck, j: Job): boolean {
-    const fee = j.cargo === 'reef' ? REEFER_FEE : FEE_PER_CONTAINER;
+    const fee = j.cargo === 'reef' ? REEFER_FEE : j.cargo === 'prem' ? PREMIUM_FEE : FEE_PER_CONTAINER;
     if (j.dstKind === 'store') {
       if (j.cargo === 'exp') this.stockExp[j.dst] += j.n;
       else {
@@ -1275,6 +1397,11 @@ export class Sim {
       if (!r) return false;
       r.platform += j.n;
       r.value += j.n * fee;
+      if (j.cargo === 'prem') this.premiumDone += j.n;
+    } else if (j.dstKind === 'plant') {
+      const p = this.plants.find((p) => p.id === j.dst);
+      if (!p) return false;
+      p.inBuf += j.n;
     } else {
       const c = this.cranes.find((c) => c.id === j.dst);
       if (!c) return false;
@@ -1291,7 +1418,7 @@ export class Sim {
     const tgt = j.tgt[j.stage];
 
     if (t.tile === tgt && t.next < 0) {
-      t.wait = TRUCK_HANDLE_GM;
+      t.wait = TRUCK_HANDLE_GM * (t.role === 'auto' ? 1 : ROUTINE_HANDLE);
       const ok = j.stage === 0 ? this.pickUp(t, j) : this.dropOff(t, j);
       if (!ok) this.cancelJob(t);
       return;
@@ -1331,7 +1458,7 @@ export class Sim {
       t.stuck = 0;
     }
 
-    t.prog += (t.agv ? AGV_SPEED : TRUCK_SPEED) * dt;
+    t.prog += (t.agv ? AGV_SPEED : TRUCK_SPEED) * (t.role === 'auto' ? 1 : ROUTINE_SPEED) * dt;
     const nx = t.next % GRID_W;
     const ny = (t.next / GRID_W) | 0;
     const cx = t.tile % GRID_W;
@@ -1374,6 +1501,7 @@ export class Sim {
     this.updateTrucks(dt);
     this.updateGates(dt);
     this.updateRails(dt);
+    this.updatePlants(dt);
     this.updateReefers();
     this.updateStats();
     this.updateLevel();
@@ -1802,6 +1930,11 @@ export class Sim {
         if (!t.staffed) continue;
         this.assignJob(t);
         if (!t.job) continue;
+        // Die Leitstelle braucht Funkzeit. Trucks mit fester Aufgabe fahren sofort los.
+        if (t.role === 'auto') {
+          t.wait = DISPATCH_GM;
+          continue;
+        }
       }
       this.stepTruck(t, dt);
     }
@@ -1839,6 +1972,7 @@ export class Sim {
             this.containersDone++;
             this.handled++;
             if (g.procFee === REEFER_FEE) this.reefersHandled++;
+            if (g.procFee === PREMIUM_FEE) this.premiumDone++;
             this.money += g.procFee;
             this.today.fees += g.procFee;
             this.emit(undefined, 'good', { tag: 'container', x: g.x, y: g.y, amount: g.procFee });
@@ -1894,6 +2028,23 @@ export class Sim {
           r.state = 'away';
           r.timer = RAIL_INTERVAL_GM - 2 * RAIL_TRAVEL_GM - RAIL_STAY_GM;
           break;
+      }
+    }
+  }
+
+  private updatePlants(dt: number) {
+    for (const p of this.plants) {
+      const cfg = PLANTS[p.kind];
+      if (p.proc > 0) {
+        p.proc -= dt;
+        if (p.proc > 0) continue;
+        p.proc = 0;
+        p.outBuf++;
+        p.made++;
+      }
+      if (p.inBuf >= cfg.needs && p.outBuf < PLANT_BUF) {
+        p.inBuf -= cfg.needs;
+        p.proc = cfg.time;
       }
     }
   }
@@ -2045,7 +2196,7 @@ export class Sim {
     let cost = 0;
     for (const c of this.cranes) cost += c.big ? R.craneBig : R.crane;
     for (const t of this.trucks) cost += t.agv ? R.agv : R.truck;
-    cost += this.gates.length * R.gate + this.rails.length * R.rail;
+    cost += this.gates.length * R.gate + this.rails.length * R.rail + this.plants.length * R.plant;
     cost += this.yardTiles.length * R.yardTile + this.reeferTiles.length * R.reeferTile;
     for (let x = 0; x < GRID_W; x++) if (this.isKai(x)) cost += R.kaiTile;
     return cost;
@@ -2079,7 +2230,9 @@ export class Sim {
       cranes: this.cranes.map((c) => ({ x: c.x, y: c.y, big: c.big })),
       gates: this.gates.map((g) => ({ x: g.x, y: g.y, served: g.served })),
       rails: this.rails.map((r) => ({ x: r.x, y: r.y, platform: r.platform, value: r.value })),
-      trucks: this.trucks.map((t) => ({ tile: t.tile, agv: t.agv })),
+      trucks: this.trucks.map((t) => ({ tile: t.tile, agv: t.agv, role: t.role })),
+      plants: this.plants.map((p) => ({ x: p.x, y: p.y, kind: p.kind })),
+      premiumDone: this.premiumDone,
       money: this.money,
       rep: this.rep,
       gm: this.gm,
@@ -2129,7 +2282,10 @@ export class Sim {
     for (const t of d.trucks) {
       s.place('truck', t.tile % GRID_W, (t.tile / GRID_W) | 0);
       if (t.agv) s.trucks[s.trucks.length - 1].agv = true;
+      s.trucks[s.trucks.length - 1].role = t.role ?? 'auto';
     }
+    for (const p of d.plants ?? []) s.place(p.kind, p.x, p.y);
+    s.premiumDone = d.premiumDone ?? 0;
     s.money = d.money;
     s.rep = d.rep;
     s.gm = d.gm;

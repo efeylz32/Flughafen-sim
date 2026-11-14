@@ -1,6 +1,6 @@
 import { Sound } from './audio/sound';
 import { Renderer, View } from './render/renderer';
-import { BuildTool, DiffId, GRID_H, GRID_W, Role, T, TICKS_PER_SEC, TILE, Tool } from './sim/data';
+import { BuildTool, DiffId, GRID_H, GRID_W, Role, T, TICKS_PER_SEC, TILE, Tool, TruckRole } from './sim/data';
 import { buildDemo } from './sim/demo';
 import { GameEvent, Removed, Sim } from './sim/sim';
 import type { UI } from './ui/ui';
@@ -304,6 +304,13 @@ export class Game {
     this.ui.toast(sel.kind === 'crane' ? 'Containerbrücke in Betrieb: 40 Moves pro Stunde' : 'Der Truck fährt jetzt fahrerlos', 'good');
   }
 
+  /** Gibt dem ausgewählten Truck eine feste Aufgabe oder stellt ihn auf Automatik. */
+  setTruckRole(role: TruckRole) {
+    if (this.selected?.kind !== 'truck') return;
+    this.sim.setRole(this.selected.id, role);
+    this.sound.play('click');
+  }
+
   hire(role: Role) {
     this.sim.hire(role);
     this.sound.play('click');
@@ -418,6 +425,7 @@ export class Game {
       if (c) this.selected = { kind: 'crane', id: c.id };
       else if (g) this.selected = { kind: 'gate', id: g.id };
       else if (r) this.selected = { kind: 'rail', id: r.id };
+      else if (sim.plantAt(tx, ty)) this.selected = { kind: 'plant', id: sim.plantAt(tx, ty)!.id };
       else if (k === T.Yard) this.selected = { kind: 'yard', id: sim.idx(tx, ty) };
       else if (k === T.Reefer) this.selected = { kind: 'reefer', id: sim.idx(tx, ty) };
     }
