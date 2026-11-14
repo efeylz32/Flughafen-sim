@@ -488,6 +488,57 @@ describe('Verarbeitung und Aufgaben', () => {
   });
 });
 
+describe('Ziel, Pleite, Kredit', () => {
+  it('Kredit bis zur Grenze der Stufe, Zinsen am Tagesabschluss, Tilgen', () => {
+    const sim = new Sim(1);
+    const m = sim.money;
+    expect(sim.takeLoan().ok).toBe(true);
+    expect(sim.takeLoan().ok).toBe(true);
+    expect(sim.takeLoan()).toMatchObject({ ok: false });
+    expect(sim.money).toBe(m + 200_000);
+    run(sim, 18.1);
+    expect(sim.history.at(-1)!.interest).toBe(800);
+    expect(sim.repayLoan().ok).toBe(true);
+    expect(sim.loan).toBe(100_000);
+  });
+
+  it('drei Tagesabschlüsse im Minus sind die Pleite', () => {
+    const sim = new Sim(1);
+    sim.money = -50_000;
+    const tags: string[] = [];
+    for (let d = 0; d < 3; d++) {
+      run(sim, 24);
+      for (const e of sim.drainEvents()) if (e.tag) tags.push(e.tag);
+    }
+    expect(tags.filter((t) => t === 'debt').length).toBe(2);
+    expect(sim.status).toBe('lost');
+    expect(sim.endReason).toMatch(/Pleite/);
+  });
+
+  it('wer wieder ins Plus kommt, fängt bei null an', () => {
+    const sim = new Sim(1);
+    sim.money = -1;
+    run(sim, 18.1);
+    expect(sim.debtDays).toBe(1);
+    sim.money = 100_000;
+    run(sim, 24);
+    expect(sim.debtDays).toBe(0);
+  });
+
+  it('Weltklasse-Hafen ist der Sieg, Tag nach dem Ziel ist verloren', () => {
+    const win = new Sim(1);
+    win.level = 4;
+    win.handled = 1e6;
+    run(win, 0.1);
+    expect(win.status).toBe('won');
+    const late = new Sim(1, 'hard');
+    late.gm += 25 * 1440;
+    run(late, 24);
+    expect(late.status).toBe('lost');
+    expect(late.endReason).toMatch(/Ziel verpasst/);
+  });
+});
+
 describe('Verkehr', () => {
   it('in einer Spur steht pro Feld nur ein fahrender Truck, der Rest staut sich', () => {
     const sim = bigPort(1, 24);

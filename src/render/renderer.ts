@@ -13,6 +13,8 @@ export interface View {
   time: number;
   /** Dauer des letzten Frames in Sekunden. */
   dt: number;
+  /** Auswahlrahmen für die Sammelzuweisung (Felder) */
+  rect: { x0: number; y0: number; x1: number; y1: number } | null;
 }
 
 const W = GRID_W * TILE;
@@ -64,6 +66,8 @@ const REEFER_BOX = 0xf4f9fd;
 /** Ausgepackte Ware ist braun (Kisten), Fertigware gold. */
 const WARE_BOX = 0xb98a52;
 const PREM_BOX = 0xf4c430;
+/** Farbe der festen Truck-Aufgabe (Automatik hat keinen Punkt) */
+export const ROLE_COLOR: Record<string, number> = { crane: 0xe2582c, out: 0x2f9e6b, export: 0x2f6db0, plant: 0x7a5cc7 };
 const CARGO_TINT: Record<string, number> = { reef: REEFER_BOX, exp: EXPORT_BOX, ware: WARE_BOX, prem: PREM_BOX };
 
 function hash(x: number, y: number): number {
@@ -104,6 +108,7 @@ interface TruckView {
   root: Container;
   load: Sprite[];
   brake: Graphics;
+  badge: Graphics;
   /** Seitlicher Versatz: fahrend in der rechten Spur, ohne Auftrag am Rand geparkt */
   lat: number;
   /** Ladung und Art, um Änderungen zu erkennen */
@@ -1012,7 +1017,10 @@ export class Renderer {
       root.addChild(s);
       load.push(s);
     }
-    return { root, load, brake, lat: 7, key: '', agv: t.agv, rot: t.angle };
+    const badge = new Graphics();
+    badge.position.set(t.agv ? 0 : -3.5, 0);
+    root.addChild(badge);
+    return { root, load, brake, badge, lat: 7, key: '', agv: t.agv, rot: t.angle };
   }
 
   private syncTrucks(sim: Sim, a: number, view: View) {
@@ -1042,9 +1050,13 @@ export class Renderer {
         (t.py + (t.fy - t.py) * a + 0.5) * TILE + Math.cos(v.rot) * v.lat,
       );
       v.brake.visible = t.stuck > 0;
-      const key = t.load + t.cargo;
+      const key = t.load + t.cargo + t.role;
       if (key !== v.key) {
         v.key = key;
+        // Farbpunkt für die feste Aufgabe
+        v.badge.clear();
+        const rc = ROLE_COLOR[t.role];
+        if (rc) v.badge.circle(0, 0, 3.6).fill(0xffffff).circle(0, 0, 2.6).fill(rc);
         for (let k = 0; k < v.load.length; k++) {
           v.load[k].visible = k < t.load;
           v.load[k].tint = CARGO_TINT[t.cargo] ?? BOX[hash(t.id, k + 40) % BOX.length];
@@ -1485,6 +1497,21 @@ export class Renderer {
       g.rect(p.x, p.y, TILE, TILE).fill({ color: p.color, alpha: (1 - u) * 0.35 });
     }
 
+    if (view.rect) {
+      const r = view.rect;
+      const x0 = Math.min(r.x0, r.x1) * TILE;
+      const y0 = Math.min(r.y0, r.y1) * TILE;
+      const w = (Math.abs(r.x1 - r.x0) + 1) * TILE;
+      const h = (Math.abs(r.y1 - r.y0) + 1) * TILE;
+      g.rect(x0, y0, w, h).fill({ color: C.accent, alpha: 0.14 });
+      g.rect(x0, y0, w, h).stroke({ width: 2, color: C.accent });
+      for (const t of sim.trucks) {
+        const tx = t.tile % GRID_W;
+        const ty = (t.tile / GRID_W) | 0;
+        if (tx * TILE < x0 || tx * TILE >= x0 + w || ty * TILE < y0 || ty * TILE >= y0 + h) continue;
+        g.circle((t.fx + 0.5) * TILE, (t.fy + 0.5) * TILE, 13).stroke({ width: 2, color: 0xffffff });
+      }
+    }
     if (view.selected) this.drawSelection(g, sim, view.selected, a, view.time);
 
     // Bau-Vorschau

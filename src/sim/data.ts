@@ -26,8 +26,8 @@ export enum T {
   Plant = 8,
 }
 
-export type Tool = 'view' | 'kai' | 'crane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'demolish';
-export type BuildTool = Exclude<Tool, 'view' | 'demolish'>;
+export type Tool = 'view' | 'kai' | 'crane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'assign' | 'demolish';
+export type BuildTool = Exclude<Tool, 'view' | 'demolish' | 'assign'>;
 
 export const COST: Record<BuildTool, number> = {
   kai: 5_000,
@@ -83,11 +83,20 @@ export const START_MONEY = 400_000;
 
 export type DiffId = 'easy' | 'normal' | 'hard';
 /** Schwierigkeitsgrade: Startgeld, Geduld der Schiffe, zugesagte Liegezeit, Strafen, Löhne, Krankenstand */
-export const DIFFS: Record<DiffId, { name: string; text: string; money: number; patience: number; dwell: number; penalty: number; wage: number; sick: number }> = {
-  easy: { name: 'Leicht', text: 'Viel Startgeld, geduldige Schiffe, milde Strafen', money: 650_000, patience: 1.5, dwell: 1.25, penalty: 0.5, wage: 0.8, sick: 0.02 },
-  normal: { name: 'Normal', text: 'Knappes Startgeld, Löhne und Fristen wie geplant', money: 400_000, patience: 1, dwell: 1, penalty: 1, wage: 1, sick: 0.04 },
-  hard: { name: 'Schwer', text: 'Wenig Startgeld, ungeduldige Schiffe, enge Fristen, hohe Löhne und Strafen', money: 250_000, patience: 0.6, dwell: 0.8, penalty: 1.6, wage: 1.3, sick: 0.07 },
+export const DIFFS: Record<
+  DiffId,
+  { name: string; text: string; money: number; patience: number; dwell: number; penalty: number; wage: number; sick: number; debtDays: number; goalDays: number; rate: number }
+> = {
+  easy: { name: 'Leicht', text: 'Viel Startgeld, geduldige Schiffe, milde Strafen', money: 650_000, patience: 1.5, dwell: 1.25, penalty: 0.5, wage: 0.8, sick: 0.02, debtDays: 5, goalDays: 45, rate: 0.7 },
+  normal: { name: 'Normal', text: 'Knappes Startgeld, Löhne und Fristen wie geplant', money: 400_000, patience: 1, dwell: 1, penalty: 1, wage: 1, sick: 0.04, debtDays: 3, goalDays: 35, rate: 1 },
+  hard: { name: 'Schwer', text: 'Wenig Startgeld, ungeduldige Schiffe, enge Fristen, hohe Löhne und Strafen', money: 250_000, patience: 0.6, dwell: 0.8, penalty: 1.6, wage: 1.3, sick: 0.07, debtDays: 2, goalDays: 25, rate: 1.4 },
 };
+
+// Kredit
+export const LOAN_STEP = 100_000;
+export const LOAN_LIMIT_PER_LEVEL = 250_000;
+/** Zinsen pro Tag auf die offene Kreditsumme */
+export const LOAN_RATE = 0.004;
 
 export type Role = 'driver' | 'crane' | 'gate';
 /** Personal: Stundenlohn und wofür die Stelle gebraucht wird */

@@ -20,6 +20,9 @@ import {
   GRID_H,
   GRID_W,
   LEVELS,
+  LOAN_LIMIT_PER_LEVEL,
+  LOAN_RATE,
+  LOAN_STEP,
   MIN_PER_DAY,
   PLANTS,
   PLANT_BUF,
@@ -227,6 +230,9 @@ export interface Contract {
 
 export type Weather = 'clear' | 'storm' | 'fog';
 
+/** Spielstand: läuft, gewonnen, verloren oder ohne Wertung weitergespielt */
+export type GameStatus = 'play' | 'won' | 'lost' | 'free';
+
 export type EventTag =
   | 'container'
   | 'export'
@@ -243,7 +249,10 @@ export type EventTag =
   | 'weather-start'
   | 'weather-end'
   | 'spoil'
-  | 'contract';
+  | 'contract'
+  | 'won'
+  | 'lost'
+  | 'debt';
 
 export interface GameEvent {
   /** Text für eine Meldung. Fehlt er, ist das Ereignis nur für Ton und Effekte da. */
@@ -265,7 +274,12 @@ export interface DayBook {
   penalty: number;
   running: number;
   wages: number;
+  interest: number;
   building: number;
+  /** Umgeschlagene Container, abgefertigte und pünktliche Schiffe */
+  handled: number;
+  ships: number;
+  onTime: number;
 }
 
 export interface Stats {
@@ -335,6 +349,10 @@ export interface SaveData {
   contracts?: Contract[];
   offers?: Contract[];
   contractsDone?: number;
+  loan?: number;
+  debtDays?: number;
+  status?: GameStatus;
+  endReason?: string;
   diff?: DiffId;
   staff?: Record<Role, number>;
   sick?: Record<Role, number[]>;
@@ -354,7 +372,7 @@ const LINES: { line: string; prefix: string; color: number }[] = [
 ];
 const UNLOADING = 'Wird entladen.';
 const LOADING = 'Wird beladen.';
-const emptyBook = (): DayBook => ({ fees: 0, exportFees: 0, rail: 0, berth: 0, bonus: 0, penalty: 0, running: 0, wages: 0, building: 0 });
+const emptyBook = (): DayBook => ({ fees: 0, exportFees: 0, rail: 0, berth: 0, bonus: 0, penalty: 0, running: 0, wages: 0, interest: 0, building: 0, handled: 0, ships: 0, onTime: 0 });
 const TILE_OF: Partial<Record<BuildTool, T>> = { kai: T.Kai, road: T.Road, yard: T.Yard, reefer: T.Reefer, gate: T.Gate, rail: T.Rail, unpack: T.Plant, pack: T.Plant };
 const eur = (n: number) => `${Math.round(n).toLocaleString('de-DE')} €`;
 
@@ -379,6 +397,11 @@ export class Sim {
   rails: Rail[] = [];
   plants: Plant[] = [];
   premiumDone = 0;
+  loan = 0;
+  /** Tagesabschlüsse in Folge mit negativem Kontostand */
+  debtDays = 0;
+  status: GameStatus = 'play';
+  endReason = '';
   trucks: Truck[] = [];
   ships: Ship[] = [];
   contracts: Contract[] = [];
@@ -1820,6 +1843,7 @@ export class Sim {
     const imports = s.containers + s.reefers;
     const onTime = imports <= 0 && s.atBerth <= s.dwellTarget + 1;
     this.shipsDone++;
+    this.today.ships++;
     if (st.deep && imports <= 0) this.bigShipsDone++;
     const c = this.contracts.find((c) => c.id === s.contractId);
     const bonus = onTime && c ? c.bonus : 0;
@@ -1829,6 +1853,7 @@ export class Sim {
     }
     if (onTime) {
       this.shipsOnTime++;
+      this.today.onTime++;
       this.rep = Math.min(REP_MAX, this.rep + 1);
       const extra = bonus ? ` und ${eur(bonus)} Vertragsbonus` : '';
       this.emit(`${s.name} abgefertigt: +${eur(st.berthFee)} Liegegebühr${extra}, Ruf +1`, 'good', {
@@ -1882,7 +1907,7 @@ export class Sim {
             ship.exportLeft--;
             ship.loaded++;
             this.exportsLoaded++;
-            this.handled++;
+            this.handled++, this.today.handled++;
             this.money += EXPORT_FEE;
             this.today.exportFees += EXPORT_FEE;
             this.emit(undefined, 'good', { tag: 'export', x: c.x, y: c.y - 1, amount: EXPORT_FEE });
@@ -1970,7 +1995,7 @@ export class Sim {
           } else {
             g.served++;
             this.containersDone++;
-            this.handled++;
+            this.handled++, this.today.handled++;
             if (g.procFee === REEFER_FEE) this.reefersHandled++;
             if (g.procFee === PREMIUM_FEE) this.premiumDone++;
             this.money += g.procFee;
@@ -2013,6 +2038,7 @@ export class Sim {
             this.money += r.value;
             this.today.rail += r.value;
             this.handled += n;
+            this.today.handled += n;
             this.containersDone += n;
             this.trainsDone++;
             this.emit(`Zug abgefahren: ${n} Container, +${eur(r.value)}`, 'good', { tag: 'train', x: r.x, y: r.y, amount: r.value });
@@ -2115,6 +2141,70 @@ export class Sim {
     this.version++;
     this.makeOffers();
     this.emit(`Neue Stufe: ${next.name}. Bonus +${eur(next.bonus)}`, 'good', { tag: 'level', amount: next.bonus });
+    if (this.level === LEVELS.length && this.status === 'play') {
+      this.status = 'won';
+      this.endReason = `Weltklasse-Hafen an Tag ${this.day}, Ziel war Tag ${this.goalDay}.`;
+      this.emit(undefined, 'good', { tag: 'won' });
+    }
+  }
+
+  // ───────────────────────── Ziel, Pleite, Kredit ─────────────────────────
+
+  /** Bis zu diesem Tag (einschließlich) muss der Weltklasse-Hafen stehen. */
+  get goalDay(): number {
+    return DIFFS[this.diff].goalDays;
+  }
+  get debtLimit(): number {
+    return DIFFS[this.diff].debtDays;
+  }
+  get loanLimit(): number {
+    return LOAN_LIMIT_PER_LEVEL * this.level;
+  }
+  get interestPerDay(): number {
+    return Math.round(this.loan * LOAN_RATE * DIFFS[this.diff].rate);
+  }
+  takeLoan(): BuildCheck {
+    if (this.loan + LOAN_STEP > this.loanLimit) {
+      return { ok: false, reason: `Mehr Kredit gibt es erst auf der nächsten Stufe (Grenze ${eur(this.loanLimit)})`, cost: 0 };
+    }
+    this.loan += LOAN_STEP;
+    this.money += LOAN_STEP;
+    return { ok: true, cost: 0 };
+  }
+  repayLoan(): BuildCheck {
+    const amt = Math.min(LOAN_STEP, this.loan);
+    if (amt <= 0) return { ok: false, reason: 'Kein Kredit offen', cost: 0 };
+    if (this.money < amt) return { ok: false, reason: 'Zu wenig Geld zum Tilgen', cost: amt };
+    this.loan -= amt;
+    this.money -= amt;
+    return { ok: true, cost: amt };
+  }
+  /** Nach Sieg oder Niederlage ohne Wertung weiterspielen. */
+  continueFree() {
+    this.status = 'free';
+  }
+
+  private lose(reason: string) {
+    this.status = 'lost';
+    this.endReason = reason;
+    this.emit(undefined, 'bad', { tag: 'lost' });
+  }
+
+  private checkEnd() {
+    if (this.status !== 'play') return;
+    if (this.money < 0) {
+      this.debtDays++;
+      const left = this.debtLimit - this.debtDays;
+      if (left <= 0) return this.lose(`Pleite: Das Konto war ${this.debtLimit} Tage in Folge im Minus.`);
+      this.emit(
+        `Konto im Minus! Noch ${left} ${left === 1 ? 'Tagesabschluss' : 'Tagesabschlüsse'} bis zur Pleite. Nimm einen Kredit auf oder spare.`,
+        'bad',
+        { tag: 'debt' },
+      );
+    } else {
+      this.debtDays = 0;
+    }
+    if (this.day > this.goalDay) this.lose(`Ziel verpasst: Der Weltklasse-Hafen sollte bis Tag ${this.goalDay} stehen.`);
   }
 
   private makeOffer(): Contract {
@@ -2209,13 +2299,17 @@ export class Sim {
     const cost = this.runningCost();
     this.money -= cost;
     this.today.running += cost;
+    const interest = this.interestPerDay;
+    this.money -= interest;
+    this.today.interest += interest;
     this.history.push(this.today);
-    if (this.history.length > 7) this.history.shift();
+    if (this.history.length > 14) this.history.shift();
     this.today = emptyBook();
     this.makeOffers();
     this.planWeather();
     this.rollSickness();
-    this.emit(`Tagesabschluss: Betriebskosten −${eur(cost)}`, 'info', { tag: 'day' });
+    this.emit(`Tagesabschluss: Betriebskosten −${eur(cost)}${interest ? `, Zinsen −${eur(interest)}` : ''}`, 'info', { tag: 'day' });
+    this.checkEnd();
   }
 
   // ───────────────────────── Speichern ─────────────────────────
@@ -2251,6 +2345,10 @@ export class Sim {
       contracts: this.contracts,
       offers: this.offers,
       contractsDone: this.contractsDone,
+      loan: this.loan,
+      debtDays: this.debtDays,
+      status: this.status,
+      endReason: this.endReason,
       diff: this.diff,
       staff: this.staff,
       sick: this.sick,
@@ -2304,6 +2402,10 @@ export class Sim {
     s.contracts = d.contracts ?? [];
     s.offers = d.offers ?? [];
     s.contractsDone = d.contractsDone ?? 0;
+    s.loan = d.loan ?? 0;
+    s.debtDays = d.debtDays ?? 0;
+    s.status = d.status ?? 'free';
+    s.endReason = d.endReason ?? '';
     if (d.staff) s.staff = { ...d.staff };
     else s.staff.driver = s.trucks.filter((t) => !t.agv).length;
     if (d.sick) s.sick = { driver: [...d.sick.driver], crane: [...d.sick.crane], gate: [...d.sick.gate] };

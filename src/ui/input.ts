@@ -9,6 +9,7 @@ const KEY_TOOLS: Record<string, Tool> = {
   y: 'yard',
   g: 'gate',
   t: 'truck',
+  a: 'assign',
   x: 'demolish',
 };
 
@@ -22,7 +23,7 @@ interface Ptr {
 /** Zeigerbedienung für Maus und Touch: Tippen, Malen, Ziehen, Zoomen. */
 export function setupInput(game: Game, el: HTMLElement) {
   const ptrs = new Map<number, Ptr>();
-  let mode: 'none' | 'paint' | 'pan' | 'tap' | 'pinch' = 'none';
+  let mode: 'none' | 'paint' | 'pan' | 'tap' | 'pinch' | 'rect' = 'none';
   let last: { x: number; y: number } | null = null;
   let failReason: string | null = null;
   let okCount = 0;
@@ -80,6 +81,7 @@ export function setupInput(game: Game, el: HTMLElement) {
     ptrs.set(e.pointerId, { x: p.x, y: p.y, sx: p.x, sy: p.y });
     if (ptrs.size === 2) {
       if (mode === 'paint') finishPaint();
+      game.rect = null;
       mode = 'pinch';
       game.hover = null;
       const [a, b] = [...ptrs.values()];
@@ -92,6 +94,10 @@ export function setupInput(game: Game, el: HTMLElement) {
     const wantPan = e.button === 1 || e.button === 2;
     if (wantPan) {
       mode = 'pan';
+    } else if (game.tool === 'assign') {
+      mode = 'rect';
+      const t = tileOf(p);
+      game.rect = { x0: t.x, y0: t.y, x1: t.x, y1: t.y };
     } else if (PAINT_TOOLS.includes(game.tool)) {
       mode = 'paint';
       game.beginStroke();
@@ -128,6 +134,11 @@ export function setupInput(game: Game, el: HTMLElement) {
       game.renderer.panBy(dx / 2, dy / 2);
       return;
     }
+    if (mode === 'rect' && game.rect) {
+      const t = tileOf(p);
+      game.rect = { ...game.rect, x1: t.x, y1: t.y };
+      return;
+    }
     if (mode === 'paint') {
       const t = tileOf(p);
       if (last && (t.x !== last.x || t.y !== last.y)) {
@@ -159,6 +170,9 @@ export function setupInput(game: Game, el: HTMLElement) {
       }
     } else if (mode === 'paint') {
       finishPaint();
+    } else if (mode === 'rect' && game.rect) {
+      game.assignRect(game.rect);
+      game.rect = null;
     }
     if (ptrs.size === 0) {
       mode = 'none';

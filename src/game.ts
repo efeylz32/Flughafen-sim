@@ -1,6 +1,6 @@
 import { Sound } from './audio/sound';
 import { Renderer, View } from './render/renderer';
-import { BuildTool, DiffId, GRID_H, GRID_W, Role, T, TICKS_PER_SEC, TILE, Tool, TruckRole } from './sim/data';
+import { BuildTool, DiffId, GRID_H, GRID_W, Role, ROLE_NAMES, T, TICKS_PER_SEC, TILE, Tool, TruckRole } from './sim/data';
 import { buildDemo } from './sim/demo';
 import { GameEvent, Removed, Sim } from './sim/sim';
 import type { UI } from './ui/ui';
@@ -34,6 +34,9 @@ export class Game {
   overlay = false;
   selected: View['selected'] = null;
   hover: View['hover'] = null;
+  /** Aufgabe, die die Sammelzuweisung vergibt */
+  assignRole: TruckRole = 'crane';
+  rect: View['rect'] = null;
 
   private acc = 0;
   private time = 0;
@@ -74,6 +77,7 @@ export class Game {
       alpha: this.speed > 0 ? this.acc : 1,
       time: this.time,
       dt: dtSec,
+      rect: this.rect,
     });
     this.ui.update(dtSec);
     this.saveTimer += dtSec;
@@ -105,6 +109,17 @@ export class Game {
       case 'level':
         this.sound.play('level');
         this.ui.showLevelUp();
+        break;
+      case 'won':
+        this.sound.play('mission');
+        this.ui.showEnd();
+        break;
+      case 'lost':
+        this.sound.play('bad');
+        this.ui.showEnd();
+        break;
+      case 'debt':
+        this.sound.play('bad');
         break;
       case 'weather-warn':
         this.sound.play('bad');
@@ -302,6 +317,36 @@ export class Game {
     this.sound.play('upgrade');
     this.renderer.addPop(x, y, 'build');
     this.ui.toast(sel.kind === 'crane' ? 'Containerbrücke in Betrieb: 40 Moves pro Stunde' : 'Der Truck fährt jetzt fahrerlos', 'good');
+  }
+
+  /** Vergibt die gewählte Aufgabe an alle Trucks im Rahmen. */
+  assignRect(r: NonNullable<View['rect']>) {
+    const x0 = Math.min(r.x0, r.x1);
+    const x1 = Math.max(r.x0, r.x1);
+    const y0 = Math.min(r.y0, r.y1);
+    const y1 = Math.max(r.y0, r.y1);
+    let n = 0;
+    for (const t of this.sim.trucks) {
+      const x = t.tile % GRID_W;
+      const y = (t.tile / GRID_W) | 0;
+      if (x < x0 || x > x1 || y < y0 || y > y1) continue;
+      this.sim.setRole(t.id, this.assignRole);
+      n++;
+    }
+    if (!n) return this.fail('Kein Truck im Rahmen');
+    this.ui.toast(`${n} ${n === 1 ? 'Truck' : 'Trucks'}: ${ROLE_NAMES[this.assignRole].name}`, 'good');
+    this.sound.play('upgrade');
+  }
+
+  takeLoan() {
+    const r = this.sim.takeLoan();
+    if (!r.ok) return this.fail(r.reason ?? 'Nicht möglich');
+    this.sound.play('coin');
+  }
+  repayLoan() {
+    const r = this.sim.repayLoan();
+    if (!r.ok) return this.fail(r.reason ?? 'Nicht möglich');
+    this.sound.play('click');
   }
 
   /** Gibt dem ausgewählten Truck eine feste Aufgabe oder stellt ihn auf Automatik. */

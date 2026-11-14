@@ -44,6 +44,8 @@ const ICONS: Record<string, string> = {
   truck: svg('<rect x="2" y="7" width="12" height="9" rx="1.2"/><path d="M14 10h4l3 3.5V16h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>'),
   unpack: svg('<path d="M3 20V9l4.5 3V9l4.5 3V9l4.5 3V5h4.5v15z"/><path d="M7 16h3M13 16h3"/>'),
   pack: svg('<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>'),
+  assign: svg('<rect x="3.5" y="5" width="17" height="14" rx="1.5" stroke-dasharray="3 2.4"/><path d="M8 12.5l2.6 2.6L16 9.5"/>'),
+  chart: svg('<path d="M4 20V4M4 20h16"/><rect x="7" y="12" width="3" height="6" rx=".6"/><rect x="12" y="8" width="3" height="10" rx=".6"/><rect x="17" y="10.5" width="3" height="7.5" rx=".6"/>'),
   dredge: svg('<path d="M3 8c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/><path d="M12 11v9M8.5 16.5L12 20l3.5-3.5"/>'),
   demolish: svg('<path d="M5 5l14 14M19 5L5 19"/>'),
   eye: svg('<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'),
@@ -83,6 +85,7 @@ const TOOLS: ToolDef[] = [
   { cat: 'land', tool: 'road', label: 'Straße', sub: '500 €', color: '#59606a' },
   { cat: 'store', tool: 'yard', label: 'Stapel', sub: '1k', color: '#c9b88a' },
   { cat: 'build', tool: 'gate', label: 'Gate', sub: '20k', color: '#d9534f' },
+  { cat: 'gear', tool: 'assign', label: 'Aufgaben', sub: 'Rahmen', color: '#2a6fdb' },
   { cat: 'gear', tool: 'truck', label: 'Truck', sub: '25k', color: '#e0a030' },
   { cat: 'build', tool: 'unpack', label: 'Packhalle', sub: '60k', color: '#c98a3c' },
   { cat: 'build', tool: 'pack', label: 'Veredeln', sub: '90k', color: '#7a5cc7' },
@@ -157,6 +160,11 @@ export class UI {
   private staffBadge!: HTMLElement;
   private lastStaff = '';
   private diff: DiffId = 'normal';
+  private rolePick!: HTMLElement;
+  private alertEl!: HTMLElement;
+  private lastFin = '';
+  private endModal!: HTMLElement;
+  private endBody!: HTMLElement;
   private levelUp!: HTMLElement;
   private levelUpBody!: HTMLElement;
   private cat: Exclude<Cat, 'always'> = 'land';
@@ -220,7 +228,9 @@ export class UI {
     this.levelName = this.levelEl.querySelector('.lname')!;
     this.levelBar = this.levelEl.querySelector('.bar')!;
     this.weatherEl = el('div', 'pill small weather hidden');
-    status.append(this.clockEl, this.levelEl, this.weatherEl);
+    this.alertEl = el('button', 'pill small debt hidden');
+    this.alertEl.addEventListener('click', () => this.toggleCard(this.finCard));
+    status.append(this.clockEl, this.levelEl, this.weatherEl, this.alertEl);
 
     this.missionCard = el('div', 'card mission');
     this.missionCard.innerHTML = `
@@ -248,12 +258,22 @@ export class UI {
     }
     this.bnHint = this.bnCard.querySelector('.hint')!;
 
-    this.finCard = el('div', 'card fin hidden');
-    this.finCard.innerHTML = `<div class="ctitle">Finanzen heute <button class="x" aria-label="Schließen">${ICONS.close}</button></div><div class="body"></div>`;
+    this.finCard = el('div', 'modal hidden');
+    this.finCard.innerHTML = `<div class="dialog deals fin"><div class="dhead"><h2>Bilanz</h2><button class="x" aria-label="Schließen">${ICONS.close}</button></div><div class="body"></div></div>`;
     this.finBody = this.finCard.querySelector('.body')!;
     this.finCard.querySelector('.x')!.addEventListener('click', () => this.finCard.classList.add('hidden'));
+    this.finCard.addEventListener('click', (e) => {
+      const t = e.target as HTMLElement;
+      if (t === this.finCard) return this.finCard.classList.add('hidden');
+      const l = t.closest<HTMLElement>('[data-loan]');
+      if (l) {
+        if (l.dataset.loan === 'take') this.game.takeLoan();
+        else this.game.repayLoan();
+        this.renderFinance(this.game.sim);
+      }
+    });
 
-    left.append(status, this.missionCard, this.bnCard, this.finCard);
+    left.append(status, this.missionCard, this.bnCard);
 
     // Rechte Knopfleiste
     const side = el('div', 'side');
@@ -283,7 +303,7 @@ export class UI {
       this.game.toggleOverlay();
       click();
     });
-    const finBtn = mk(ICONS.coins, 'Finanzen', () => {
+    const finBtn = mk(ICONS.chart, 'Bilanz und Statistik', () => {
       this.toggleCard(this.finCard);
       click();
     });
@@ -318,12 +338,23 @@ export class UI {
       tabs.appendChild(b);
     }
     const row = el('div', 'tools');
-    bar.append(tabs, row);
+    this.rolePick = el('div', 'rolepick hidden');
+    for (const r of Object.keys(ROLE_NAMES) as TruckRole[]) {
+      const b = el('button', '', ROLE_NAMES[r].name);
+      b.dataset.role = r;
+      b.addEventListener('click', () => {
+        this.game.assignRole = r;
+        this.refreshTools();
+        click();
+      });
+      this.rolePick.appendChild(b);
+    }
+    bar.append(this.rolePick, tabs, row);
     for (const t of TOOLS) {
       const b = el('button', 'tool');
       b.innerHTML = `<span class="ico" style="--c:${t.color}">${ICONS[t.tool]}<span class="lk">${ICONS.lock}</span></span><b>${t.label}</b><small>${t.sub}</small>`;
       b.addEventListener('click', () => {
-        const need = t.tool === 'view' || t.tool === 'demolish' ? 1 : UNLOCK[t.tool as BuildTool];
+        const need = UNLOCK[t.tool as BuildTool] ?? 1;
         if (this.game.sim.level < need) {
           this.game.fail(`${t.label} gibt es ab Stufe ${need} (${LEVELS[need - 1].name})`);
           return;
@@ -434,6 +465,20 @@ export class UI {
       this.renderStaff(true);
     });
 
+    // Ende: Sieg oder Niederlage
+    this.endModal = el('div', 'modal hidden');
+    this.endModal.innerHTML = `<div class="dialog levelup"><div class="body"></div><button class="primary free">Ohne Wertung weiterspielen</button><button class="secondary again">Neues Spiel</button></div>`;
+    this.endBody = this.endModal.querySelector('.body')!;
+    this.endModal.querySelector('.free')!.addEventListener('click', () => {
+      this.game.sim.continueFree();
+      this.endModal.classList.add('hidden');
+      this.game.setSpeed(this.speedBeforeModal);
+    });
+    this.endModal.querySelector('.again')!.addEventListener('click', () => {
+      this.endModal.classList.add('hidden');
+      this.showMenu();
+    });
+
     // Neue Stufe
     this.levelUp = el('div', 'modal hidden');
     this.levelUp.innerHTML = `<div class="dialog levelup"><div class="body"></div><button class="primary go">Weiter</button></div>`;
@@ -443,7 +488,7 @@ export class UI {
       this.game.setSpeed(this.speedBeforeModal);
     });
 
-    root.append(top, left, side, this.sheet, bar, this.toasts, this.menu, this.deals, this.staffModal, this.levelUp);
+    root.append(top, left, side, this.sheet, bar, this.toasts, this.menu, this.deals, this.staffModal, this.finCard, this.endModal, this.levelUp);
     this.refreshSpeed();
     this.refreshTools();
     this.refreshOverlay();
@@ -491,6 +536,20 @@ export class UI {
     this.game.setSpeed(0);
   }
 
+  showEnd() {
+    const sim = this.game.sim;
+    const won = sim.status === 'won';
+    this.endBody.innerHTML = `
+      <div class="trophy ${won ? '' : 'lost'}">${won ? ICONS.trophy : ICONS.close}</div>
+      <div class="eyebrow ${won ? '' : 'neg'}">${won ? 'Gewonnen' : 'Verloren'} · ${DIFFS[sim.diff].name}</div>
+      <h1>${won ? 'Weltklasse-Hafen!' : 'Spiel vorbei'}</h1>
+      <p class="sub">${sim.endReason}</p>
+      <div class="news"><b>Deine Bilanz</b><span>${num(sim.handled)} Container umgeschlagen, ${num(sim.shipsDone)} Schiffe, davon ${num(sim.shipsOnTime)} pünktlich. Kontostand ${eur(sim.money)}${sim.loan ? `, Kredit ${eur(sim.loan)}` : ''}.</span></div>`;
+    if (this.endModal.classList.contains('hidden')) this.speedBeforeModal = this.game.speed || this.game.lastSpeed || 1;
+    this.endModal.classList.remove('hidden');
+    this.game.setSpeed(0);
+  }
+
   refreshSpeed() {
     for (const b of this.speedBtns) b.classList.toggle('on', Number(b.dataset.v) === this.game.speed);
   }
@@ -499,6 +558,8 @@ export class UI {
     const cur = this.toolBtns.get(this.game.tool)?.def.cat;
     if (cur && cur !== 'always') this.cat = cur;
     for (const [id, b] of this.catBtns) b.classList.toggle('on', id === this.cat);
+    this.rolePick.classList.toggle('hidden', this.game.tool !== 'assign');
+    for (const b of this.rolePick.querySelectorAll<HTMLElement>('button')) b.classList.toggle('on', b.dataset.role === this.game.assignRole);
     for (const [t, v] of this.toolBtns) {
       v.btn.classList.toggle('on', t === this.game.tool);
       v.btn.classList.toggle('hidden', v.def.cat !== 'always' && v.def.cat !== this.cat);
@@ -539,13 +600,16 @@ export class UI {
     const next = LEVELS[sim.level];
     this.levelName.textContent = `Stufe ${sim.level}`;
     this.levelBar.style.width = `${Math.round(sim.levelProgress * 100)}%`;
-    this.levelEl.title = next
-      ? `${sim.levelName}: ${num(sim.handled)} von ${num(next.need)} Containern bis ${next.name}`
-      : `${sim.levelName}: ${num(sim.handled)} Container umgeschlagen`;
+    this.levelEl.title =
+      (next ? `${sim.levelName}: ${num(sim.handled)} von ${num(next.need)} Containern bis ${next.name}` : `${sim.levelName}: ${num(sim.handled)} Container umgeschlagen`) +
+      (sim.status === 'play' ? `. Ziel: Weltklasse-Hafen bis Tag ${sim.goalDay}.` : '');
+    const debt = sim.status === 'play' && sim.money < 0;
+    this.alertEl.classList.toggle('hidden', !debt);
+    if (debt) this.alertEl.textContent = `Minus: noch ${Math.max(1, sim.debtLimit - sim.debtDays)} ${sim.debtLimit - sim.debtDays === 1 ? 'Tag' : 'Tage'}`;
     if (sim.level !== this.lastLevel) {
       this.lastLevel = sim.level;
       for (const v of this.toolBtns.values()) {
-        const need = v.def.tool === 'view' || v.def.tool === 'demolish' ? 1 : UNLOCK[v.def.tool as BuildTool];
+        const need = UNLOCK[v.def.tool as BuildTool] ?? 1;
         const locked = sim.level < need;
         v.btn.classList.toggle('locked', locked);
         v.sub.textContent = locked ? `Stufe ${need}` : v.def.sub;
@@ -602,21 +666,60 @@ export class UI {
 
   private renderFinance(sim: Sim) {
     const d = sim.today;
-    const inc = d.fees + d.rail + d.exportFees + d.berth + d.bonus;
-    const exp = d.running + d.building + d.penalty + d.wages;
-    const y = sim.history.at(-1);
+    const income = (b: typeof d) => b.fees + b.rail + b.exportFees + b.berth + b.bonus;
+    const costs = (b: typeof d) => b.running + b.building + b.penalty + b.wages + b.interest;
+    const inc = income(d);
+    const exp = costs(d);
     const row = (label: string, v: number) => (v ? `<div class="fl sub"><span>${label}</span><span>${eur(v)}</span></div>` : '');
-    this.finBody.innerHTML = `
+    const left = sim.goalDay - sim.day;
+    const goal =
+      sim.status === 'play'
+        ? `<div class="goal"><b>Ziel: Weltklasse-Hafen bis Tag ${sim.goalDay}</b><span>Heute ist Tag ${sim.day}, noch ${Math.max(0, left)} ${left === 1 ? 'Tag' : 'Tage'}. Stufe ${sim.level} von ${LEVELS.length}.${
+            sim.debtDays ? ` <span class="neg">Konto seit ${sim.debtDays} Tagesabschluss im Minus, bei ${sim.debtLimit} ist es die Pleite.</span>` : ` Ist das Konto ${sim.debtLimit} Tagesabschlüsse in Folge im Minus, bist du pleite.`
+          }</span></div>`
+        : `<div class="goal"><b>${sim.status === 'won' ? 'Gewonnen' : sim.status === 'lost' ? 'Verloren' : 'Freies Spiel'}</b><span>${sim.endReason || 'Ohne Ziel und ohne Pleite.'}</span></div>`;
+
+    // Verlauf der letzten Tage: Ergebnis und umgeschlagene Container
+    const days = [...sim.history.slice(-7), d];
+    const res = days.map((b) => income(b) - costs(b));
+    const maxRes = Math.max(1, ...res.map(Math.abs));
+    const cont = days.map((b) => b.handled);
+    const maxCont = Math.max(1, ...cont);
+    const label = (i: number) => (i === days.length - 1 ? 'heute' : `T${sim.day - (days.length - 1 - i)}`);
+    const chart = (vals: number[], max: number, fmt: (v: number) => string, signed: boolean) =>
+      `<div class="chart">${vals
+        .map(
+          (v, i) =>
+            `<div class="col" title="${label(i)}: ${fmt(v)}"><span class="v">${fmt(v)}</span><span class="bar ${signed && v < 0 ? 'neg' : ''} ${i === vals.length - 1 ? 'now' : ''}" style="height:${Math.max(2, Math.round((Math.abs(v) / max) * 100))}%"></span><span class="l">${label(i)}</span></div>`,
+        )
+        .join('')}</div>`;
+    const k = (v: number) => (Math.abs(v) >= 1000 ? `${Math.round(v / 1000)}k` : String(Math.round(v)));
+    const y = sim.history.at(-1);
+
+    const html = `
+      ${goal}
+      <h3>Heute</h3>
       <div class="fl"><b>Einnahmen</b><b>${eur(inc)}</b></div>
       ${row('Container am Gate', d.fees)}${row('Container per Bahn', d.rail)}${row('Export aufs Schiff', d.exportFees)}
       ${row('Liegegebühren', d.berth)}${row('Vertrags- und Stufenbonus', d.bonus)}
       <div class="fl"><b>Ausgaben</b><b>${eur(exp)}</b></div>
-      ${row('Löhne', d.wages)}${row('Bau und Aufrüstung', d.building)}${row('Strafen', d.penalty)}${row('Betrieb (Tagesabschluss)', d.running)}
+      ${row('Löhne', d.wages)}${row('Bau und Aufrüstung', d.building)}${row('Strafen', d.penalty)}${row('Wartung (Tagesabschluss)', d.running)}${row('Zinsen (Tagesabschluss)', d.interest)}
       <div class="fl total"><b>Ergebnis heute</b><b class="${inc - exp >= 0 ? 'pos' : 'neg'}">${eur(inc - exp)}</b></div>
-      ${y ? `<div class="fl sub"><span>Gestern</span><span>${eur(y.fees + y.rail + y.exportFees + y.berth + y.bonus - y.running - y.building - y.penalty - y.wages)}</span></div>` : ''}
-      <div class="fl sub"><span>Wartung pro Tag</span><span>${eur(sim.runningCost())}</span></div>
-      <div class="fl sub"><span>Löhne pro Tag</span><span>${eur((Object.keys(ROLES) as Role[]).reduce((n, r) => n + sim.staff[r] * sim.wagePerHour(r) * 24, 0))}</span></div>
-      <div class="fl sub"><span>Schiffe / Container gesamt</span><span>${num(sim.shipsDone)} / ${num(sim.handled)}</span></div>`;
+      <div class="fl sub"><span>Laufend pro Tag: Wartung / Löhne</span><span>${eur(sim.runningCost())} / ${eur((Object.keys(ROLES) as Role[]).reduce((n, r) => n + sim.staff[r] * sim.wagePerHour(r) * 24, 0))}</span></div>
+      <h3>Kredit</h3>
+      <div class="fl sub"><span>Offen</span><span>${eur(sim.loan)} von ${eur(sim.loanLimit)}</span></div>
+      <div class="fl sub"><span>Zinsen pro Tag</span><span>${eur(sim.interestPerDay)}</span></div>
+      <div class="pm"><button class="secondary" data-loan="repay" ${sim.loan ? '' : 'disabled'}>100.000 € tilgen</button><button class="primary" data-loan="take" ${sim.loan + 100_000 > sim.loanLimit ? 'disabled' : ''}>100.000 € leihen</button></div>
+      <h3>Ergebnis pro Tag</h3>
+      ${chart(res, maxRes, k, true)}
+      <h3>Container pro Tag</h3>
+      ${chart(cont, maxCont, (v) => String(v), false)}
+      ${y ? `<p class="sub">Gestern: ${y.ships} Schiffe abgefertigt, davon ${y.onTime} pünktlich.</p>` : ''}
+      <div class="fl sub"><span>Gesamt: Schiffe / Container</span><span>${num(sim.shipsDone)} / ${num(sim.handled)}</span></div>`;
+    if (html !== this.lastFin) {
+      this.finBody.innerHTML = html;
+      this.lastFin = html;
+    }
   }
 
   private renderStaff(force: boolean) {

@@ -243,3 +243,25 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .sheet .actions .roles button.on { background: var(--accent); color: #fff; }
 .sheet .actions .meta { font-size: 13px; color: var(--muted); margin: 4px 0 8px; }
 .sheet { max-height: calc(100% - 300px); overflow-y: auto; }
+
+/* Bilanz */
+.fin .goal { background: #f4f7fb; border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; font-size: 14px; line-height: 1.4; color: #34455a; }
+.fin .goal b { color: var(--ink); font-size: 15px; }
+.fin .pm { display: flex; gap: 8px; }
+.fin .pm button { flex: 1; border: 0; border-radius: 12px; padding: 11px; font-weight: 800; font-size: 14px; }
+.chart { display: flex; gap: 6px; align-items: stretch; height: 120px; padding: 4px 0; }
+.chart .col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 3px; min-width: 0; }
+.chart .bar { width: 100%; background: #9ec0ef; border-radius: 5px 5px 2px 2px; }
+.chart .bar.now { background: var(--accent); }
+.chart .bar.neg { background: #f0a19c; }
+.chart .bar.neg.now { background: var(--bad); }
+.chart .v { font-size: 11px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+.chart .l { font-size: 11px; color: var(--muted); }
+.pill.debt { background: var(--bad); color: #fff; border: 0; }
+.levelup .trophy.lost { background: var(--bad); box-shadow: inset 0 -5px 0 rgba(0,0,0,.15), 0 0 0 8px #fbe0de; }
+.eyebrow.neg { color: var(--bad); }
+.dialog.levelup .secondary { border: 0; border-radius: 14px; padding: 12px; font-weight: 800; }
+/* Sammelzuweisung */
+.rolepick { display: flex; gap: 6px; justify-content: safe center; overflow-x: auto; scrollbar-width: none; }
+.rolepick button { flex: none; border: 0; border-radius: 10px; padding: 7px 11px; font-weight: 800; font-size: 13px; background: #eef2f7; }
+.rolepick button.on { background: var(--accent); color: #fff; }
