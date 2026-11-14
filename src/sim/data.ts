@@ -134,10 +134,10 @@ export const EXPORT_FEE = 250;
 // Hafenstufen: `need` ist die Zahl der insgesamt umgeschlagenen Container
 export const LEVELS = [
   { name: 'Anleger', need: 0, bonus: 0, contracts: 0 },
-  { name: 'Regionalhafen', need: 400, bonus: 100_000, contracts: 2 },
-  { name: 'Handelshafen', need: 2_500, bonus: 250_000, contracts: 3 },
-  { name: 'Seehafen', need: 8_000, bonus: 500_000, contracts: 4 },
-  { name: 'Weltklasse-Hafen', need: 20_000, bonus: 1_000_000, contracts: 5 },
+  { name: 'Regionalhafen', need: 1_200, bonus: 100_000, contracts: 2 },
+  { name: 'Handelshafen', need: 6_000, bonus: 250_000, contracts: 3 },
+  { name: 'Seehafen', need: 18_000, bonus: 500_000, contracts: 4 },
+  { name: 'Weltklasse-Hafen', need: 45_000, bonus: 1_000_000, contracts: 5 },
 ];
 /** Was jede Stufe neu bringt (für die Anzeige beim Aufstieg). */
 export const LEVEL_NEWS: { title: string; text: string }[][] = [

@@ -10,10 +10,10 @@ Das Spielkonzept steht im Doc „Hafen-Imperium: Spielkonzept“.
 | Stufe | Name | Ab umgeschlagenen Containern | Neu |
 |---|---|---|---|
 | 1 | Anleger | 0 | Kai, Kran, Straße, Stapelplatz, Gate, Trucks |
-| 2 | Regionalhafen | 400 | Export (Schiffe beladen), Verträge mit Reedereien, Containerbrücke, Wetter |
-| 3 | Handelshafen | 2.500 | Kühlfracht mit Kühlplätzen, Gleisanschluss, Baggern für große Schiffe |
-| 4 | Seehafen | 8.000 | Fahrerlose Fahrzeuge, 4 Verträge |
-| 5 | Weltklasse-Hafen | 20.000 | 5 Verträge |
+| 2 | Regionalhafen | 1.200 | Export (Schiffe beladen), Verträge mit Reedereien, Containerbrücke, Wetter |
+| 3 | Handelshafen | 6.000 | Kühlfracht mit Kühlplätzen, Gleisanschluss, Baggern für große Schiffe |
+| 4 | Seehafen | 18.000 | Fahrerlose Fahrzeuge, 4 Verträge |
+| 5 | Weltklasse-Hafen | 45.000 | 5 Verträge |
 
 - **Export:** Schiffe wollen auch beladen werden. Export-Container kommen über das Gate, Trucks bringen sie zum Kran (250 € pro Stück).
 - **Verträge:** Feste Anläufe einer Reederei. Pünktlich abgefertigt gibt es Bonus, sonst Strafe.

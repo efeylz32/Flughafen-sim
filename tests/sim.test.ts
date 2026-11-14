@@ -222,12 +222,12 @@ describe('Hafenstufen', () => {
   it('Aufstieg zur Stufe 2 bringt Bonus und Vertragsangebote', () => {
     const sim = bigPort(1);
     const tags: string[] = [];
-    for (let i = 0; i < 12000 && sim.level < 2; i++) {
+    for (let i = 0; i < 30000 && sim.level < 2; i++) {
       sim.tick();
       for (const e of sim.drainEvents()) if (e.tag) tags.push(e.tag);
     }
     expect(sim.level).toBe(2);
-    expect(sim.handled).toBeGreaterThanOrEqual(400);
+    expect(sim.handled).toBeGreaterThanOrEqual(1200);
     expect(tags).toContain('level');
     expect(sim.offers.length).toBe(3);
   });
