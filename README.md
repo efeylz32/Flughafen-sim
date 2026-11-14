@@ -14,6 +14,7 @@ npm install
 npm run dev      # Entwicklungsserver, auch im lokalen Netz erreichbar (z. B. vom Handy)
 npm test         # Simulationstests (ohne Grafik)
 npm run build    # Typprüfung und Produktions-Build nach dist/
+npm run build:single  # zusätzlich eine einzelne, selbstständige Datei dist/hafen-imperium.html
 ```
 
 Im Menü gibt es zwei Startarten:

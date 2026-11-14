@@ -1,3 +1,5 @@
+// Ohne eval(), damit das Spiel auch unter strenger Content-Security-Policy läuft (z. B. eingebettet).
+import 'pixi.js/unsafe-eval';
 import './style.css';
 import { Game } from './game';
 import { setupInput } from './ui/input';
