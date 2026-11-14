@@ -1,0 +1,200 @@
+import { Game, PAINT_TOOLS } from '../game';
+import type { Tool } from '../sim/data';
+
+const KEY_TOOLS: Record<string, Tool> = {
+  v: 'view',
+  k: 'kai',
+  c: 'crane',
+  r: 'road',
+  y: 'yard',
+  g: 'gate',
+  t: 'truck',
+  x: 'demolish',
+};
+
+interface Ptr {
+  x: number;
+  y: number;
+  sx: number;
+  sy: number;
+  t0: number;
+  type: string;
+  button: number;
+}
+
+/** Zeigerbedienung für Maus und Touch: Tippen, Malen, Ziehen, Zoomen. */
+export function setupInput(game: Game, el: HTMLElement) {
+  const ptrs = new Map<number, Ptr>();
+  let mode: 'none' | 'paint' | 'pan' | 'tap' | 'pinch' = 'none';
+  let last: { x: number; y: number } | null = null;
+  let failReason: string | null = null;
+  let okCount = 0;
+  let pinchDist = 0;
+
+  const rel = (e: { clientX: number; clientY: number }) => {
+    const r = el.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  };
+  const tileOf = (p: { x: number; y: number }) => game.renderer.screenToTile(p.x, p.y);
+
+  function paintLine(a: { x: number; y: number }, b: { x: number; y: number }, skipFirst = false) {
+    // Bresenham über Felder
+    let x0 = a.x;
+    let y0 = a.y;
+    const dx = Math.abs(b.x - x0);
+    const dy = Math.abs(b.y - y0);
+    const sx = x0 < b.x ? 1 : -1;
+    const sy = y0 < b.y ? 1 : -1;
+    let err = dx - dy;
+    let first = true;
+    for (;;) {
+      if (!(skipFirst && first)) {
+        const r = game.applyTool(x0, y0);
+        if (r) failReason ??= r;
+        else okCount++;
+      }
+      first = false;
+      if (x0 === b.x && y0 === b.y) break;
+      const e2 = 2 * err;
+      if (e2 > -dy) {
+        err -= dy;
+        x0 += sx;
+      }
+      if (e2 < dx) {
+        err += dx;
+        y0 += sy;
+      }
+    }
+  }
+
+  el.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  el.addEventListener('pointerdown', (e) => {
+    el.setPointerCapture(e.pointerId);
+    const p = rel(e);
+    ptrs.set(e.pointerId, { x: p.x, y: p.y, sx: p.x, sy: p.y, t0: performance.now(), type: e.pointerType, button: e.button });
+    if (ptrs.size === 2) {
+      mode = 'pinch';
+      const [a, b] = [...ptrs.values()];
+      pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
+      return;
+    }
+    if (ptrs.size > 2) return;
+    failReason = null;
+    okCount = 0;
+    const wantPan = e.button === 1 || e.button === 2;
+    if (wantPan) {
+      mode = 'pan';
+    } else if (PAINT_TOOLS.includes(game.tool)) {
+      mode = 'paint';
+      last = tileOf(p);
+      game.hover = { ...last, ok: game.previewOk(last.x, last.y) };
+      paintLine(last, last);
+    } else {
+      mode = 'tap';
+      const t = tileOf(p);
+      if (e.pointerType !== 'mouse' && game.tool !== 'view') game.hover = { ...t, ok: game.previewOk(t.x, t.y) };
+    }
+  });
+
+  el.addEventListener('pointermove', (e) => {
+    const p = rel(e);
+    const ptr = ptrs.get(e.pointerId);
+    if (!ptr) {
+      if (e.pointerType === 'mouse' && game.tool !== 'view') {
+        const t = tileOf(p);
+        game.hover = { ...t, ok: game.previewOk(t.x, t.y) };
+      }
+      return;
+    }
+    const dx = p.x - ptr.x;
+    const dy = p.y - ptr.y;
+    ptr.x = p.x;
+    ptr.y = p.y;
+
+    if (mode === 'pinch' && ptrs.size >= 2) {
+      const [a, b] = [...ptrs.values()];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      const cx = (a.x + b.x) / 2;
+      const cy = (a.y + b.y) / 2;
+      if (pinchDist > 0) game.renderer.zoomAt(cx, cy, d / pinchDist);
+      pinchDist = d;
+      game.renderer.panBy(dx / 2, dy / 2);
+      return;
+    }
+    if (mode === 'paint') {
+      const t = tileOf(p);
+      game.hover = { ...t, ok: game.previewOk(t.x, t.y) };
+      if (last && (t.x !== last.x || t.y !== last.y)) {
+        paintLine(last, t, true);
+        last = t;
+      }
+      return;
+    }
+    if (mode === 'tap') {
+      if (Math.hypot(p.x - ptr.sx, p.y - ptr.sy) > 8) {
+        mode = 'pan';
+        game.hover = null;
+      }
+    }
+    if (mode === 'pan') game.renderer.panBy(dx, dy);
+  });
+
+  function end(e: PointerEvent) {
+    const ptr = ptrs.get(e.pointerId);
+    ptrs.delete(e.pointerId);
+    if (!ptr) return;
+    if (mode === 'tap' && ptrs.size === 0) {
+      const t = tileOf(ptr);
+      if (game.tool === 'view') {
+        const w = game.renderer.screenToWorld(ptr.x, ptr.y);
+        game.pick(w.x, w.y);
+      } else {
+        const r = game.applyTool(t.x, t.y);
+        if (r) game.ui.toast(r, 'bad');
+      }
+    } else if (mode === 'paint' && okCount === 0 && failReason) {
+      game.ui.toast(failReason, 'bad');
+    }
+    if (ptrs.size === 0) {
+      mode = 'none';
+      last = null;
+      if (e.pointerType !== 'mouse') game.hover = null;
+    } else if (mode === 'pinch' && ptrs.size < 2) {
+      mode = 'pan';
+    }
+  }
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', end);
+  el.addEventListener('pointerleave', (e) => {
+    if (e.pointerType === 'mouse' && ptrs.size === 0) game.hover = null;
+  });
+
+  el.addEventListener(
+    'wheel',
+    (e) => {
+      e.preventDefault();
+      const p = rel(e);
+      game.renderer.zoomAt(p.x, p.y, Math.exp(-e.deltaY * 0.0015));
+    },
+    { passive: false },
+  );
+
+  window.addEventListener('keydown', (e) => {
+    if (e.target instanceof HTMLElement && /INPUT|TEXTAREA/.test(e.target.tagName)) return;
+    if (e.code === 'Space') {
+      game.togglePause();
+      e.preventDefault();
+      return;
+    }
+    const k = e.key.toLowerCase();
+    if (k === '1') game.setSpeed(1);
+    else if (k === '2') game.setSpeed(3);
+    else if (k === '3') game.setSpeed(8);
+    else if (k === 'o') game.toggleOverlay();
+    else if (k === 'escape') {
+      game.setTool('view');
+      game.selected = null;
+    } else if (KEY_TOOLS[k]) game.setTool(KEY_TOOLS[k]);
+  });
+}
