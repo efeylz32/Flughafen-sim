@@ -218,6 +218,7 @@ export function setupInput(game: Game, el: HTMLElement) {
     else if (k === '3') game.setSpeed(8);
     else if (k === 'o') game.toggleOverlay();
     else if (k === 'm') game.toggleSound();
+    else if (k === 'r') game.rotate();
     else if (k === 'escape') {
       game.setTool('view');
       game.selected = null;

@@ -1,7 +1,6 @@
 import type { Game } from '../game';
 import {
   BuildTool,
-  CRANE_BUFFER,
   DIFFS,
   DiffId,
   MAPS,
@@ -12,7 +11,6 @@ import {
   ZONES,
   ROLES,
   Role,
-  CRANE_EXP_BUFFER,
   GATE_APRON_CAP,
   LEVELS,
   LEVEL_NEWS,
@@ -27,6 +25,10 @@ import {
   UNLOCK,
   UPGRADE,
   YARD_CAP_PER_TILE,
+  dimsOf,
+  sizeOf,
+  SHIP_PATIENCE_GM,
+  GOAL_LEVEL,
 } from '../sim/data';
 import { ACHIEVEMENTS } from '../achievements';
 import { MISSIONS } from '../sim/missions';
@@ -69,6 +71,7 @@ const ICONS: Record<string, string> = {
   pause: svg('<path d="M8 5v14M16 5v14"/>'),
   close: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
   undo: svg('<path d="M8 5.5L3.5 10 8 14.5"/><path d="M3.5 10H14a5.5 5.5 0 0 1 0 11h-3.5"/>'),
+  rotate: svg('<path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v4.5h-4.5"/>'),
   sound: svg('<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M15.5 9a4.5 4.5 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11"/>'),
   mute: svg('<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/>'),
   star: svg('<path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 16.9l-5.2 2.8 1-5.9L3.5 9.7l5.9-.8z"/>'),
@@ -191,6 +194,9 @@ export class UI {
   private dayTimer = 0;
   private achModal!: HTMLElement;
   private zonePick!: HTMLElement;
+  private rotPick!: HTMLElement;
+  private zoneCard!: HTMLElement;
+  private zoneKey = '';
   private alertEl!: HTMLElement;
   private lastFin = '';
   private endModal!: HTMLElement;
@@ -306,7 +312,15 @@ export class UI {
 
     this.dayCard = el('div', 'card dayrep hidden');
     this.dayCard.addEventListener('click', () => this.dayCard.classList.add('hidden'));
-    left.append(status, this.missionCard, this.bnCard, this.dayCard);
+    // Zonen-Übersicht, solange das Zonen-Werkzeug aktiv ist
+    this.zoneCard = el('div', 'card zonerep hidden');
+    this.zoneCard.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('[data-clearzones]')) {
+        this.game.sim.clearZones();
+        this.zoneKey = '';
+      }
+    });
+    left.append(status, this.missionCard, this.bnCard, this.dayCard, this.zoneCard);
 
     // Rechte Knopfleiste
     const side = el('div', 'side');
@@ -398,7 +412,15 @@ export class UI {
       });
       this.zonePick.appendChild(b);
     });
-    bar.append(this.rolePick, this.zonePick, tabs, row);
+    // Drehen: für Gebäude, die nicht quadratisch sind
+    this.rotPick = el('div', 'rolepick rotpick hidden');
+    const rb = el('button', '', '');
+    rb.addEventListener('click', () => {
+      this.game.rotate();
+      click();
+    });
+    this.rotPick.appendChild(rb);
+    bar.append(this.rolePick, this.zonePick, this.rotPick, tabs, row);
     for (const t of TOOLS) {
       const b = el('button', 'tool');
       b.innerHTML = `<span class="ico" style="--c:${t.color}">${ICONS[t.tool]}<span class="lk">${ICONS.lock}</span></span><b>${t.label}</b><small>${t.sub}</small>`;
@@ -712,6 +734,9 @@ export class UI {
     for (const [id, b] of this.catBtns) b.classList.toggle('on', id === this.cat);
     this.rolePick.classList.toggle('hidden', this.game.tool !== 'assign');
     this.zonePick.classList.toggle('hidden', this.game.tool !== 'zone');
+    const [sw, sh] = sizeOf(this.game.tool);
+    this.rotPick.classList.toggle('hidden', sw === sh);
+    this.rotPick.firstElementChild!.innerHTML = `${ICONS.rotate} Drehen (R) · ${dimsOf(this.game.tool, this.game.sim.rot).join(' × ')} Felder`;
     for (const b of this.zonePick.querySelectorAll<HTMLElement>('button')) b.classList.toggle('on', Number(b.dataset.zone) === this.game.zonePick);
     for (const b of this.rolePick.querySelectorAll<HTMLElement>('button')) b.classList.toggle('on', b.dataset.role === this.game.assignRole);
     for (const [t, v] of this.toolBtns) {
@@ -738,6 +763,29 @@ export class UI {
 
   // ───────────────────────── Aktualisieren ─────────────────────────
 
+  private renderZones(sim: Sim) {
+    const on = this.game.tool === 'zone';
+    this.zoneCard.classList.toggle('hidden', !on);
+    if (!on) return;
+    const rep = sim.zoneReport();
+    const key = JSON.stringify(rep);
+    if (key === this.zoneKey) return;
+    this.zoneKey = key;
+    if (!rep.length) {
+      this.zoneCard.innerHTML = `<div class="ctitle"><span>Zonen</span></div><div class="sub">Noch keine Zonen. Zonen trennen Kreisläufe: Fahrten gibt es nur zwischen Kran, Lager, Gate, Halle und Bahn derselben Farbe. Trucks ohne Zone fahren überall, Trucks mit Zone nur in ihrer.</div>`;
+      return;
+    }
+    const n = (v: number, word: string) => (v ? `${v} ${word}` : '');
+    this.zoneCard.innerHTML =
+      `<div class="ctitle"><span>Zonen</span><button class="linkbtn" data-clearzones>Alle löschen</button></div>` +
+      rep
+        .map((r) => {
+          const parts = [n(r.cranes, 'Kran'), n(r.yard, 'Lager'), n(r.reefer, 'Kühl'), n(r.gates, 'Gate'), n(r.rails, 'Bahn'), n(r.plants, 'Halle'), n(r.trucks, 'Truck')].filter(Boolean).join(' · ');
+          return `<div class="zrow"><div class="zhead"><span class="zdot" style="background:${hex(ZONES[r.z].color)}"></span><b>${r.z ? `Zone ${ZONES[r.z].name}` : 'Ohne Zone'}</b><span class="${r.problems.length ? 'neg' : 'pos'}">${r.problems.length ? '!' : 'ok'}</span></div><div class="sub">${parts || 'leer'}</div>${r.problems.map((p) => `<div class="zprob">${p}</div>`).join('')}</div>`;
+        })
+        .join('');
+  }
+
   update(dt: number) {
     if (this.dayTimer > 0) {
       this.dayTimer -= dt;
@@ -747,6 +795,7 @@ export class UI {
     if (this.acc < 0.12) return;
     this.acc = 0;
     const sim = this.game.sim;
+    this.renderZones(sim);
 
     this.moneyEl.textContent = eur(sim.money);
     this.moneyEl.classList.toggle('neg', sim.money < 0);
@@ -839,7 +888,7 @@ export class UI {
     const left = sim.goalDay - sim.day;
     const goal =
       sim.status === 'play'
-        ? `<div class="goal"><b>Ziel: Weltklasse-Hafen bis Tag ${sim.goalDay}</b><span>Heute ist Tag ${sim.day}, noch ${Math.max(0, left)} ${left === 1 ? 'Tag' : 'Tage'}. Stufe ${sim.level} von ${LEVELS.length}.${
+        ? `<div class="goal"><b>Ziel: Weltklasse-Hafen bis Tag ${sim.goalDay}</b><span>Heute ist Tag ${sim.day}, noch ${Math.max(0, left)} ${left === 1 ? 'Tag' : 'Tage'}. Stufe ${sim.level}, Ziel ist Stufe ${GOAL_LEVEL}.${
             sim.debtDays ? ` <span class="neg">Konto seit ${sim.debtDays} Tagesabschluss im Minus, bei ${sim.debtLimit} ist es die Pleite.</span>` : ` Ist das Konto ${sim.debtLimit} Tagesabschlüsse in Folge im Minus, bist du pleite.`
           }</span></div>`
         : `<div class="goal"><b>${sim.status === 'won' ? 'Gewonnen' : sim.status === 'lost' ? 'Verloren' : 'Freies Spiel'}</b><span>${sim.endReason || 'Ohne Ziel und ohne Pleite.'}</span></div>`;
@@ -959,8 +1008,8 @@ export class UI {
     const st = SHIP_TYPES[c.ship];
     const tags = `<span class="tag">${st.name} · ${st.containers} Container</span>${c.reefer ? '<span class="tag cold">Kühlfracht</span>' : ''}`;
     const need =
-      c.ship === 'panamax' && !this.game.sim.hasDeepBerth()
-        ? '<div class="warn">Braucht einen tiefen Liegeplatz mit 6 Kai-Feldern.</div>'
+      st.deep && !this.game.sim.hasDeepBerth(st.len)
+        ? `<div class="warn">Braucht einen tiefen Liegeplatz mit ${st.len} Kai-Feldern.</div>`
         : c.reefer && this.game.sim.reeferCapacity === 0
           ? '<div class="warn">Braucht Kühlplätze.</div>'
           : '';
@@ -1035,7 +1084,8 @@ export class UI {
         <div class="meta">${done} von ${s.total} Containern abgeladen${s.reefers ? `, noch ${s.reefers} Kühlcontainer an Bord` : ''}</div>
         ${s.exportTotal ? `<div class="progress exp"><span style="width:${Math.round((s.loaded / s.exportTotal) * 100)}%"></span></div><div class="meta">${s.loaded} von ${s.exportTotal} Export-Containern geladen</div>` : ''}
         <div class="why ${s.blocked ? 'alert' : ''}"><b>Warum steht das Schiff?</b><br>${s.reason || '–'}</div>
-        ${s.state === 'unloading' ? `<div class="meta ${late ? 'neg' : ''}">Liegezeit ${hours(s.atBerth)} (zugesagt: ${hours(s.dwellTarget)})</div>` : ''}`;
+        ${s.state === 'unloading' ? `<div class="meta ${late ? 'neg' : ''}">Liegezeit ${hours(s.atBerth)} (zugesagt: ${hours(s.dwellTarget)})</div>` : ''}
+        ${s.state === 'queued' && s.queuedFor > 0 ? `<div class="meta ${s.queuedFor > SHIP_PATIENCE_GM * DIFFS[sim.diff].patience * 0.6 ? 'neg' : ''}">Wartet seit ${hours(s.queuedFor)}, sagt nach ${hours(SHIP_PATIENCE_GM * DIFFS[sim.diff].patience)} ab</div>` : ''}`;
     } else if (sel.kind === 'crane') {
       const c = sim.cranes.find((c) => c.id === sel.id);
       if (!c) return gone();
@@ -1050,7 +1100,7 @@ export class UI {
       html = `<h3>${c.big ? 'Containerbrücke' : 'Mobilkran'} <span class="tag">${c.big ? 40 : 20} Moves pro Stunde</span></h3>
         <div class="meta">${c.state === 'broken' ? 'Ausgefallen: wartet auf die Werkstatt' : st}</div>
         ${wearRow(c.wear)}
-        <div class="meta">Entladen am Kran: ${c.buffer + c.bufReef} von ${CRANE_BUFFER}${sim.level >= 2 ? ` · Export am Kran: ${c.expBuf} von ${CRANE_EXP_BUFFER}` : ''}</div>`;
+        <div class="meta">Entladen am Kran: ${c.buffer + c.bufReef} von ${sim.bufCap(c)}${sim.level >= 2 ? ` · Export am Kran: ${c.expBuf} von ${sim.bufCap(c, true)}` : ''}</div>`;
       if (!c.big) actions = upgradeBtn('crane', 'Zur Containerbrücke aufrüsten');
     } else if (sel.kind === 'gate') {
       const g = sim.gates.find((g) => g.id === sel.id);

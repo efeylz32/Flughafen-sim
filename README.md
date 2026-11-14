@@ -10,10 +10,14 @@ Das Spielkonzept steht im Doc „Hafen-Imperium: Spielkonzept“.
 | Stufe | Name | Ab umgeschlagenen Containern | Neu |
 |---|---|---|---|
 | 1 | Anleger | 0 | Kai, Kran, Straße, Stapelplatz, Gate, Trucks |
-| 2 | Regionalhafen | 1.000 | Export (Schiffe beladen), Verträge mit Reedereien, Containerbrücke, Wetter |
-| 3 | Handelshafen | 4.500 | Kühlfracht mit Kühlplätzen, Gleisanschluss, Baggern für große Schiffe |
-| 4 | Seehafen | 11.000 | Fahrerlose Fahrzeuge, 4 Verträge |
-| 5 | Weltklasse-Hafen | 24.000 | 5 Verträge |
+| 2 | Regionalhafen | 1.500 | Export (Schiffe beladen), Verträge mit Reedereien, Containerbrücke, Wetter |
+| 3 | Handelshafen | 7.000 | Kühlfracht mit Kühlplätzen, Gleisanschluss, Baggern für große Schiffe, Portalkran |
+| 4 | Seehafen | 17.000 | Fahrerlose Fahrzeuge, Mega-Frachter (8 Kai-Felder), 4 Verträge |
+| 5 | Weltklasse-Hafen | 36.000 | Ziel erreicht, 5 Verträge. Das Spiel geht weiter. |
+| 6 | Mega-Hub | 70.000 | 6 Verträge |
+| 7 | Welthafen | 120.000 | 7 Verträge |
+
+Der Aufstiegsbonus ist klein (40.000 € bis 600.000 €). Löhne steigen je Stufe um 8 % (Tariflohn).
 
 - **Export:** Schiffe wollen auch beladen werden. Export-Container kommen über das Gate, Trucks bringen sie zum Kran (250 € pro Stück).
 - **Verträge:** Feste Anläufe einer Reederei. Pünktlich abgefertigt gibt es Bonus, sonst Strafe.
@@ -24,17 +28,19 @@ Das Spielkonzept steht im Doc „Hafen-Imperium: Spielkonzept“.
 - **Verarbeitung (ab Stufe 2):** Die Packhalle packt Container aus, die Veredelung macht aus zwei davon Fertigware für 900 €. Trucks fahren die Ware dazwischen.
 - **Aufgaben für Trucks:** Jeder Truck fährt auf Automatik oder bekommt eine feste Aufgabe (Kran räumen, Ausgang, Export, Verarbeitung). Feste Aufgaben sind 25 % schneller und sparen die Funkzeit der Leitstelle.
 - **Personal und Schwierigkeit:** Fahrer, Kranführer und Gate-Kräfte kosten Stundenlohn und können krank werden. Drei Schwierigkeitsgrade im Menü.
-- **Ziel und Pleite:** Weltklasse-Hafen bis Tag 50/40/32 (je Schwierigkeit). Ist das Konto 5/3/2 Tagesabschlüsse in Folge im Minus, ist es die Pleite.
+- **Ziel und Pleite:** Weltklasse-Hafen (Stufe 5) bis Tag 65/55/45 (je Schwierigkeit), danach ohne Frist weiter bis Stufe 7. Ist das Konto 5/3/2 Tagesabschlüsse in Folge im Minus, ist es die Pleite.
 - **Kredit und Bilanz:** Kredit in Schritten von 100.000 €, Grenze wächst mit der Stufe, Zinsen täglich. Die Bilanz zeigt Tagesfinanzen und den Verlauf der letzten Tage.
 - **Sammelzuweisung:** Werkzeug „Aufgaben“, Rahmen über Trucks ziehen.
-- **Einbahnstraßen und Land:** Straßen auf eine Richtung schalten. Land ist in Streifen geteilt und muss gekauft werden.
+- **Einbahnstraßen und Land:** Straßen auf eine Richtung schalten. Eine Einbahnstraße hat zwei Spuren und lässt doppelt so viele Trucks durch. Land ist in Streifen geteilt und muss gekauft werden.
 - **Verschleiß (ab Stufe 2):** Kräne und Trucks werden langsamer und fallen bei 100 % aus. Die Werkstatt mit Mechaniker repariert.
 - **Kühlhalle (ab Stufe 3):** Kühlcontainer zu Lebensmitteln für 750 €.
-- **Karten:** Küste, Insel (keine Bahn, mehr Schiffe), Felsen (Sprengen kostet).
+- **Karten:** Küste, Insel (Kai an allen vier Küsten, keine Bahn, mehr Startgeld, ab Stufe 2 mehr Schiffe), Felsen (Sprengen kostet, etwas mehr Startgeld).
 - **Konkurrenz und Entscheidungen (ab Stufe 2):** Hafen Nordstadt wirbt Reedereien ab, wenn du unpünktlicher bist. Ereignisse wie Streik oder Zollverdacht verlangen eine Entscheidung.
-- **Zonen:** Lagerflächen, Kräne, Gates, Hallen, Gleise und Trucks in einer von vier Farben anmalen. Fahrten verbinden nur gleiche Zonen, Trucks mit Zone fahren nur dort.
+- **Zonen:** Lagerflächen, Kräne, Gates, Hallen, Gleise und Trucks in einer von vier Farben anmalen. Fahrten verbinden nur gleiche Zonen, Trucks mit Zone fahren nur dort. Mit dem Zonen-Werkzeug zeigt eine Übersicht, was in jeder Zone steht und was dem Kreislauf fehlt.
 - **Aufrüsten:** Kran oder Truck mit „Ansehen“ antippen und im Info-Blatt aufrüsten.
-- **Große Kräne:** Die aufgerüstete Containerbrücke steht über zwei Kai-Feldern (das Feld rechts daneben muss frei sein).
+- **Große Kräne:** Die aufgerüstete Containerbrücke steht über zwei Kai-Feldern (das Feld daneben muss frei sein) und hat Platz für 8 statt 4 Container.
+- **Drehen:** Gate, Packhalle und Veredelung lassen sich vor dem Bauen drehen (Knopf über der Leiste oder Taste R).
+- **Wartebalken:** Über wartenden Schiffen läuft die Geduld ab, über liegenden Schiffen die zugesagte Liegezeit, über Trucks im Stau die Wartezeit.
 - **Portalkran (ab Stufe 3):** Auf eine Lager- oder Kühlfläche gesetzt, stapelt er 9 statt 6 Container pro Feld im Umkreis und halbiert die Umschlagzeit der Trucks dort. Braucht einen Kranführer.
 - **Markt:** Elektronik, Kleidung und Lebensmittel haben eigene Preise, die sich täglich ändern (mit Boom und Einbruch). In der Veredelung wählst du, was produziert wird. Kurse stehen in der Bilanz.
 - **Tagesbericht:** Nach jedem Tag eine Karte mit Ergebnis, Containern, Pünktlichkeit, häufigstem Engpass und Stau.
@@ -82,6 +88,7 @@ Der Spielstand wird automatisch im Browser gespeichert (`localStorage`).
 src/sim/      Simulation in reinem TypeScript, kein Browser-Code (testbar, headless)
   data.ts       alle Balancing-Werte
   sim.ts        Spielzustand, Bauen, Ticks, Jobs der Trucks, Schiffe, Verträge, Wetter, Stufen, Speichern
+  quay.ts       Kaimauern an allen vier Küsten: Kaipositionen, Liegeplätze, Wege der Schiffe
   missions.ts   Tutorial-Missionen
   demo.ts       Demo-Hafen
 src/render/   PixiJS-Darstellung und Kamera (Gelände, Schiffe, Kräne, Trucks, Tag und Nacht)

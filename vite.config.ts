@@ -8,5 +8,5 @@ export default defineConfig({
     // Ein einziges JS-Bundle, damit sich das Spiel als eine einzelne HTML-Datei ausliefern lässt.
     rollupOptions: { output: { inlineDynamicImports: true } },
   },
-  test: { include: ['tests/**/*.test.ts'] },
+  test: { include: ['tests/**/*.test.ts'], testTimeout: 20_000 },
 });

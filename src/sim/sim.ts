@@ -6,6 +6,7 @@ import {
   CRANE_BIG_MOVE_GM,
   CRANE_BUFFER,
   CRANE_EXP_BUFFER,
+  CRANE_BUFFER_BIG,
   CRANE_MOVE_GM,
   DIFFS,
   DISPATCH_GM,
@@ -40,6 +41,7 @@ import {
   GRID_H,
   GRID_W,
   LEVELS,
+  GOAL_LEVEL,
   LOAN_LIMIT_PER_LEVEL,
   LOAN_RATE,
   LOAN_STEP,
@@ -63,6 +65,7 @@ import {
   ROUTINE_SPEED,
   RUN_COST_PER_DAY,
   sizeOf,
+  dimsOf,
   SHIP_LEN,
   SHIP_MAX_STAY_GM,
   SHIP_PATIENCE_GM,
@@ -82,6 +85,7 @@ import {
   UPGRADE,
   YARD_CAP_PER_TILE,
 } from './data';
+import { approach, berthPose, departure, OUT, qOf, qOfWater, qTile, Q_MAX, sideOf, isVertical } from './quay';
 import { MISSIONS } from './missions';
 import { SCENARIOS } from './scenarios';
 
@@ -135,6 +139,8 @@ export interface Crane {
   id: number;
   x: number;
   y: number;
+  /** Kaiposition (siehe quay.ts) */
+  q: number;
   /** Containerbrücke statt Mobilkran */
   big: boolean;
   /** Entladene Container am Kran, die auf einen Truck warten */
@@ -227,6 +233,8 @@ export interface Truck {
   dir: number;
   /** Spielminuten, die der Truck gerade im Stau steht */
   stuck: number;
+  /** Spur auf Einbahnstraßen: 0 rechts, 1 links */
+  slot: number;
   /** Ein Fahrer ist im Dienst (fahrerlose Fahrzeuge brauchen keinen) */
   staffed: boolean;
   role: TruckRole;
@@ -248,7 +256,12 @@ export interface Ship {
   y: number;
   px: number;
   py: number;
+  /** Liegeplatz als Kaiposition q (siehe quay.ts), -1 ohne */
   berthX: number;
+  /** Blickrichtung in Radiant: 0 nach rechts, π/2 nach unten */
+  rot: number;
+  /** Nächster Wegpunkt beim Einlaufen */
+  wp: number;
   /** Normale Import-Container an Bord */
   containers: number;
   /** Kühlcontainer an Bord */
@@ -378,6 +391,8 @@ export interface Removed {
   value?: number;
   /** Kran war Containerbrücke, Truck war fahrerlos */
   upgraded?: boolean;
+  /** Gebäude war gedreht */
+  rot?: boolean;
 }
 
 export interface DemolishResult extends BuildCheck {
@@ -409,10 +424,10 @@ export interface SaveData {
   wageBoost?: Record<Role, number>;
   strikeLeft?: number;
   pending?: Decision | null;
-  gates: { x: number; y: number; served: number }[];
+  gates: { x: number; y: number; served: number; rot?: boolean }[];
   rails?: { x: number; y: number; platform: number; value: number }[];
   trucks: { tile: number; agv?: boolean; role?: TruckRole; wear?: number }[];
-  plants?: { x: number; y: number; kind: PlantKind }[];
+  plants?: { x: number; y: number; kind: PlantKind; rot?: boolean }[];
   premiumDone?: number;
   money: number;
   rep: number;
@@ -424,6 +439,7 @@ export interface SaveData {
   reefersHandled?: number;
   trainsDone?: number;
   bigShipsDone?: number;
+  megaDone?: number;
   shipsDone: number;
   shipsOnTime: number;
   containersDone: number;
@@ -480,7 +496,8 @@ export class Sim {
   /** Zone je Lagerfeld (0 = keine) */
   zone = new Uint8Array(GRID_W * GRID_H);
   /** Ausgebaggerte Spalten vor dem Kai (1 = tief) */
-  depth = new Uint8Array(GRID_W);
+  /** Ausgebaggert vor der Kaiposition q (siehe quay.ts) */
+  depth = new Uint8Array(Q_MAX);
 
   cranes: Crane[] = [];
   gates: Gate[] = [];
@@ -533,6 +550,7 @@ export class Sim {
   shipsDone = 0;
   shipsOnTime = 0;
   bigShipsDone = 0;
+  megaDone = 0;
   containersDone = 0;
   exportsLoaded = 0;
   reefersHandled = 0;
@@ -552,6 +570,8 @@ export class Sim {
   events: GameEvent[] = [];
   /** Wird bei jeder Bauänderung erhöht, damit der Renderer neu zeichnet. */
   version = 0;
+  /** Gebäude beim nächsten Bauen gedreht (Breite und Höhe getauscht). Nur Bedienung, wird nicht gespeichert. */
+  rot = false;
 
   private nextId = 1;
   private seed: number;
@@ -572,7 +592,7 @@ export class Sim {
     readonly map: MapId = 'coast',
   ) {
     this.seed = seed >>> 0;
-    this.money = DIFFS[diff].money;
+    this.money = DIFFS[diff].money + MAPS[map].bonus;
     this.rivalRate = RIVAL_START[diff];
     this.lastDay = Math.floor(this.gm / MIN_PER_DAY);
     for (let y = 0; y < GRID_H; y++) {
@@ -650,6 +670,46 @@ export class Sim {
     // Laufende Fahrten, die jetzt nicht mehr passen, werden neu vergeben
     for (const tr of this.trucks) if (tr.job && tr.job.stage === 0 && !this.jobZoneOk(tr, tr.job)) this.cancelJob(tr);
     return { ok: true, cost: 0 };
+  }
+
+  /** Übersicht je Zone: was dazugehört und was dem Kreislauf fehlt */
+  zoneReport(): { z: number; cranes: number; trucks: number; yard: number; reefer: number; gates: number; rails: number; plants: number; problems: string[] }[] {
+    const used = new Set<number>();
+    for (const e of [...this.cranes, ...this.gates, ...this.plants, ...this.rails, ...this.trucks]) if (e.zone) used.add(e.zone);
+    for (const i of [...this.yardTiles, ...this.reeferTiles]) if (this.zone[i]) used.add(this.zone[i]);
+    if (used.size === 0) return [];
+    const free = this.trucks.filter((t) => t.zone === 0).length;
+    const out = [];
+    for (const z of [...used, 0].sort((a, b) => (a || 9) - (b || 9))) {
+      const r = {
+        z,
+        cranes: this.cranes.filter((c) => c.zone === z).length,
+        trucks: this.trucks.filter((t) => t.zone === z).length,
+        yard: this.yardTiles.filter((i) => this.zone[i] === z).length,
+        reefer: this.reeferTiles.filter((i) => this.zone[i] === z).length,
+        gates: this.gates.filter((g) => g.zone === z).length,
+        rails: this.rails.filter((q) => q.zone === z).length,
+        plants: this.plants.filter((p) => p.zone === z).length,
+        problems: [] as string[],
+      };
+      const any = r.cranes + r.yard + r.reefer + r.gates + r.rails + r.plants > 0;
+      if (!any && z === 0) continue;
+      if (any && (z === 0 ? r.trucks : r.trucks + free) === 0) r.problems.push(z === 0 ? 'Kein Truck ohne Zone: Trucks mit Zone fahren nur in ihrer Zone.' : 'Kein Truck fährt hier.');
+      if (r.cranes > 0 && r.yard + r.reefer === 0) r.problems.push('Kräne, aber kein Lager: entladene Container kommen nicht weg.');
+      if (r.yard + r.reefer > 0 && r.gates + r.rails === 0) r.problems.push('Kein Ausgang: Male ein Gate oder die Bahn in dieser Zone an.');
+      if (r.gates > 0 && r.yard + r.reefer === 0 && r.plants === 0) r.problems.push('Gate ohne Lager in derselben Zone.');
+      if (r.yard + r.reefer > 0 && r.cranes === 0 && r.plants === 0) r.problems.push('Lager ohne Kran: Hier kommt nichts an.');
+      if (!any && r.trucks > 0) r.problems.push('Trucks ohne Aufgabe: In dieser Zone steht nichts.');
+      out.push(r);
+    }
+    return out;
+  }
+  /** Setzt alle Zonen zurück */
+  clearZones() {
+    this.zone.fill(0);
+    for (const e of [...this.cranes, ...this.gates, ...this.plants, ...this.rails, ...this.trucks]) e.zone = 0;
+    this.invalidateJobs();
+    this.version++;
   }
 
   private zoneOf(kind: Job['srcKind'] | Job['dstKind'], id: number): number {
@@ -825,7 +885,28 @@ export class Sim {
 
   /** Kran auf dem Feld. Eine Containerbrücke steht auf zwei Kai-Feldern. */
   craneAt(x: number, y: number): Crane | undefined {
-    return this.cranes.find((c) => c.y === y && (c.x === x || (c.big && c.x + 1 === x)));
+    return this.cranes.find((c) => (c.x === x && c.y === y) || (c.big && this.sameTile(qTile(this.cq(c) + 1), x, y)));
+  }
+  private sameTile(t: [number, number] | null, x: number, y: number): boolean {
+    return !!t && t[0] === x && t[1] === y;
+  }
+  /** Platz unter dem Kran für entladene (bzw. Export-) Container */
+  bufCap(c: Crane, exp = false): number {
+    return c.big ? CRANE_BUFFER_BIG : exp ? CRANE_EXP_BUFFER : CRANE_BUFFER;
+  }
+  /** Kaiposition eines Krans */
+  cq(c: { x: number; y: number; q?: number }): number {
+    return c.q ?? qOf(c.x, c.y);
+  }
+  /** Zweites Feld, das eine Containerbrücke braucht, wenn sie frei ist */
+  bridgeRoom(c: Crane): boolean {
+    const t = qTile(this.cq(c) + 1);
+    return !!t && this.isKai(this.cq(c) + 1) && !this.craneAt(t[0], t[1]);
+  }
+  /** Größe eines Schiffs in Feldern (liegt waagerecht oder senkrecht) */
+  shipBox(s: Ship): { x: number; y: number; w: number; h: number } {
+    const vert = Math.abs(Math.sin(s.rot)) > 0.5;
+    return vert ? { x: s.x, y: s.y, w: 2, h: s.len } : { x: s.x, y: s.y, w: s.len, h: 2 };
   }
   gateAt(x: number, y: number): Gate | undefined {
     return this.gates.find((g) => covers(g, x, y));
@@ -858,15 +939,19 @@ export class Sim {
   truckAtTile(tile: number): Truck | undefined {
     return this.trucks.find((t) => t.tile === tile);
   }
-  private isKai(x: number): boolean {
-    return x >= 0 && x < GRID_W && this.kind[this.idx(x, COAST_ROW)] === T.Kai;
+  /** Liegt an Kaiposition q eine Kaimauer? */
+  isKai(q: number): boolean {
+    const t = qTile(q);
+    return !!t && this.kind[this.idx(t[0], t[1])] === T.Kai;
   }
 
   /** x-Anfang aller kleinen Liegeplätze (4 Kai-Felder in Folge), ohne Überlappung, von links. */
+  private berthCache: { v: number; list: number[]; deep: number } = { v: -1, list: [], deep: 0 };
   berths(): number[] {
+    if (this.berthCache.v === this.version) return this.berthCache.list;
     const out: number[] = [];
     let x = 0;
-    while (x <= GRID_W - SHIP_LEN) {
+    while (x <= Q_MAX - SHIP_LEN) {
       let ok = true;
       for (let k = 0; k < SHIP_LEN; k++) {
         if (!this.isKai(x + k)) {
@@ -880,40 +965,54 @@ export class Sim {
         x += SHIP_LEN;
       }
     }
+    this.berthCache = { v: this.version, list: out, deep: this.findDeep() };
     return out;
   }
   hasBerth(): boolean {
     return this.berths().length > 0;
   }
-  /** Gibt es einen ausgebaggerten Liegeplatz mit 6 Kai-Feldern für große Schiffe? */
-  hasDeepBerth(): boolean {
-    const len = SHIP_TYPES.panamax.len;
+  /** Gibt es einen ausgebaggerten Liegeplatz für große Schiffe (6 Kai-Felder, Mega-Frachter 8)? */
+  hasDeepBerth(len = SHIP_TYPES.panamax.len): boolean {
+    this.berths();
+    return this.berthCache.deep >= len;
+  }
+  /** Längste ausgebaggerte Kaistrecke */
+  private findDeep(): number {
+    let best = 0;
     let run = 0;
-    for (let x = 0; x < GRID_W; x++) {
+    for (let x = 0; x < Q_MAX; x++) {
       run = this.isKai(x) && this.depth[x] ? run + 1 : 0;
-      if (run >= len) return true;
+      best = Math.max(best, run);
     }
-    return false;
+    return best;
   }
   berthContaining(x: number): number {
     for (const b of this.berths()) if (x >= b && x < b + SHIP_LEN) return b;
     return -1;
   }
   cranesAtBerth(b: number, len = SHIP_LEN): Crane[] {
-    return this.cranes.filter((c) => c.x >= b && c.x < b + len);
+    return this.cranes.filter((c) => {
+      const q = this.cq(c);
+      return q >= b && q < b + len;
+    });
   }
   shipAtBerth(x: number): Ship | undefined {
     return this.ships.find((s) => s.state === 'unloading' && x >= s.berthX && x < s.berthX + s.len);
   }
 
+  private nearBerth(s: Ship): boolean {
+    const p = berthPose(s.berthX);
+    return Math.hypot(s.x - p.x, s.y - p.y) < s.len + 0.5;
+  }
+
   /** Sucht einen freien Liegeplatz für ein Schiff. Liefert den x-Anfang oder -1. */
   private findBerth(len: number, deep: boolean): number {
     const occ = this.ships
-      .filter((s) => s.state === 'sailing' || s.state === 'unloading' || (s.state === 'leaving' && s.berthX >= 0 && s.x < s.berthX + s.len + 0.5))
+      .filter((s) => s.state === 'sailing' || s.state === 'unloading' || (s.state === 'leaving' && s.berthX >= 0 && this.nearBerth(s)))
       .map((s) => [s.berthX, s.berthX + s.len] as const);
     let best = -1;
     let bestScore = -Infinity;
-    for (let x = 0; x <= GRID_W - len; x++) {
+    for (let x = 0; x <= Q_MAX - len; x++) {
       let ok = true;
       let deepTiles = 0;
       for (let k = 0; k < len && ok; k++) {
@@ -944,7 +1043,7 @@ export class Sim {
     const k = this.kind[i];
     if (!this.owned[x]) return { ok: false, reason: `Das Land gehört dir noch nicht. Kaufe es mit „Land kaufen“ (${eur(this.plotPrice)}).`, cost };
     if (k === T.Rock) return { ok: false, reason: `Hier liegt ein Felsen. Sprenge ihn mit „Abriss“ (${eur(ROCK_COST)}).`, cost };
-    const [sw, sh] = sizeOf(tool);
+    const [sw, sh] = dimsOf(tool, this.rot);
     if (sw > 1 || sh > 1) {
       for (let yy = y; yy < y + sh; yy++) {
         for (let xx = x; xx < x + sw; xx++) {
@@ -958,7 +1057,7 @@ export class Sim {
     switch (tool) {
       case 'kai':
         if (k === T.Water) reason = 'Kai steht an Land, direkt am Wasser';
-        else if (k !== T.Land || y !== COAST_ROW) reason = 'Kai nur in der ersten Reihe am Wasser';
+        else if (k !== T.Land || !this.kaiSpot(x, y)) reason = 'Kai nur direkt am Wasser, in der ersten Reihe an der Küste';
         break;
       case 'crane':
         if (k !== T.Kai) reason = 'Kran braucht ein Kai-Feld';
@@ -986,16 +1085,25 @@ export class Sim {
         if (k !== T.Road) reason = 'Truck braucht eine Straße';
         break;
       case 'dredge':
-        if (k !== T.Water || y < COAST_ROW - 3) reason = 'Baggern nur im Wasser direkt vor dem Kai';
-        else if (this.depth[x]) reason = 'Hier ist schon gebaggert';
+        if (k !== T.Water || qOfWater(x, y) < 0) reason = 'Baggern nur im Wasser direkt vor der Küste';
+        else if (this.depth[qOfWater(x, y)]) reason = 'Hier ist schon gebaggert';
         break;
     }
     if (!reason && this.money < cost) reason = 'Zu wenig Geld';
     return { ok: !reason, reason, cost };
   }
 
+  /** Darf an diesem Landfeld ein Kai stehen? Davor muss offenes Wasser liegen. */
+  kaiSpot(x: number, y: number): boolean {
+    const q = qOf(x, y);
+    if (q < 0) return false;
+    const [dx, dy] = OUT[sideOf(q)];
+    return this.inBounds(x + dx, y + dy) && this.kind[this.idx(x + dx, y + dy)] === T.Water;
+  }
+
   /** Setzt ein Objekt ohne Prüfung und ohne Kosten. Liefert bei Trucks die neue ID. */
-  private place(tool: BuildTool, x: number, y: number): number | undefined {
+  private place(tool: BuildTool, x: number, y: number, rot = this.rot): number | undefined {
+    const [bw, bh] = dimsOf(tool, rot);
     const i = this.idx(x, y);
     switch (tool) {
       case 'kai':
@@ -1018,6 +1126,7 @@ export class Sim {
           id: this.nextId++,
           x,
           y,
+          q: qOf(x, y),
           big: false,
           buffer: 0,
           bufReef: 0,
@@ -1035,8 +1144,8 @@ export class Sim {
         this.staff.crane++;
         return undefined;
       case 'gate':
-        for (const f of this.footprintOf({ x, y, w: 2, h: 1 })) this.kind[f] = T.Gate;
-        this.gates.push({ id: this.nextId++, x, y, w: 2, h: 1, apron: [], resIn: 0, inApron: 0, resOut: 0, proc: 0, procIn: false, procFee: 0, lastIn: false, served: 0, staffed: true, zone: 0 });
+        for (const f of this.footprintOf({ x, y, w: bw, h: bh })) this.kind[f] = T.Gate;
+        this.gates.push({ id: this.nextId++, x, y, w: bw, h: bh, apron: [], resIn: 0, inApron: 0, resOut: 0, proc: 0, procIn: false, procFee: 0, lastIn: false, served: 0, staffed: true, zone: 0 });
         this.staff.gate++;
         return undefined;
       case 'rail':
@@ -1044,7 +1153,7 @@ export class Sim {
         this.rails.push({ id: this.nextId++, x, y, platform: 0, value: 0, resIn: 0, state: 'away', timer: 60, lastLoad: 0, zone: 0 });
         return undefined;
       case 'dredge':
-        this.depth[x] = 1;
+        this.depth[qOfWater(x, y)] = 1;
         return undefined;
       case 'rtg':
         this.rtgs.push({ id: this.nextId++, x, y, staffed: true });
@@ -1058,15 +1167,12 @@ export class Sim {
       case 'unpack':
       case 'pack':
       case 'cold':
-        {
-          const [w, h] = sizeOf(tool);
-          for (const f of this.footprintOf({ x, y, w, h })) this.kind[f] = T.Plant;
-        }
-        this.plants.push({ id: this.nextId++, x, y, w: sizeOf(tool)[0], h: sizeOf(tool)[1], kind: tool, product: 'elec', inBuf: 0, outBuf: 0, resIn: 0, resOut: 0, proc: 0, made: 0, zone: 0 });
+        for (const f of this.footprintOf({ x, y, w: bw, h: bh })) this.kind[f] = T.Plant;
+        this.plants.push({ id: this.nextId++, x, y, w: bw, h: bh, kind: tool, product: 'elec', inBuf: 0, outBuf: 0, resIn: 0, resOut: 0, proc: 0, made: 0, zone: 0 });
         return undefined;
       case 'truck': {
         const id = this.nextId++;
-        this.trucks.push({ id, tile: i, next: -1, prog: 0, fx: x, fy: y, px: x, py: y, wait: 0, load: 0, cargo: 'imp', agv: false, job: null, angle: 0, dir: -1, stuck: 0, staffed: true, role: 'auto', wear: 0, zone: 0 });
+        this.trucks.push({ id, tile: i, next: -1, prog: 0, fx: x, fy: y, px: x, py: y, wait: 0, load: 0, cargo: 'imp', agv: false, job: null, angle: 0, dir: -1, stuck: 0, slot: 0, staffed: true, role: 'auto', wear: 0, zone: 0 });
         this.staff.driver++;
         return id;
       }
@@ -1095,7 +1201,7 @@ export class Sim {
     if (k === T.Water || k === T.Land) {
       return this.truckAtTile(i) ? { ok: true, cost: 0 } : { ok: false, reason: 'Hier ist nichts', cost: 0 };
     }
-    if (k === T.Kai && !this.craneAt(x, y) && this.shipUsesKai(x)) {
+    if (k === T.Kai && !this.craneAt(x, y) && this.shipUsesKai(qOf(x, y))) {
       return { ok: false, reason: 'Ein Schiff liegt am Kai', cost: 0 };
     }
     return { ok: true, cost: 0 };
@@ -1193,7 +1299,7 @@ export class Sim {
       case T.Gate: {
         const g = this.gateAt(x, y);
         if (!g) return;
-        out.push({ tool: 'gate', x: g.x, y: g.y, refund: this.give(COST.gate, factor), served: g.served });
+        out.push({ tool: 'gate', x: g.x, y: g.y, refund: this.give(COST.gate, factor), served: g.served, rot: g.h > g.w });
         this.gates = this.gates.filter((q) => q !== g);
         this.staff.gate = Math.max(0, this.staff.gate - 1);
         for (const f of this.footprintOf(g)) this.kind[f] = T.Land;
@@ -1211,7 +1317,7 @@ export class Sim {
       case T.Plant: {
         const p = this.plantAt(x, y);
         if (!p) return;
-        out.push({ tool: p.kind, x: p.x, y: p.y, refund: this.give(COST[p.kind], factor) });
+        out.push({ tool: p.kind, x: p.x, y: p.y, refund: this.give(COST[p.kind], factor), rot: p.w !== sizeOf(p.kind)[0] });
         this.plants = this.plants.filter((q) => q !== p);
         for (const f of this.footprintOf(p)) this.kind[f] = T.Land;
         break;
@@ -1245,11 +1351,12 @@ export class Sim {
       if (!r) return fail('Der Portalkran existiert nicht mehr');
       this.takeRtg(r, 1, removed);
     } else if (a.tool === 'dredge') {
-      if (!this.depth[a.x]) return fail('Hier ist nicht mehr gebaggert');
-      if (this.ships.some((s) => SHIP_TYPES[s.type].deep && (s.state === 'sailing' || s.state === 'unloading') && s.berthX <= a.x && a.x < s.berthX + s.len)) {
+      const dq = qOfWater(a.x, a.y);
+      if (dq < 0 || !this.depth[dq]) return fail('Hier ist nicht mehr gebaggert');
+      if (this.ships.some((s) => SHIP_TYPES[s.type].deep && (s.state === 'sailing' || s.state === 'unloading') && s.berthX <= dq && dq < s.berthX + s.len)) {
         return fail('Ein großes Schiff liegt dort');
       }
-      this.depth[a.x] = 0;
+      this.depth[dq] = 0;
       removed.push({ tool: 'dredge', x: a.x, y: a.y, refund: this.give(COST.dredge, 1) });
     } else {
       const i = this.idx(a.x, a.y);
@@ -1257,7 +1364,7 @@ export class Sim {
       if ((a.tool === 'unpack' || a.tool === 'pack' || a.tool === 'cold') && this.plantAt(a.x, a.y)?.kind !== a.tool) return fail('Das Feld wurde inzwischen geändert');
       if (a.tool === 'kai') {
         if (this.craneAt(a.x, a.y)) return fail('Auf dem Kai steht ein Kran');
-        if (this.shipUsesKai(a.x)) return fail('Ein Schiff liegt am Kai');
+        if (this.shipUsesKai(qOf(a.x, a.y))) return fail('Ein Schiff liegt am Kai');
       }
       this.takeTile(i, 1, removed);
     }
@@ -1284,7 +1391,7 @@ export class Sim {
       } else if (r.tool === 'rtg') {
         if ((k !== T.Yard && k !== T.Reefer) || this.rtgAt(r.x, r.y)) return fail('Der Platz ist belegt');
       } else if (r.tool !== 'dredge') {
-        const [w, h] = sizeOf(r.tool);
+        const [w, h] = dimsOf(r.tool, !!r.rot);
         for (const f of this.footprintOf({ x: r.x, y: r.y, w, h })) {
           if ((willBe.get(f) ?? this.kind[f]) !== T.Land) return fail('Das Feld ist inzwischen belegt');
           willBe.set(f, TILE_OF[r.tool]!);
@@ -1293,7 +1400,7 @@ export class Sim {
       }
     }
     for (const r of order) {
-      const id = this.place(r.tool, r.x, r.y);
+      const id = this.place(r.tool, r.x, r.y, !!r.rot);
       const i = this.idx(r.x, r.y);
       if (r.tool === 'yard' || r.tool === 'reefer') {
         this.stock[i] = r.stock ?? 0;
@@ -1332,7 +1439,7 @@ export class Sim {
       const c = this.cranes.find((c) => c.id === id);
       if (!c) return fail('Der Kran existiert nicht mehr');
       if (c.big) return fail('Ist schon eine Containerbrücke');
-      if (!this.isKai(c.x + 1) || this.craneAt(c.x + 1, c.y)) return fail('Die Containerbrücke braucht rechts daneben ein freies Kai-Feld');
+      if (!this.bridgeRoom(c)) return fail('Die Containerbrücke steht auf zwei Feldern: Rechts (bzw. unten) daneben muss ein freies Kai-Feld sein');
     } else {
       const t = this.trucks.find((t) => t.id === id);
       if (!t) return fail('Der Truck existiert nicht mehr');
@@ -1506,10 +1613,10 @@ export class Sim {
     for (const c of this.cranes) {
       if (!zOk(c.zone)) continue;
       const ci = this.idx(c.x, c.y);
-      const ship = this.shipAtBerth(c.x);
+      const ship = this.shipAtBerth(this.cq(c));
       // 1. Entladene Container vom Kran wegfahren
       const more = ship !== undefined && ship.containers + ship.reefers > 0;
-      const full = c.buffer + c.bufReef >= CRANE_BUFFER;
+      const full = c.buffer + c.bufReef >= this.bufCap(c);
       for (const cargo of ['imp', 'reef'] as const) {
         const avail = cargo === 'imp' ? c.buffer - c.resOut : c.bufReef - c.resOutReef;
         if (avail <= 0) continue;
@@ -1535,7 +1642,7 @@ export class Sim {
         let onTheWay = 0;
         for (const q of this.cranesAtBerth(ship.berthX, ship.len)) onTheWay += q.expBuf + q.resExpIn;
         const need = ship.exportLeft - onTheWay;
-        const room = CRANE_EXP_BUFFER - c.expBuf - c.resExpIn;
+        const room = this.bufCap(c, true) - c.expBuf - c.resExpIn;
         if (need > 0 && room > 0) {
           const src = this.findSource(T.Yard, 'exp', t.tile, c.zone);
           const acc = src ? this.nearestAccess(ci, src.access) : null;
@@ -1785,6 +1892,11 @@ export class Sim {
     return true;
   }
 
+  /** Wie viele Trucks gleichzeitig in diese Richtung über das Feld fahren können */
+  laneCap(tile: number, dir: number): number {
+    return this.oneway[tile] === dir ? 2 : 1;
+  }
+
   private stepTruck(t: Truck, dt: number) {
     const j = t.job!;
     const tgt = j.tgt[j.stage];
@@ -1812,19 +1924,26 @@ export class Sim {
         const n = cand[dir];
         if (n < 0 || d[n] !== here - 1) continue;
         // Unter gleich kurzen Wegen den nehmen, dessen Spur frei ist
-        if (pick < 0 || this.lane[n * 4 + dir] === 0) {
+        const free = this.lane[n * 4 + dir] < this.laneCap(n, dir);
+        if (pick < 0 || free) {
           pick = n;
           pickDir = dir;
-          if (this.lane[n * 4 + dir] === 0) break;
+          if (free) break;
         }
       }
       if (pick < 0) return this.cancelJob(t);
       t.angle = [0, Math.PI / 2, Math.PI, -Math.PI / 2][pickDir];
       // Die Spur im nächsten Feld ist belegt: warten. Das ist der Stau.
-      if (this.lane[pick * 4 + pickDir] > 0 && t.stuck < TRUCK_PATIENCE_GM) {
+      if (this.lane[pick * 4 + pickDir] >= this.laneCap(pick, pickDir) && t.stuck < TRUCK_PATIENCE_GM) {
         t.stuck += dt;
         this.roadJam[t.tile] += dt;
         return;
+      }
+      // Auf Einbahnstraßen gibt es zwei Spuren: der zweite Truck nimmt die linke
+      t.slot = 0;
+      if (this.oneway[pick] === pickDir && this.lane[pick * 4 + pickDir] > 0) {
+        const taken = this.trucks.some((o) => o !== t && o.slot === 0 && (o.next === pick || (o.tile === pick && o.dir === pickDir)));
+        t.slot = taken ? 1 : 0;
       }
       this.lane[pick * 4 + pickDir]++;
       t.next = pick;
@@ -1902,7 +2021,8 @@ export class Sim {
     return Math.max(0, this.staff[role] - this.sick[role].length);
   }
   wagePerHour(role: Role): number {
-    return Math.round(ROLES[role].wage * DIFFS[this.diff].wage * this.wageBoost[role]);
+    // Größere Häfen zahlen Tariflohn: +8 % je Stufe
+    return Math.round(ROLES[role].wage * DIFFS[this.diff].wage * this.wageBoost[role] * (1 + 0.08 * (Math.min(this.level, 7) - 1)));
   }
   hire(role: Role) {
     this.staff[role]++;
@@ -2056,6 +2176,8 @@ export class Sim {
       px: -st.len - 2,
       py: 2.5,
       berthX: -1,
+      rot: 0,
+      wp: 0,
       containers: st.containers - reefers,
       reefers,
       total: st.containers,
@@ -2095,13 +2217,14 @@ export class Sim {
       this.nextShipIn = 30;
       return;
     }
-    const big = this.level >= 3 && this.hasDeepBerth() && this.rnd() < 0.25;
+    const mega = this.level >= 4 && this.hasDeepBerth(SHIP_TYPES.mega.len) && this.rnd() < 0.3;
+    const big = !mega && this.level >= 3 && this.hasDeepBerth() && this.rnd() < 0.25;
     const reefer = this.level >= 3 && this.reeferCapacity >= 12 && this.rnd() < 0.4;
-    this.addShip(big ? 'panamax' : 'feeder', null, reefer);
+    this.addShip(mega ? 'mega' : big ? 'panamax' : 'feeder', null, reefer);
     // Ist die Konkurrenz pünktlicher als du, kommen weniger freie Schiffe
     const mine = this.myRate;
     const rival = this.level >= 2 && mine !== null ? 1 + Math.max(0, this.rivalRate - mine) : 1;
-    const base = (Math.min(300, Math.max(120, 300 - this.rep * 1.5)) + this.contracts.length * 90) * MAPS[this.map].ships * rival;
+    const base = (Math.min(300, Math.max(120, 300 - this.rep * 1.5)) + this.contracts.length * 90) * (this.level >= 2 ? MAPS[this.map].ships : 1) * rival;
     this.nextShipIn = base * (0.8 + this.rnd() * 0.4);
   }
 
@@ -2110,12 +2233,14 @@ export class Sim {
     const dy = ty - s.y;
     const d = Math.hypot(dx, dy);
     if (d <= step) {
+      if (d > 1e-6) s.rot = Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? 0 : Math.PI) : dy >= 0 ? Math.PI / 2 : -Math.PI / 2;
       s.x = tx;
       s.y = ty;
       return true;
     }
     s.x += (dx / d) * step;
     s.y += (dy / d) * step;
+    s.rot = Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? 0 : Math.PI) : dy >= 0 ? Math.PI / 2 : -Math.PI / 2;
     return false;
   }
 
@@ -2127,6 +2252,7 @@ export class Sim {
         const b = this.findBerth(s.len, SHIP_TYPES[s.type].deep);
         if (b < 0) continue;
         s.berthX = b;
+        s.wp = 0;
         s.state = 'sailing';
       }
     }
@@ -2144,8 +2270,8 @@ export class Sim {
           }
           s.queuedFor += dt;
           s.blocked = s.queuedFor > 60;
-          if (SHIP_TYPES[s.type].deep && !this.hasDeepBerth()) {
-            s.reason = 'Braucht einen tiefen Liegeplatz: 6 Kai-Felder in einer Reihe, davor ausgebaggert.';
+          if (SHIP_TYPES[s.type].deep && !this.hasDeepBerth(s.len)) {
+            s.reason = `Braucht einen tiefen Liegeplatz: ${s.len} Kai-Felder in einer Reihe, davor ausgebaggert.`;
           } else if (this.hasBerth()) {
             s.reason = 'Wartet auf einen freien Liegeplatz. Baue einen weiteren Liegeplatz.';
           } else {
@@ -2160,8 +2286,13 @@ export class Sim {
           }
           break;
         }
-        case 'sailing':
-          if (this.moveToward(s, s.berthX, COAST_ROW - 2, step)) {
+        case 'sailing': {
+          const path = approach(s.berthX);
+          const [tx, ty] = path[Math.min(s.wp, path.length - 1)];
+          if (this.moveToward(s, tx, ty, step) && ++s.wp >= path.length) {
+            // Am Liegeplatz längs zur Kaimauer drehen
+            if (isVertical(sideOf(s.berthX))) s.rot = Math.abs(Math.sin(s.rot)) > 0.5 ? s.rot : Math.PI / 2;
+            else s.rot = Math.abs(Math.sin(s.rot)) > 0.5 ? 0 : s.rot;
             s.state = 'unloading';
             s.atBerth = 0;
             this.emit(undefined, 'info', { tag: 'ship-arrived', x: s.x, y: s.y });
@@ -2169,6 +2300,7 @@ export class Sim {
           s.reason = 'Läuft in den Hafen ein.';
           s.blocked = false;
           break;
+        }
         case 'unloading': {
           // Bei Sturm läuft die Liegezeit nicht weiter
           if (this.weather !== 'storm') s.atBerth += dt;
@@ -2181,7 +2313,10 @@ export class Sim {
           break;
         }
         case 'leaving':
-          if (this.moveToward(s, GRID_W + 8, s.y, step)) this.ships = this.ships.filter((x) => x !== s);
+          {
+            const [tx, ty] = departure(s.berthX, s.x, s.y);
+            if (this.moveToward(s, tx, ty, step)) this.ships = this.ships.filter((x) => x !== s);
+          }
           s.reason = 'Läuft aus.';
           s.blocked = false;
           break;
@@ -2251,6 +2386,7 @@ export class Sim {
     this.shipsDone++;
     this.today.ships++;
     if (st.deep && imports <= 0) this.bigShipsDone++;
+    if (s.type === 'mega' && imports <= 0) this.megaDone++;
     const c = this.contracts.find((c) => c.id === s.contractId);
     const bonus = onTime && c ? c.bonus : 0;
     if (imports <= 0) {
@@ -2264,8 +2400,8 @@ export class Sim {
       const extra = bonus ? ` und ${eur(bonus)} Vertragsbonus` : '';
       this.emit(`${s.name} abgefertigt: +${eur(st.berthFee)} Liegegebühr${extra}, Ruf +1`, 'good', {
         tag: 'ship-done',
-        x: s.x + s.len / 2,
-        y: s.y,
+        x: this.shipBox(s).x + this.shipBox(s).w / 2,
+        y: this.shipBox(s).y,
         amount: st.berthFee + bonus,
       });
     } else if (imports > 0) {
@@ -2287,7 +2423,7 @@ export class Sim {
     const storm = this.weather === 'storm';
     for (const c of this.cranes) {
       const mt = this.moveTime(c);
-      const ship = this.shipAtBerth(c.x);
+      const ship = this.shipAtBerth(this.cq(c));
       if (storm) {
         c.state = 'storm';
         continue;
@@ -2302,7 +2438,7 @@ export class Sim {
         continue;
       }
       const imports = ship.containers + ship.reefers;
-      const canUnload = imports > 0 && c.buffer + c.bufReef < CRANE_BUFFER;
+      const canUnload = imports > 0 && c.buffer + c.bufReef < this.bufCap(c);
       const canLoad = ship.exportLeft > 0 && c.expBuf > 0;
       if (canUnload || canLoad) {
         c.state = 'working';
@@ -2560,7 +2696,7 @@ export class Sim {
     this.version++;
     this.makeOffers();
     this.emit(`Neue Stufe: ${next.name}. Bonus +${eur(next.bonus)}`, 'good', { tag: 'level', amount: next.bonus });
-    if (this.level === LEVELS.length && this.status === 'play' && !this.scenario) {
+    if (this.level === GOAL_LEVEL && this.status === 'play' && !this.scenario) {
       this.status = 'won';
       this.endReason = `Weltklasse-Hafen an Tag ${this.day}, Ziel war Tag ${this.goalDay}.`;
       this.emit(undefined, 'good', { tag: 'won' });
@@ -2651,7 +2787,7 @@ export class Sim {
         options: ['Führung geben (5.000 €)', 'Ablehnen'],
       },
     ];
-    if (this.cranes.some((c) => !c.big && this.isKai(c.x + 1) && !this.craneAt(c.x + 1, c.y))) {
+    if (this.cranes.some((c) => !c.big && this.bridgeRoom(c))) {
       list.push({
         id: 'parts',
         title: 'Gebrauchte Teile für eine Containerbrücke',
@@ -2727,7 +2863,7 @@ export class Sim {
         break;
       case 'parts': {
         if (choice !== 0) break;
-        const c = this.cranes.find((c) => !c.big && this.isKai(c.x + 1) && !this.craneAt(c.x + 1, c.y));
+        const c = this.cranes.find((c) => !c.big && this.bridgeRoom(c));
         if (!c || this.money < 60_000) {
           this.emit('Das Geschäft kam nicht zustande.', 'info');
           break;
@@ -2810,7 +2946,7 @@ export class Sim {
     const roll = this.rnd();
     const big = this.level >= 3 && roll < 0.3;
     const reefer = this.level >= 3 && !big && roll > 0.65;
-    const ship: ShipTypeId = big ? 'panamax' : 'feeder';
+    const ship: ShipTypeId = big && this.level >= 4 && this.rnd() < 0.4 ? 'mega' : big ? 'panamax' : 'feeder';
     const interval = big ? this.pick([480, 600, 720]) : this.pick([240, 300, 360, 480]);
     const dwell = Math.round((big ? this.pick([600, 720]) : this.pick([360, 420, 480])) * DIFFS[this.diff].dwell);
     const calls = 4 + Math.floor(this.rnd() * 6);
@@ -2886,7 +3022,7 @@ export class Sim {
     for (const t of this.trucks) cost += t.agv ? R.agv : R.truck;
     cost += this.gates.length * R.gate + this.rails.length * R.rail + this.plants.length * R.plant + this.shops.length * R.shop;
     cost += this.yardTiles.length * R.yardTile + this.reeferTiles.length * R.reeferTile;
-    for (let x = 0; x < GRID_W; x++) if (this.isKai(x)) cost += R.kaiTile;
+    for (let i = 0; i < this.kind.length; i++) if (this.kind[i] === T.Kai) cost += R.kaiTile;
     return cost;
   }
 
@@ -2947,10 +3083,10 @@ export class Sim {
       wageBoost: this.wageBoost,
       strikeLeft: this.strikeLeft,
       pending: this.pending,
-      gates: this.gates.map((g) => ({ x: g.x, y: g.y, served: g.served })),
+      gates: this.gates.map((g) => ({ x: g.x, y: g.y, served: g.served, rot: g.h > g.w })),
       rails: this.rails.map((r) => ({ x: r.x, y: r.y, platform: r.platform, value: r.value })),
       trucks: this.trucks.map((t) => ({ tile: t.tile, agv: t.agv, role: t.role, wear: t.wear })),
-      plants: this.plants.map((p) => ({ x: p.x, y: p.y, kind: p.kind })),
+      plants: this.plants.map((p) => ({ x: p.x, y: p.y, kind: p.kind, rot: p.w !== sizeOf(p.kind)[0] })),
       premiumDone: this.premiumDone,
       money: this.money,
       rep: this.rep,
@@ -2962,6 +3098,7 @@ export class Sim {
       reefersHandled: this.reefersHandled,
       trainsDone: this.trainsDone,
       bigShipsDone: this.bigShipsDone,
+      megaDone: this.megaDone,
       shipsDone: this.shipsDone,
       shipsOnTime: this.shipsOnTime,
       containersDone: this.containersDone,
@@ -3002,7 +3139,7 @@ export class Sim {
       s.cranes[s.cranes.length - 1].wear = c.wear ?? 0;
     }
     for (const g of d.gates) {
-      s.place('gate', g.x, g.y);
+      s.place('gate', g.x, g.y, !!g.rot);
       s.gates[s.gates.length - 1].served = g.served;
     }
     for (const r of d.rails ?? []) {
@@ -3017,7 +3154,7 @@ export class Sim {
       s.trucks[s.trucks.length - 1].role = t.role ?? 'auto';
       s.trucks[s.trucks.length - 1].wear = t.wear ?? 0;
     }
-    for (const p of d.plants ?? []) s.place(p.kind, p.x, p.y);
+    for (const p of d.plants ?? []) s.place(p.kind, p.x, p.y, !!p.rot);
     for (const p of d.shops ?? []) s.place('workshop', p.x, p.y);
     if (d.zone) s.zone.set(d.zone);
     for (const r of d.rtgs ?? []) s.place('rtg', r.x, r.y);
@@ -3045,6 +3182,7 @@ export class Sim {
     s.reefersHandled = d.reefersHandled ?? 0;
     s.trainsDone = d.trainsDone ?? 0;
     s.bigShipsDone = d.bigShipsDone ?? 0;
+    s.megaDone = d.megaDone ?? 0;
     s.shipsDone = d.shipsDone;
     s.shipsOnTime = d.shipsOnTime;
     s.containersDone = d.containersDone;

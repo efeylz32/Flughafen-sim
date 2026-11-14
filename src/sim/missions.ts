@@ -35,7 +35,7 @@ export const MISSIONS: Mission[] = [
   {
     title: 'Setze einen Kran',
     text: 'Wähle den Kran und tippe auf ein Kai-Feld.',
-    done: (s) => s.cranes.some((c) => s.berthContaining(c.x) >= 0),
+    done: (s) => s.cranes.some((c) => s.berthContaining(s.cq(c)) >= 0),
   },
   {
     title: 'Lege eine Straße zum Kran',

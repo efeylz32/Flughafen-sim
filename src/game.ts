@@ -2,7 +2,7 @@ import { Sound } from './audio/sound';
 import { Renderer, View } from './render/renderer';
 import { BuildTool, DiffId, GRID_H, GRID_W, MapId, ProductId, Role, ROLE_NAMES, T, TICKS_PER_SEC, TILE, Tool, TruckRole } from './sim/data';
 import { Progress } from './achievements';
-import { DIFFS, MAPS } from './sim/data';
+import { DIFFS, MAPS, sizeOf } from './sim/data';
 import { buildDemo } from './sim/demo';
 import { setupScenario } from './sim/scenario-setup';
 import { SCENARIOS } from './sim/scenarios';
@@ -218,6 +218,14 @@ export class Game {
   }
   setTool(t: Tool) {
     this.tool = t;
+    this.hover = null;
+    this.ui.refreshTools();
+  }
+  /** Dreht das nächste Gebäude (Breite und Höhe tauschen) */
+  rotate() {
+    const [w, h] = sizeOf(this.tool);
+    if (w === h) return;
+    this.sim.rot = !this.sim.rot;
     this.hover = null;
     this.ui.refreshTools();
   }
@@ -534,7 +542,8 @@ export class Game {
     const before = this.selected;
     this.selected = null;
     for (const s of sim.ships) {
-      if (wx >= s.x * TILE && wx <= (s.x + s.len) * TILE && wy >= s.y * TILE && wy <= (s.y + 2) * TILE) {
+      const b = sim.shipBox(s);
+      if (wx >= b.x * TILE && wx <= (b.x + b.w) * TILE && wy >= b.y * TILE && wy <= (b.y + b.h) * TILE) {
         this.selected = { kind: 'ship', id: s.id };
         break;
       }

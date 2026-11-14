@@ -1,6 +1,6 @@
 /** Zufällige Bau- und Abrissfolgen: Das Spiel darf nie abstürzen und keine unmöglichen Zustände erreichen. */
 import { expect, it } from 'vitest';
-import { BuildTool, COAST_ROW, CRANE_BUFFER, CRANE_EXP_BUFFER, GRID_H, GRID_W, RTG_CAP, T } from '../src/sim/data';
+import { BuildTool, COAST_ROW, GRID_H, GRID_W, RTG_CAP, T } from '../src/sim/data';
 import { buildDemo } from '../src/sim/demo';
 import { Sim } from '../src/sim/sim';
 
@@ -23,8 +23,8 @@ function check(s: Sim, step: number) {
   }
   for (const c of s.cranes) {
     expect(s.kind[s.idx(c.x, c.y)], `${where}: Kran ohne Kai`).toBe(T.Kai);
-    expect(c.buffer + c.bufReef).toBeLessThanOrEqual(CRANE_BUFFER);
-    expect(c.expBuf).toBeLessThanOrEqual(CRANE_EXP_BUFFER);
+    expect(c.buffer + c.bufReef).toBeLessThanOrEqual(s.bufCap(c));
+    expect(c.expBuf).toBeLessThanOrEqual(s.bufCap(c, true));
     expect(c.resOut + c.resOutReef + c.resExpIn).toBeGreaterThanOrEqual(0);
   }
   for (const g of s.gates) for (const f of s.footprintOf(g)) expect(s.kind[f]).toBe(T.Gate);
@@ -52,17 +52,21 @@ function check(s: Sim, step: number) {
   }
 }
 
-it.each([1, 2, 3, 4, 5])('Zufallsfolge %i bleibt stabil', (seed) => {
+it.each([1, 2, 3, 4, 5, 6, 7])('Zufallsfolge %i bleibt stabil', (seed) => {
   let r = seed * 7919;
   const rnd = () => ((r = (r * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
-  const s = new Sim(seed);
-  buildDemo(s);
+  // Folgen 6 und 7 spielen auf der Insel mit Kai an allen Küsten
+  const island = seed >= 6;
+  const s = new Sim(seed, 'normal', island ? 'island' : 'coast');
+  if (!island) buildDemo(s);
   s.level = 4;
   s.money = 50_000_000;
   for (let step = 0; step < 1500; step++) {
     const x = Math.floor(rnd() * GRID_W);
-    const y = COAST_ROW - 2 + Math.floor(rnd() * (GRID_H - COAST_ROW + 2));
+    const y = island ? Math.floor(rnd() * GRID_H) : COAST_ROW - 2 + Math.floor(rnd() * (GRID_H - COAST_ROW + 2));
     const roll = rnd();
+    if (rnd() < 0.1) s.rot = !s.rot;
+    if (island && step === 0) s.mission = 30;
     if (roll < 0.55) s.build(TOOLS[Math.floor(rnd() * TOOLS.length)], x, y);
     else if (roll < 0.75) {
       const res = s.demolish(x, y);

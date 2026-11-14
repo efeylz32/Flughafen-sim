@@ -81,6 +81,11 @@ export const SIZE: Partial<Record<BuildTool, [number, number]>> = {
   workshop: [2, 2],
 };
 export const sizeOf = (tool: string): [number, number] => SIZE[tool as BuildTool] ?? [1, 1];
+/** Größe mit Drehung: gedreht sind Breite und Höhe vertauscht */
+export const dimsOf = (tool: string, rot: boolean): [number, number] => {
+  const [w, h] = sizeOf(tool);
+  return rot ? [h, w] : [w, h];
+};
 
 /** Laufende Kosten pro Spieltag. */
 export const RUN_COST_PER_DAY = {
@@ -106,9 +111,9 @@ export const DIFFS: Record<
   DiffId,
   { name: string; text: string; money: number; patience: number; dwell: number; penalty: number; wage: number; sick: number; debtDays: number; goalDays: number; rate: number }
 > = {
-  easy: { name: 'Leicht', text: 'Viel Startgeld, geduldige Schiffe, milde Strafen', money: 650_000, patience: 1.5, dwell: 1.25, penalty: 0.5, wage: 0.8, sick: 0.02, debtDays: 5, goalDays: 50, rate: 0.7 },
-  normal: { name: 'Normal', text: 'Knappes Startgeld, Löhne und Fristen wie geplant', money: 400_000, patience: 1, dwell: 1, penalty: 1, wage: 1, sick: 0.04, debtDays: 3, goalDays: 40, rate: 1 },
-  hard: { name: 'Schwer', text: 'Wenig Startgeld, ungeduldige Schiffe, enge Fristen, hohe Löhne und Strafen', money: 250_000, patience: 0.6, dwell: 0.8, penalty: 1.6, wage: 1.3, sick: 0.07, debtDays: 2, goalDays: 32, rate: 1.4 },
+  easy: { name: 'Leicht', text: 'Viel Startgeld, geduldige Schiffe, milde Strafen', money: 650_000, patience: 1.5, dwell: 1.25, penalty: 0.5, wage: 0.8, sick: 0.02, debtDays: 5, goalDays: 65, rate: 0.7 },
+  normal: { name: 'Normal', text: 'Knappes Startgeld, Löhne und Fristen wie geplant', money: 400_000, patience: 1, dwell: 1, penalty: 1, wage: 1, sick: 0.04, debtDays: 3, goalDays: 55, rate: 1 },
+  hard: { name: 'Schwer', text: 'Wenig Startgeld, ungeduldige Schiffe, enge Fristen, hohe Löhne und Strafen', money: 250_000, patience: 0.6, dwell: 0.8, penalty: 1.6, wage: 1.3, sick: 0.07, debtDays: 2, goalDays: 45, rate: 1.4 },
 };
 
 // Kredit
@@ -141,10 +146,10 @@ export const PLOT_PRICE_STEP = 30_000;
 
 // Karten
 export type MapId = 'coast' | 'island' | 'rocks';
-export const MAPS: Record<MapId, { name: string; text: string; ships: number }> = {
-  coast: { name: 'Küste', text: 'Viel Platz, Bahnanschluss am rechten Rand.', ships: 1 },
-  island: { name: 'Insel', text: 'Wenig Land, keine Bahn, dafür kommen Schiffe öfter.', ships: 0.8 },
-  rocks: { name: 'Felsen', text: 'Felsen versperren Bauland. Sprengen kostet 8.000 € pro Feld.', ships: 1 },
+export const MAPS: Record<MapId, { name: string; text: string; ships: number; bonus: number }> = {
+  coast: { name: 'Küste', text: 'Viel Platz, Bahnanschluss am rechten Rand.', ships: 1, bonus: 0 },
+  island: { name: 'Insel', text: 'Kai an allen vier Küsten, aber wenig Land und keine Bahn. Ab Stufe 2 kommen Schiffe öfter. 150.000 € mehr Startgeld.', ships: 0.8, bonus: 150_000 },
+  rocks: { name: 'Felsen', text: 'Felsen versperren Bauland. Sprengen kostet 8.000 € pro Feld. 50.000 € mehr Startgeld.', ships: 1, bonus: 50_000 },
 };
 export const ROCK_COST = 8_000;
 
@@ -160,6 +165,8 @@ export const CRANE_MOVE_GM = 3; // Mobilkran: 20 Moves pro Stunde
 export const CRANE_BIG_MOVE_GM = 1.5; // Containerbrücke: 40 Moves pro Stunde
 export const CRANE_BUFFER = 4;
 export const CRANE_EXP_BUFFER = 4;
+/** Die Containerbrücke hat unter sich doppelt so viel Platz */
+export const CRANE_BUFFER_BIG = 8;
 
 // Transport
 export const TRUCK_SPEED = 2; // Felder pro gm
@@ -205,10 +212,12 @@ export const SHIP_PATIENCE_GM = 720;
 export const SHIP_DWELL_TARGET_GM = 480;
 export const SHIP_MAX_STAY_GM = 1440;
 
-export type ShipTypeId = 'feeder' | 'panamax';
+export type ShipTypeId = 'feeder' | 'panamax' | 'mega';
 export const SHIP_TYPES: Record<ShipTypeId, { name: string; len: number; containers: number; deep: boolean; berthFee: number; dwell: number }> = {
   feeder: { name: 'Feeder', len: 4, containers: 120, deep: false, berthFee: 2_500, dwell: 480 },
   panamax: { name: 'Panamax', len: 6, containers: 300, deep: true, berthFee: 8_000, dwell: 720 },
+  /** Ab Stufe 5: braucht 8 Kai-Felder, ausgebaggert */
+  mega: { name: 'Mega-Frachter', len: 8, containers: 500, deep: true, berthFee: 16_000, dwell: 960 },
 };
 /** Anteil der Ladung, den ein Schiff zusätzlich als Export mitnehmen will (ab Stufe 2). */
 export const EXPORT_SHARE = 0.4;
@@ -262,11 +271,16 @@ export const EXPORT_FEE = 250;
 // Hafenstufen: `need` ist die Zahl der insgesamt umgeschlagenen Container
 export const LEVELS = [
   { name: 'Anleger', need: 0, bonus: 0, contracts: 0 },
-  { name: 'Regionalhafen', need: 1_000, bonus: 100_000, contracts: 2 },
-  { name: 'Handelshafen', need: 4_500, bonus: 250_000, contracts: 3 },
-  { name: 'Seehafen', need: 11_000, bonus: 500_000, contracts: 4 },
-  { name: 'Weltklasse-Hafen', need: 24_000, bonus: 1_000_000, contracts: 5 },
+  { name: 'Regionalhafen', need: 1_500, bonus: 40_000, contracts: 2 },
+  { name: 'Handelshafen', need: 7_000, bonus: 100_000, contracts: 3 },
+  { name: 'Seehafen', need: 17_000, bonus: 180_000, contracts: 4 },
+  { name: 'Weltklasse-Hafen', need: 36_000, bonus: 300_000, contracts: 5 },
+  // Nach dem Ziel geht es weiter
+  { name: 'Mega-Hub', need: 70_000, bonus: 400_000, contracts: 6 },
+  { name: 'Welthafen', need: 120_000, bonus: 600_000, contracts: 7 },
 ];
+/** Mit dieser Stufe ist das Spiel gewonnen. Danach geht es ohne Frist weiter. */
+export const GOAL_LEVEL = 5;
 /** Was jede Stufe neu bringt (für die Anzeige beim Aufstieg). */
 export const LEVEL_NEWS: { title: string; text: string }[][] = [
   [],
@@ -288,7 +302,13 @@ export const LEVEL_NEWS: { title: string; text: string }[][] = [
   ],
   [
     { title: 'Fahrerlose Fahrzeuge', text: 'Tippe einen Truck an und rüste ihn auf. Er fährt dann schneller und kostet weniger im Betrieb.' },
+    { title: 'Mega-Frachter', text: 'Bringen 500 Container und 16.000 € Liegegebühr. Sie brauchen 8 Kai-Felder in einer Reihe, davor ausgebaggert.' },
     { title: 'Bis zu 4 Verträge', text: 'Mehr Reedereien können gleichzeitig zu dir fahren.' },
   ],
-  [{ title: 'Bis zu 5 Verträge', text: 'Dein Hafen spielt in der obersten Liga.' }],
+  [
+    { title: 'Ziel erreicht', text: 'Du hast gewonnen. Das Spiel geht ohne Frist weiter: Mega-Hub und Welthafen warten.' },
+    { title: 'Bis zu 5 Verträge', text: 'Dein Hafen spielt in der obersten Liga.' },
+  ],
+  [{ title: 'Bis zu 6 Verträge', text: 'Mehr Mega-Frachter, mehr Verträge. Jetzt zählt der Durchsatz.' }],
+  [{ title: 'Bis zu 7 Verträge', text: 'Der größte Hafen der Welt. Alles Weitere ist Rekordjagd.' }],
 ];

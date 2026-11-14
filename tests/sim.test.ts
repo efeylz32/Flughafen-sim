@@ -535,8 +535,9 @@ describe('Ziel, Pleite, Kredit', () => {
     win.handled = 1e6;
     run(win, 0.1);
     expect(win.status).toBe('won');
+    expect(win.level).toBe(7);
     const late = new Sim(1, 'hard');
-    late.gm += 32 * 1440;
+    late.gm += 45 * 1440;
     run(late, 24);
     expect(late.status).toBe('lost');
     expect(late.endReason).toMatch(/Ziel verpasst/);
@@ -888,4 +889,99 @@ describe('Speichern', () => {
 
 it('Takt: 10 Ticks pro Sekunde', () => {
   expect(TICKS_PER_SEC).toBe(10);
+});
+
+describe('Kai an mehreren Küsten', () => {
+  function islandPort(side: 'W' | 'S'): Sim {
+    const sim = new Sim(5, 'normal', 'island');
+    sim.money = 5_000_000;
+    if (side === 'W') {
+      for (let y = 12; y < 16; y++) expect(sim.build('kai', 2, y).ok).toBe(true);
+      sim.build('crane', 2, 13);
+      for (let y = 10; y <= 20; y++) sim.build('road', 3, y);
+      for (let y = 12; y <= 16; y++) sim.build('yard', 4, y);
+      sim.build('gate', 4, 18);
+      for (let i = 0; i < 4; i++) sim.build('truck', 3, 10 + i);
+    } else {
+      const y = 24; // Südküste
+      for (let x = 8; x < 12; x++) expect(sim.build('kai', x, y).ok).toBe(true);
+      sim.build('crane', 9, y);
+      for (let x = 6; x <= 16; x++) sim.build('road', x, y - 1);
+      for (let x = 8; x <= 12; x++) sim.build('yard', x, y - 2);
+      sim.build('gate', 14, y - 2);
+      for (let i = 0; i < 4; i++) sim.build('truck', 6 + i, y - 1);
+    }
+    sim.updateMissions(true);
+    sim.mission = Math.max(sim.mission, 6);
+    sim.nextShipIn = 1;
+    return sim;
+  }
+
+  it('Kai nur dort, wo Wasser davor liegt', () => {
+    const sim = new Sim(5, 'normal', 'island');
+    expect(sim.canBuild('kai', 2, 14).ok).toBe(true);
+    expect(sim.canBuild('kai', 3, 14).ok).toBe(false);
+    const coast = new Sim(5);
+    expect(coast.canBuild('kai', 2, 14).ok).toBe(false);
+  });
+
+  it('Schiffe legen an der Westküste an und werden abgefertigt', () => {
+    const sim = islandPort('W');
+    expect(sim.berths().length).toBe(1);
+    run(sim, 16);
+    expect(sim.shipsDone).toBeGreaterThanOrEqual(1);
+    expect(sim.containersDone).toBeGreaterThan(50);
+  });
+
+  it('Schiffe legen an der Südküste an', () => {
+    const sim = islandPort('S');
+    run(sim, 16);
+    expect(sim.shipsDone).toBeGreaterThanOrEqual(1);
+  });
+
+  it('Containerbrücke hat doppelt so viel Platz unter sich', () => {
+    const sim = basicPort(0, 1);
+    const c = sim.cranes[0];
+    expect(sim.bufCap(c)).toBe(4);
+    c.big = true;
+    expect(sim.bufCap(c)).toBe(8);
+  });
+});
+
+describe('Gebäude drehen', () => {
+  it('gedrehtes Gate steht senkrecht und übersteht Abriss, Rückgängig und Speichern', () => {
+    const sim = new Sim();
+    sim.rot = true;
+    expect(sim.build('gate', 10, k + 2).ok).toBe(true);
+    const g = sim.gates[0];
+    expect([g.w, g.h]).toEqual([1, 2]);
+    expect(sim.gateAt(10, k + 3)).toBe(g);
+    sim.rot = false;
+    const d = sim.demolish(10, k + 3);
+    expect(sim.gates.length).toBe(0);
+    expect(sim.undoDemolish(d.removed).ok).toBe(true);
+    expect([sim.gates[0].w, sim.gates[0].h]).toEqual([1, 2]);
+    const copy = Sim.deserialize(JSON.parse(JSON.stringify(sim.serialize())));
+    expect([copy.gates[0].w, copy.gates[0].h]).toEqual([1, 2]);
+  });
+
+  it('gedrehte Packhalle ist 2 × 3', () => {
+    const sim = new Sim();
+    sim.level = 2;
+    sim.rot = true;
+    expect(sim.build('unpack', 10, k + 2).ok).toBe(true);
+    expect([sim.plants[0].w, sim.plants[0].h]).toEqual([2, 3]);
+  });
+});
+
+describe('Einbahnstraße', () => {
+  it('hat zwei Spuren und lässt doppelt so viele Trucks durch', () => {
+    const sim = new Sim();
+    for (let x = 4; x <= 12; x++) sim.build('road', x, k + 2);
+    const tile = (k + 2) * GRID_W + 8;
+    expect(sim.laneCap(tile, 0)).toBe(1);
+    sim.oneway[tile] = 0;
+    expect(sim.laneCap(tile, 0)).toBe(2);
+    expect(sim.laneCap(tile, 2)).toBe(1);
+  });
 });

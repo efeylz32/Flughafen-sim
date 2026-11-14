@@ -1,6 +1,9 @@
 import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture, TilingSprite } from 'pixi.js';
-import { ZONES, COAST_ROW, CRANE_BUFFER, CRANE_EXP_BUFFER, GRID_H, GRID_W, MapId, MIN_PER_DAY, PLOT_W, RAIL_CAP, RAIL_TRAVEL_GM, sizeOf, T, TICK_GM, TILE, YARD_CAP_PER_TILE, RTG_CAP } from '../sim/data';
+import { DIFFS, SHIP_PATIENCE_GM, TRUCK_PATIENCE_GM, ZONES, COAST_ROW, CRANE_BUFFER, CRANE_BUFFER_BIG, CRANE_EXP_BUFFER, GRID_H, GRID_W, MapId, MIN_PER_DAY, PLOT_W, RAIL_CAP, RAIL_TRAVEL_GM, dimsOf, T, TICK_GM, TILE, YARD_CAP_PER_TILE, RTG_CAP } from '../sim/data';
 import type { Crane, Rail, Ship, Sim, Truck } from '../sim/sim';
+import { N as QN, S as QS_, W as QW, qOf, qOfWater, qTile, sideOf, OUT, Q_MAX } from '../sim/quay';
+/** Drehung der Kai-Grafik: Wasser liegt im Norden, Süden, Westen oder Osten */
+const SIDE_ANGLE = [0, Math.PI, -Math.PI / 2, Math.PI / 2];
 
 export interface View {
   overlay: boolean;
@@ -98,6 +101,8 @@ function utilColor(u: number): number {
 
 interface ShipView {
   root: Container;
+  /** Dreht sich mit dem Schiff, Name und Warnzeichen bleiben waagerecht */
+  rotor: Container;
   wake: Graphics;
   body: Container;
   cargo: Sprite[];
@@ -577,25 +582,38 @@ export class Renderer {
             break;
           }
           case T.Kai: {
-            // Kaimauer ragt ein Stück ins Wasser
-            g.rect(px, py - 6, TILE, 7).fill(C.kaiWall);
-            g.rect(px, py - 6, TILE, 1.5).fill(shade(C.kaiWall, 0.75));
-            g.rect(px, py, TILE, TILE).fill(C.kai);
-            g.rect(px, py, TILE, 2.5).fill(C.kaiCurb);
-            g.rect(px, py + 8, TILE, 2).fill(C.yellow);
-            g.rect(px + TILE - 0.6, py + 10, 1.2, TILE - 10).fill(C.kaiJoint);
-            g.rect(px, py + TILE - 1, TILE, 1).fill(C.kaiJoint);
+            // Kaimauer ragt ein Stück ins Wasser. Gezeichnet für Wasser im Norden, dann zur Küste gedreht.
+            const q = qOf(x, y);
+            const side = q < 0 ? QN : sideOf(q);
+            const ang = SIDE_ANGLE[side];
+            const ax = Math.round(Math.cos(ang));
+            const ay = Math.round(Math.sin(ang));
+            g.save();
+            const ca = Math.round(Math.cos(ang));
+            const sa = Math.round(Math.sin(ang));
+            g.setTransform(ca, sa, -sa, ca, px + TILE / 2, py + TILE / 2);
+            const lx = -TILE / 2;
+            const ly = -TILE / 2;
+            g.rect(lx, ly - 6, TILE, 7).fill(C.kaiWall);
+            g.rect(lx, ly - 6, TILE, 1.5).fill(shade(C.kaiWall, 0.75));
+            g.rect(lx, ly, TILE, TILE).fill(C.kai);
+            g.rect(lx, ly, TILE, 2.5).fill(C.kaiCurb);
+            g.rect(lx, ly + 8, TILE, 2).fill(C.yellow);
+            g.rect(lx + TILE - 0.6, ly + 10, 1.2, TILE - 10).fill(C.kaiJoint);
+            g.rect(lx, ly + TILE - 1, TILE, 1).fill(C.kaiJoint);
             // Kranschienen
-            g.rect(px, py + 13, TILE, 1.4).fill(0x8b939c);
-            g.rect(px, py + 20, TILE, 1.4).fill(0x8b939c);
+            g.rect(lx, ly + 13, TILE, 1.4).fill(0x8b939c);
+            g.rect(lx, ly + 20, TILE, 1.4).fill(0x8b939c);
             // Poller und Fender
-            g.circle(px + 8, py + 4.6, 2.5).fill(C.bollard);
-            g.circle(px + 24, py + 4.6, 2.5).fill(C.bollard);
-            g.circle(px + 7.4, py + 4, 1).fill({ color: 0xffffff, alpha: 0.35 });
-            g.circle(px + 23.4, py + 4, 1).fill({ color: 0xffffff, alpha: 0.35 });
-            g.roundRect(px + 13, py - 8, 6, 6, 2.5).fill(0x20252c);
-            if (!same(-1, 0)) g.rect(px, py - 6, 2, TILE + 6).fill(C.kaiWall);
-            if (!same(1, 0)) g.rect(px + TILE - 2, py - 6, 2, TILE + 6).fill(C.kaiWall);
+            g.circle(lx + 8, ly + 4.6, 2.5).fill(C.bollard);
+            g.circle(lx + 24, ly + 4.6, 2.5).fill(C.bollard);
+            g.circle(lx + 7.4, ly + 4, 1).fill({ color: 0xffffff, alpha: 0.35 });
+            g.circle(lx + 23.4, ly + 4, 1).fill({ color: 0xffffff, alpha: 0.35 });
+            g.roundRect(lx + 13, ly - 8, 6, 6, 2.5).fill(0x20252c);
+            if (!same(-ax, -ay)) g.rect(lx, ly - 6, 2, TILE + 6).fill(C.kaiWall);
+            if (!same(ax, ay)) g.rect(lx + TILE - 2, ly - 6, 2, TILE + 6).fill(C.kaiWall);
+            g.restore();
+            g.resetTransform();
             break;
           }
           case T.Road: {
@@ -767,20 +785,37 @@ export class Renderer {
     }
 
     // Ausgebaggerte Fahrrinne vor dem Kai: dunkleres Wasser mit Bojen an den Rändern
-    for (let x = 0; x < GRID_W; x++) {
-      if (!sim.depth[x]) continue;
-      const top = COAST - 3 * TILE;
-      g.rect(x * TILE, top, TILE, 3 * TILE - 7).fill({ color: 0x0c3560, alpha: 0.4 });
-      for (const side of [-1, 1]) {
-        const nx = x + side;
-        if (nx >= 0 && nx < GRID_W && sim.depth[nx]) continue;
-        const bx = side < 0 ? x * TILE + 2 : (x + 1) * TILE - 2;
-        g.circle(bx, top + 2, 3.2).fill(0xffffff);
-        g.circle(bx, top + 2, 2.3).fill(side < 0 ? 0xd9473f : 0x2f9e6b);
+    for (let q = 0; q < Q_MAX; q++) {
+      if (!sim.depth[q]) continue;
+      const r = this.channelRect(q);
+      if (!r) continue;
+      g.rect(r.x, r.y, r.w, r.h).fill({ color: 0x0c3560, alpha: 0.4 });
+      for (const d of [-1, 1]) {
+        if (sim.depth[q + d] && qTile(q + d)) continue;
+        // Boje an der äußeren Ecke der Rinne
+        const [ox, oy] = OUT[sideOf(q)];
+        const along = ox === 0;
+        const bx = along ? (d < 0 ? r.x + 2 : r.x + r.w - 2) : ox < 0 ? r.x + 2 : r.x + r.w - 2;
+        const by = along ? (oy < 0 ? r.y + 2 : r.y + r.h - 2) : d < 0 ? r.y + 2 : r.y + r.h - 2;
+        g.circle(bx, by, 3.2).fill(0xffffff);
+        g.circle(bx, by, 2.3).fill(d < 0 ? 0xd9473f : 0x2f9e6b);
       }
     }
     // Rand des Baugebiets
     g.rect(0, COAST, W, H - COAST).stroke({ width: 2, color: 0xffffff, alpha: 0.3 });
+  }
+
+  /** Wasserfläche vor der Kaiposition q, drei Felder tief (in Pixeln) */
+  private channelRect(q: number): { x: number; y: number; w: number; h: number } | null {
+    const t = qTile(q);
+    if (!t) return null;
+    const [ox, oy] = OUT[sideOf(q)];
+    const x0 = t[0] * TILE;
+    const y0 = t[1] * TILE;
+    if (oy < 0) return { x: x0, y: y0 - 3 * TILE, w: TILE, h: 3 * TILE - 7 };
+    if (oy > 0) return { x: x0, y: y0 + TILE + 7, w: TILE, h: 3 * TILE - 7 };
+    if (ox < 0) return { x: x0 - 2 * TILE, y: y0, w: 2 * TILE - 7, h: TILE };
+    return { x: x0 + TILE + 7, y: y0, w: 2 * TILE - 7, h: TILE };
   }
 
   private glow(x: number, y: number, r: number, color: number, alpha: number): Sprite {
@@ -848,12 +883,17 @@ export class Renderer {
       }
     }
     for (const gt of sim.gates) {
-      const x = gt.x * TILE;
-      const y = gt.y * TILE;
-      const w = gt.w * TILE;
+      // Gezeichnet waagerecht; ein gedrehtes Gate (1 × 2) wird um 90° gedreht
+      const vert = gt.h > gt.w;
+      const n = Math.max(gt.w, gt.h);
+      if (vert) g.setTransform(0, 1, -1, 0, gt.x * TILE + TILE, gt.y * TILE);
+      else g.setTransform(1, 0, 0, 1, gt.x * TILE, gt.y * TILE);
+      const x = 0;
+      const y = 0;
+      const w = n * TILE;
       g.rect(x + 1.5, y + 1.5, w - 3, TILE - 3).stroke({ width: 1.3, color: C.roadEdge, alpha: 0.85 });
       // Trennlinie zwischen den Spuren
-      for (let k = 1; k < gt.w; k++) g.rect(x + k * TILE - 1, y + 3, 2, TILE - 6).fill({ color: 0xffffff, alpha: 0.7 });
+      for (let k = 1; k < n; k++) g.rect(x + k * TILE - 1, y + 3, 2, TILE - 6).fill({ color: 0xffffff, alpha: 0.7 });
       // Dach über beide Spuren, Häuschen in der Mitte
       g.roundRect(x + 4.5, y + 7, w - 6, 13, 2).fill({ color: 0x000000, alpha: 0.25 });
       g.roundRect(x + 3, y + 4, w - 6, 13, 2).fill(C.white);
@@ -862,6 +902,7 @@ export class Renderer {
       for (let sx = x + 6; sx < x + w - 6; sx += 6.5) g.rect(sx, y + 4, 3, 3).fill(C.white);
       g.roundRect(x + w / 2 - 5, y + 8, 10, 5, 1.2).fill(0x2f6db0);
       g.rect(x + w / 2 - 3.5, y + 9.2, 7, 1.6).fill(0xbfe1ff);
+      g.resetTransform();
     }
   }
 
@@ -1072,8 +1113,10 @@ export class Renderer {
     alert.position.set(L / 2, 2);
     alert.visible = false;
 
-    root.addChild(wake, body, label, alert);
-    return { root, wake, body, cargo, alert, filled: -1, len: L };
+    const rotor = new Container();
+    rotor.addChild(wake, body);
+    root.addChild(rotor, label, alert);
+    return { root, rotor, wake, body, cargo, alert, filled: -1, len: L };
   }
 
   private syncShips(sim: Sim, a: number, view: View) {
@@ -1087,6 +1130,14 @@ export class Renderer {
         this.shipLayer.addChild(v.root);
       }
       v.root.position.set((s.px + (s.x - s.px) * a) * TILE, (s.py + (s.y - s.py) * a) * TILE);
+      // Drehung um die linke obere Ecke der Umrandung
+      const L = v.len;
+      const r = s.rot;
+      v.rotor.rotation = r;
+      const vert = Math.abs(Math.sin(r)) > 0.5;
+      if (!vert) v.rotor.position.set(Math.cos(r) > 0 ? 0 : L, Math.cos(r) > 0 ? 0 : 2 * TILE);
+      else v.rotor.position.set(Math.sin(r) > 0 ? 2 * TILE : 0, Math.sin(r) > 0 ? 0 : L);
+      v.alert.position.set(vert ? TILE : L / 2, 2);
       // Ladung an Deck: was noch an Bord ist, plus was schon verladen wurde
       const filled = Math.ceil(Math.min(1, (s.containers + s.reefers + s.loaded) / s.total) * v.cargo.length);
       if (filled !== v.filled) {
@@ -1183,7 +1234,10 @@ export class Renderer {
       v.root.rotation = v.rot;
       // Rechtsverkehr: in Fahrtrichtung rechts von der Mittellinie
       const idle = !t.job && t.wait <= 0;
-      v.lat += ((idle ? 10.5 : 7) - v.lat) * Math.min(1, view.dt * 6);
+      // Einbahnstraße: zwei Spuren, die zweite links der Mitte
+      const ow = sim.oneway[t.tile] >= 0 || (t.next >= 0 && sim.oneway[t.next] >= 0);
+      const want = idle ? 10.5 : ow ? (t.slot ? -6.5 : 6.5) : 7;
+      v.lat += (want - v.lat) * Math.min(1, view.dt * 6);
       v.root.position.set(
         (t.px + (t.fx - t.px) * a + 0.5) * TILE - Math.sin(v.rot) * v.lat,
         (t.py + (t.fy - t.py) * a + 0.5) * TILE + Math.cos(v.rot) * v.lat,
@@ -1213,7 +1267,13 @@ export class Renderer {
 
   private makeCrane(c: Crane): CraneView {
     const root = new Container();
-    root.position.set(c.x * TILE, c.y * TILE);
+    // Gezeichnet für Wasser im Norden, dann zur Küste gedreht. Süd und West werden gespiegelt,
+    // damit die Containerbrücke auf das nächste Kai-Feld (q + 1) reicht.
+    const side = sideOf(c.q);
+    root.pivot.set(TILE / 2, TILE / 2);
+    root.position.set(c.x * TILE + TILE / 2, c.y * TILE + TILE / 2);
+    root.rotation = SIDE_ANGLE[side] ?? 0;
+    if (side === QS_ || side === QW) root.scale.x = -1;
     // Mobilkran: orange. Containerbrücke: blau, mit längerem und breiterem Ausleger
     const main = c.big ? 0x2f6db0 : 0xe2582c;
     const dark = shade(main, 0.7);
@@ -1278,14 +1338,14 @@ export class Renderer {
 
     // Am Fuß des Krans: unten entladene Container, darüber Export fürs Schiff
     const buffer: Sprite[] = [];
-    for (let k = 0; k < CRANE_BUFFER; k++) {
-      const s = this.box(this.boxV, 0xffffff, 1.6 + k * (c.big ? 15 : 7.4), 22.2, 0.8);
+    for (let k = 0; k < (c.big ? CRANE_BUFFER_BIG : CRANE_BUFFER); k++) {
+      const s = this.box(this.boxV, 0xffffff, 1.6 + k * 7.4 + (c.big ? 1.2 : 0), 22.2, 0.8);
       s.visible = false;
       buffer.push(s);
     }
     const exp: Sprite[] = [];
-    for (let k = 0; k < CRANE_EXP_BUFFER; k++) {
-      const s = this.box(this.boxV, EXPORT_BOX, 2.4 + k * (c.big ? 15 : 7.2), 12.6, 0.7);
+    for (let k = 0; k < (c.big ? CRANE_BUFFER_BIG : CRANE_EXP_BUFFER); k++) {
+      const s = this.box(this.boxV, EXPORT_BOX, 2.4 + k * 7.2 + (c.big ? 1.2 : 0), 12.6, 0.7);
       s.visible = false;
       exp.push(s);
     }
@@ -1533,13 +1593,21 @@ export class Renderer {
 
     // Festmacherleinen
     for (const s of sim.ships) {
-      if (s.state !== 'unloading') continue;
-      const x = s.x * TILE;
-      const y = s.y * TILE;
+      if (s.state !== 'unloading' || s.berthX < 0) continue;
       const rope = { width: 1.1, color: 0xe9e3cf, alpha: 0.9 };
-      const L = s.len * TILE;
-      g.moveTo(x + 9, y + 56).lineTo(x + 8, COAST + 4.6).stroke(rope);
-      g.moveTo(x + L - 28, y + 56).lineTo(x + L - 8, COAST + 4.6).stroke(rope);
+      const [ox, oy] = OUT[sideOf(s.berthX)];
+      for (const [q, shift] of [
+        [s.berthX, 6],
+        [s.berthX + s.len - 1, -6],
+      ] as const) {
+        const t = qTile(q);
+        if (!t) continue;
+        // Poller an der Kaikante, Klampe an Deck etwas weiter draußen
+        const bx = (t[0] + 0.5) * TILE + ox * 11.4;
+        const by = (t[1] + 0.5) * TILE + oy * 11.4;
+        const along = [Math.abs(oy), Math.abs(ox)];
+        g.moveTo(bx + ox * 22 + along[0] * shift, by + oy * 22 + along[1] * shift).lineTo(bx, by).stroke(rope);
+      }
     }
 
     // Stau: Felder, auf denen Trucks zuletzt warten mussten, färben sich rot
@@ -1551,8 +1619,11 @@ export class Renderer {
 
     // Gates: wartende Container, Schranke, Ampel
     for (const gt of sim.gates) {
-      const px = gt.x * TILE;
-      const py = gt.y * TILE;
+      const lanes = Math.max(gt.w, gt.h);
+      if (gt.h > gt.w) g.setTransform(0, 1, -1, 0, gt.x * TILE + TILE, gt.y * TILE);
+      else g.setTransform(1, 0, 0, 1, gt.x * TILE, gt.y * TILE);
+      const px = 0;
+      const py = 0;
       for (let k = 0; k < gt.apron.length; k++) {
         const bx = px + 3.5 + k * 6.4;
         g.roundRect(bx + 0.8, py + 22.3, 5.4, 7.4, 0.8).fill({ color: 0x000000, alpha: 0.3 });
@@ -1564,7 +1635,7 @@ export class Renderer {
         g.roundRect(px + 3.2 + k * 6.8, py - 3.8, 4.4, 4.4, 0.7).fill(EXPORT_BOX);
       }
       const open = gt.proc > 0;
-      for (let lane = 0; lane < gt.w; lane++) {
+      for (let lane = 0; lane < lanes; lane++) {
         const lx = px + lane * TILE;
         if (open) {
           g.rect(lx + 4, py + 17.5, 2, 4).fill(C.white);
@@ -1573,7 +1644,8 @@ export class Renderer {
           for (let i = 0; i < 3; i++) g.rect(lx + 8 + i * 8, py + 18.5, 4, 1.8).fill(C.white);
         }
       }
-      g.circle(px + gt.w * TILE - 5.5, py + 10.5, 1.8).fill(open ? 0x3fe08a : 0xff5a4a);
+      g.circle(px + lanes * TILE - 5.5, py + 10.5, 1.8).fill(open ? 0x3fe08a : 0xff5a4a);
+      g.resetTransform();
     }
 
     // Verarbeitung: links wartender Eingang, rechts fertiger Ausgang, Lampe zeigt Arbeit
@@ -1599,14 +1671,19 @@ export class Renderer {
 
     // Hinweise, wo das aktive Werkzeug bauen kann
     if (view.tool === 'kai') {
-      for (let x = 0; x < GRID_W; x++) {
-        if (sim.kind[COAST_ROW * GRID_W + x] === T.Land) {
-          g.rect(x * TILE + 1.5, COAST + 1.5, TILE - 3, TILE - 3).stroke({ width: 1.5, color: 0xffffff, alpha: 0.5 + 0.2 * Math.sin(view.time * 4) });
+      for (let i = 0; i < sim.kind.length; i++) {
+        const x = i % GRID_W;
+        const y = (i / GRID_W) | 0;
+        if (sim.kind[i] === T.Land && sim.kaiSpot(x, y)) {
+          g.rect(x * TILE + 1.5, y * TILE + 1.5, TILE - 3, TILE - 3).stroke({ width: 1.5, color: 0xffffff, alpha: 0.5 + 0.2 * Math.sin(view.time * 4) });
         }
       }
     } else if (view.tool === 'dredge') {
-      for (let x = 0; x < GRID_W; x++) {
-        if (!sim.depth[x]) g.rect(x * TILE + 1.5, COAST - 2 * TILE + 1.5, TILE - 3, 2 * TILE - 10).stroke({ width: 1.5, color: 0xffffff, alpha: 0.4 + 0.2 * Math.sin(view.time * 4) });
+      for (let q = 0; q < Q_MAX; q++) {
+        const t = qTile(q);
+        if (!t || sim.depth[q] || !sim.kaiSpot(t[0], t[1]) && sim.kind[t[1] * GRID_W + t[0]] !== T.Kai) continue;
+        const r = this.channelRect(q)!;
+        g.rect(r.x + 1.5, r.y + 1.5, r.w - 3, r.h - 3).stroke({ width: 1.5, color: 0xffffff, alpha: 0.4 + 0.2 * Math.sin(view.time * 4) });
       }
     } else if (view.tool === 'buyland') {
       for (let x = 0; x < GRID_W; x += PLOT_W) {
@@ -1625,9 +1702,11 @@ export class Renderer {
         }
       }
     } else if (view.tool === 'crane') {
-      for (let x = 0; x < GRID_W; x++) {
-        if (sim.kind[COAST_ROW * GRID_W + x] === T.Kai && !sim.craneAt(x, COAST_ROW)) {
-          g.rect(x * TILE + 2.5, COAST + 2.5, TILE - 5, TILE - 5).stroke({ width: 1.5, color: 0xffffff, alpha: 0.55 + 0.2 * Math.sin(view.time * 4) });
+      for (let i = 0; i < sim.kind.length; i++) {
+        const x = i % GRID_W;
+        const y = (i / GRID_W) | 0;
+        if (sim.kind[i] === T.Kai && !sim.craneAt(x, y)) {
+          g.rect(x * TILE + 2.5, y * TILE + 2.5, TILE - 5, TILE - 5).stroke({ width: 1.5, color: 0xffffff, alpha: 0.55 + 0.2 * Math.sin(view.time * 4) });
         }
       }
     }
@@ -1724,6 +1803,7 @@ export class Renderer {
         g.circle((t.fx + 0.5) * TILE, (t.fy + 0.5) * TILE, 13).stroke({ width: 2, color: 0xffffff });
       }
     }
+    this.drawWaitBars(g, sim, a);
     if (view.selected) this.drawSelection(g, sim, view.selected, a, view.time);
 
     // Bau-Vorschau
@@ -1731,14 +1811,15 @@ export class Renderer {
       const { x, y, ok } = view.hover;
       if (x >= 0 && y >= 0 && x < GRID_W && y < GRID_H) {
         const col = view.tool === 'demolish' || !ok ? C.bad : C.good;
-        const [fw, fh] = sizeOf(view.tool);
+        const [fw, fh] = dimsOf(view.tool, sim.rot);
         g.roundRect(x * TILE, y * TILE, fw * TILE, fh * TILE, 3).fill({ color: col, alpha: 0.38 });
         g.roundRect(x * TILE + 1, y * TILE + 1, fw * TILE - 2, fh * TILE - 2, 3).stroke({ width: 2, color: 0xffffff, alpha: 0.9 });
         if (view.tool === 'crane' && ok) {
           g.roundRect(x * TILE + 11.5, y * TILE - 60, 9, 82, 1.5).fill({ color: 0xffffff, alpha: 0.35 });
         }
         if (view.tool === 'dredge' && ok) {
-          g.rect(x * TILE, COAST - 3 * TILE, TILE, 3 * TILE - 7).fill({ color: 0x0c3560, alpha: 0.45 });
+          const r = this.channelRect(qOfWater(x, y));
+          if (r) g.rect(r.x, r.y, r.w, r.h).fill({ color: 0x0c3560, alpha: 0.45 });
         }
       }
     }
@@ -1765,11 +1846,15 @@ export class Renderer {
       sp.alpha = alpha;
     };
     for (const s of sim.ships) {
-      const x = (s.px + (s.x - s.px) * a) * TILE;
-      const y = (s.py + (s.y - s.py) * a) * TILE;
-      use(x + 15, y + 32, 44, 0xffe2b0, 0.4);
-      use(x + s.len * TILE - 9, y + 25, 10, 0xff4a3d, 0.8);
-      use(x + s.len * TILE - 9, y + 39, 10, 0x3fe08a, 0.8);
+      const b = sim.shipBox(s);
+      const cx = (s.px + (s.x - s.px) * a + b.w / 2) * TILE;
+      const cy = (s.py + (s.y - s.py) * a + b.h / 2) * TILE;
+      const dx = Math.cos(s.rot);
+      const dy = Math.sin(s.rot);
+      const L = s.len * TILE;
+      use(cx - dx * (L / 2 - 15), cy - dy * (L / 2 - 15), 44, 0xffe2b0, 0.4);
+      use(cx + dx * (L / 2 - 9) + dy * 7, cy + dy * (L / 2 - 9) - dx * 7, 10, 0xff4a3d, 0.8);
+      use(cx + dx * (L / 2 - 9) - dy * 7, cy + dy * (L / 2 - 9) + dx * 7, 10, 0x3fe08a, 0.8);
     }
     for (const t of sim.trucks) {
       const cx = (t.px + (t.fx - t.px) * a + 0.5) * TILE;
@@ -1797,6 +1882,34 @@ export class Renderer {
     });
   }
 
+  /** Wartebalken: Schiffe auf Reede (Geduld), am Kai (zugesagte Liegezeit), Trucks im Stau */
+  private drawWaitBars(g: Graphics, sim: Sim, a: number) {
+    const bar = (cx: number, top: number, w: number, u: number, col: number) => {
+      const h = 4.5;
+      g.roundRect(cx - w / 2 - 1.5, top - 1.5, w + 3, h + 3, 3).fill({ color: 0xffffff, alpha: 0.92 });
+      g.roundRect(cx - w / 2, top, w, h, 2).fill(0x2a3442);
+      g.roundRect(cx - w / 2, top, Math.max(h, w * Math.min(1, u)), h, 2).fill(col);
+    };
+    const patience = SHIP_PATIENCE_GM * DIFFS[sim.diff].patience;
+    for (const s of sim.ships) {
+      let u = -1;
+      if (s.state === 'queued' && s.queuedFor > 0) u = s.queuedFor / patience;
+      else if (s.state === 'unloading') u = s.atBerth / Math.max(1, s.dwellTarget);
+      if (u < 0) continue;
+      const b = sim.shipBox(s);
+      const x = (s.px + (s.x - s.px) * a + b.w / 2) * TILE;
+      const y = (s.py + (s.y - s.py) * a) * TILE;
+      bar(x, y - 22, Math.min(64, b.w * TILE - 20), u, u < 0.6 ? C.good : u < 0.9 ? C.warn : C.bad);
+    }
+    for (const t of sim.trucks) {
+      if (t.stuck < 0.6) continue;
+      const cx = (t.px + (t.fx - t.px) * a + 0.5) * TILE;
+      const cy = (t.py + (t.fy - t.py) * a + 0.5) * TILE;
+      const u = t.stuck / TRUCK_PATIENCE_GM;
+      bar(cx, cy - 20, 20, u, u < 0.5 ? C.warn : C.bad);
+    }
+  }
+
   private drawSelection(g: Graphics, sim: Sim, sel: NonNullable<View['selected']>, a: number, time: number) {
     let x = 0;
     let y = 0;
@@ -1805,24 +1918,35 @@ export class Renderer {
     if (sel.kind === 'ship') {
       const s = sim.ships.find((s) => s.id === sel.id);
       if (!s) return;
-      x = (s.px + (s.x - s.px) * a) * TILE;
-      y = (s.py + (s.y - s.py) * a) * TILE + 3;
-      w = s.len * TILE;
-      h = 2 * TILE - 6;
+      const b = sim.shipBox(s);
+      x = (s.px + (s.x - s.px) * a) * TILE + (b.w === 2 ? 3 : 0);
+      y = (s.py + (s.y - s.py) * a) * TILE + (b.h === 2 ? 3 : 0);
+      w = b.w * TILE - (b.w === 2 ? 6 : 0);
+      h = b.h * TILE - (b.h === 2 ? 6 : 0);
     } else if (sel.kind === 'crane') {
       const c = sim.cranes.find((c) => c.id === sel.id);
       if (!c) return;
       const up = c.big ? 70 : 60;
-      x = c.x * TILE;
-      y = c.y * TILE - up;
-      h = TILE + up;
-      w = (c.big ? 2 : 1) * TILE;
+      const t2 = c.big ? qTile(c.q + 1) : null;
+      const xs = [c.x, t2 ? t2[0] : c.x];
+      const ys = [c.y, t2 ? t2[1] : c.y];
+      x = Math.min(...xs) * TILE;
+      y = Math.min(...ys) * TILE;
+      w = (Math.max(...xs) + 1) * TILE - x;
+      h = (Math.max(...ys) + 1) * TILE - y;
+      // Der Ausleger ragt übers Wasser
+      const [ox, oy] = OUT[sideOf(c.q)];
+      if (ox < 0) x -= up;
+      if (oy < 0) y -= up;
+      w += Math.abs(ox) * up;
+      h += Math.abs(oy) * up;
     } else if (sel.kind === 'gate') {
       const gt = sim.gates.find((gt) => gt.id === sel.id);
       if (!gt) return;
       x = gt.x * TILE;
       y = gt.y * TILE;
       w = gt.w * TILE;
+      h = gt.h * TILE;
     } else if (sel.kind === 'plant') {
       const p = sim.plants.find((p) => p.id === sel.id);
       if (!p) return;
