@@ -7,6 +7,8 @@ import {
   MAPS,
   MapId,
   RIVAL_NAME,
+  PRODUCTS,
+  ProductId,
   ZONES,
   ROLES,
   Role,
@@ -26,7 +28,9 @@ import {
   UPGRADE,
   YARD_CAP_PER_TILE,
 } from '../sim/data';
+import { ACHIEVEMENTS } from '../achievements';
 import { MISSIONS } from '../sim/missions';
+import { SCENARIOS } from '../sim/scenarios';
 import type { Contract, Job, Sim } from '../sim/sim';
 
 const num = (n: number) => Math.round(n).toLocaleString('de-DE');
@@ -49,6 +53,7 @@ const ICONS: Record<string, string> = {
   unpack: svg('<path d="M3 20V9l4.5 3V9l4.5 3V9l4.5 3V5h4.5v15z"/><path d="M7 16h3M13 16h3"/>'),
   pack: svg('<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>'),
   assign: svg('<rect x="3.5" y="5" width="17" height="14" rx="1.5" stroke-dasharray="3 2.4"/><path d="M8 12.5l2.6 2.6L16 9.5"/>'),
+  rtg: svg('<path d="M4 20V5M20 20V5M3 5h18M3 9h18"/><rect x="10" y="10" width="4" height="3" rx=".5"/><path d="M12 13v3"/><rect x="9" y="16" width="6" height="4" rx=".6"/>'),
   zone: svg('<rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.5"/><rect x="13" y="3.5" width="7.5" height="7.5" rx="1.5"/><rect x="3.5" y="13" width="7.5" height="7.5" rx="1.5"/><path d="M13 16.8h7.5M16.8 13v7.5"/>'),
   chart: svg('<path d="M4 20V4M4 20h16"/><rect x="7" y="12" width="3" height="6" rx=".6"/><rect x="12" y="8" width="3" height="10" rx=".6"/><rect x="17" y="10.5" width="3" height="7.5" rx=".6"/>'),
   oneway: svg('<path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M3 5h18M3 19h18" opacity=".5"/>'),
@@ -99,6 +104,7 @@ const TOOLS: ToolDef[] = [
   { cat: 'gear', tool: 'truck', label: 'Truck', sub: '25k', color: '#e0a030' },
   { cat: 'build', tool: 'unpack', label: 'Packhalle', sub: '60k · 3×2', color: '#c98a3c' },
   { cat: 'build', tool: 'pack', label: 'Veredeln', sub: '90k · 3×3', color: '#7a5cc7' },
+  { cat: 'store', tool: 'rtg', label: 'Portalkran', sub: '60k', color: '#f2a030' },
   { cat: 'store', tool: 'reefer', label: 'Kühlplatz', sub: '4k', color: '#3b9bd6' },
   { cat: 'build', tool: 'cold', label: 'Kühlhalle', sub: '80k · 2×2', color: '#3b9bd6' },
   { cat: 'build', tool: 'workshop', label: 'Werkstatt', sub: '40k · 2×2', color: '#5b6b82' },
@@ -181,6 +187,9 @@ export class UI {
   private decision!: HTMLElement;
   private decisionBody!: HTMLElement;
   private rolePick!: HTMLElement;
+  private dayCard!: HTMLElement;
+  private dayTimer = 0;
+  private achModal!: HTMLElement;
   private zonePick!: HTMLElement;
   private alertEl!: HTMLElement;
   private lastFin = '';
@@ -295,7 +304,9 @@ export class UI {
       }
     });
 
-    left.append(status, this.missionCard, this.bnCard);
+    this.dayCard = el('div', 'card dayrep hidden');
+    this.dayCard.addEventListener('click', () => this.dayCard.classList.add('hidden'));
+    left.append(status, this.missionCard, this.bnCard, this.dayCard);
 
     // Rechte Knopfleiste
     const side = el('div', 'side');
@@ -344,6 +355,8 @@ export class UI {
       const role = t.closest<HTMLElement>('[data-role]');
       if (role) this.game.setTruckRole(role.dataset.role as TruckRole);
       else if (t.closest('[data-upgrade]')) this.game.upgradeSelected();
+      const prod = t.closest<HTMLElement>('[data-product]');
+      if (prod && this.game.selected?.kind === 'plant') this.game.setProduct(this.game.selected.id, prod.dataset.product as ProductId);
     });
 
     // Werkzeugleiste
@@ -420,6 +433,9 @@ export class UI {
         <p class="sub maptext"></p>
         <button class="primary demo">Demo-Hafen mit Engpass</button>
         <button class="secondary empty">Neuer leerer Hafen</button>
+        <div class="difflabel">Szenarien</div>
+        ${SCENARIOS.map((s) => `<button class="secondary scen" data-scenario="${s.id}"><b>${s.name}</b><span>${s.text} Ziel: ${s.goal} bis Tag ${s.days}.</span></button>`).join('')}
+        <button class="secondary achv">Erfolge und Bestenliste</button>
         <details><summary>Bedienung</summary>
           <ul>
             <li><b>Handy:</b> Werkzeug unten wählen, tippen oder ziehen zum Bauen. Mit zwei Fingern verschieben und zoomen, mit „Ansehen" auch mit einem Finger.</li>
@@ -479,6 +495,13 @@ export class UI {
       this.hideMenu();
     });
     this.menu.querySelector('.close-menu')!.addEventListener('click', () => this.hideMenu());
+    for (const b of this.menu.querySelectorAll<HTMLElement>('[data-scenario]')) {
+      b.addEventListener('click', () => {
+        this.game.newScenario(b.dataset.scenario!);
+        this.hideMenu();
+      });
+    }
+    this.menu.querySelector('.achv')!.addEventListener('click', () => this.showAchievements());
 
     // Verträge
     this.deals = el('div', 'modal hidden');
@@ -555,7 +578,7 @@ export class UI {
       this.game.setSpeed(this.speedBeforeModal);
     });
 
-    root.append(top, left, side, this.sheet, bar, this.toasts, this.menu, this.deals, this.staffModal, this.finCard, this.endModal, this.decision, this.levelUp);
+    root.append(top, left, side, this.sheet, bar, this.toasts, this.menu, this.deals, this.staffModal, this.finCard, this.endModal, this.decision, this.levelUp, this.buildAchModal());
     this.refreshSpeed();
     this.refreshTools();
     this.refreshOverlay();
@@ -601,6 +624,56 @@ export class UI {
     if (this.levelUp.classList.contains('hidden')) this.speedBeforeModal = this.game.speed || this.game.lastSpeed || 1;
     this.levelUp.classList.remove('hidden');
     this.game.setSpeed(0);
+  }
+
+  private buildAchModal(): HTMLElement {
+    this.achModal = el('div', 'modal hidden');
+    this.achModal.innerHTML = `<div class="dialog deals"><div class="dhead"><h2>Erfolge</h2><button class="x" aria-label="Schließen">${ICONS.close}</button></div><div class="body"></div></div>`;
+    this.achModal.addEventListener('click', (e) => {
+      const t = e.target as HTMLElement;
+      if (t === this.achModal || t.closest('.x')) this.achModal.classList.add('hidden');
+    });
+    return this.achModal;
+  }
+
+  showAchievements() {
+    const pr = this.game.progress;
+    const got = ACHIEVEMENTS.filter((a) => pr.unlocked[a.id]).length;
+    this.achModal.querySelector('.body')!.innerHTML = `
+      <p class="sub">${got} von ${ACHIEVEMENTS.length} freigeschaltet. Erfolge und Bestenliste werden nur in diesem Browser gespeichert.</p>
+      <div class="achs">${ACHIEVEMENTS.map(
+        (a) => `<div class="ach ${pr.unlocked[a.id] ? 'got' : ''}"><span class="ai">${pr.unlocked[a.id] ? ICONS.trophy : ICONS.lock}</span><span><b>${a.name}</b><small>${a.text}${pr.unlocked[a.id] ? ` · ${pr.unlocked[a.id]}` : ''}</small></span></div>`,
+      ).join('')}</div>
+      <h3>Bestenliste</h3>
+      ${
+        pr.records.length
+          ? `<div class="board">${pr.records
+              .slice(0, 12)
+              .map((r, i) => `<div><span class="rk">${i + 1}</span><span><b>${r.title}</b><small>${r.date}, ${num(r.handled)} Container, Vermögen ${eur(r.money)}</small></span><b>Tag ${r.day}</b></div>`)
+              .join('')}</div>`
+          : '<p class="sub">Noch kein Sieg. Gewinne ein Spiel oder ein Szenario, dann steht es hier.</p>'
+      }`;
+    this.achModal.classList.remove('hidden');
+  }
+
+  /** Kurzer Bericht über den vergangenen Tag. Verschwindet von selbst oder per Tippen. */
+  showDayReport() {
+    const sim = this.game.sim;
+    const y = sim.history.at(-1);
+    if (!y) return;
+    const inc = y.fees + y.rail + y.exportFees + y.berth + y.bonus;
+    const exp = y.running + y.building + y.penalty + y.wages + (y.interest ?? 0);
+    const bn = y.bn ? (Object.entries(y.bn) as [keyof typeof y.bn, number][]).sort((a, b) => b[1] - a[1])[0] : null;
+    const bnName = bn && bn[1] > 20 ? STAGES.find((s) => s.key === bn[0])!.label : 'keiner';
+    this.dayCard.innerHTML = `
+      <div class="ctitle"><span>Tag ${sim.day - 1} im Rückblick</span><span class="x">${ICONS.close}</span></div>
+      <div class="fl sub"><span>Ergebnis</span><b class="${inc - exp >= 0 ? 'pos' : 'neg'}">${eur(inc - exp)}</b></div>
+      <div class="fl sub"><span>Container</span><b>${num(y.handled)}</b></div>
+      <div class="fl sub"><span>Schiffe pünktlich</span><b>${y.ships ? `${y.onTime} von ${y.ships}` : '–'}</b></div>
+      <div class="fl sub"><span>Häufigster Engpass</span><b>${bnName}</b></div>
+      ${y.jamPeak > 0.2 ? `<div class="fl sub"><span>Stau</span><b class="neg">bis ${Math.round(y.jamPeak * 100)} % der Trucks</b></div>` : ''}`;
+    this.dayCard.classList.remove('hidden');
+    this.dayTimer = 30;
   }
 
   showDecision() {
@@ -666,6 +739,10 @@ export class UI {
   // ───────────────────────── Aktualisieren ─────────────────────────
 
   update(dt: number) {
+    if (this.dayTimer > 0) {
+      this.dayTimer -= dt;
+      if (this.dayTimer <= 0) this.dayCard.classList.add('hidden');
+    }
     this.acc += dt;
     if (this.acc < 0.12) return;
     this.acc = 0;
@@ -795,6 +872,14 @@ export class UI {
       <div class="fl total"><b>Ergebnis heute</b><b class="${inc - exp >= 0 ? 'pos' : 'neg'}">${eur(inc - exp)}</b></div>
       <div class="fl sub"><span>Laufend pro Tag: Wartung / Löhne</span><span>${eur(sim.runningCost())} / ${eur((Object.keys(ROLES) as Role[]).reduce((n, r) => n + sim.staff[r] * sim.wagePerHour(r) * 24, 0))}</span></div>
       ${sim.level >= 2 ? `<h3>Konkurrenz</h3><div class="fl sub"><span>${RIVAL_NAME}: pünktlich</span><span>${Math.round(sim.rivalRate * 100)} %</span></div><div class="fl sub"><span>Du gestern</span><span class="${sim.myRate !== null && sim.myRate < sim.rivalRate - 0.1 ? 'neg' : ''}">${sim.myRate === null ? '–' : `${Math.round(sim.myRate * 100)} %`}</span></div><p class="sub">Liegst du mehr als 10 Punkte darunter, wechseln Reedereien und es kommen weniger freie Schiffe.${sim.lostToRival ? ` Bisher verloren: ${sim.lostToRival} Verträge.` : ''}</p>` : ''}
+      <h3>Markt</h3>
+      ${(Object.keys(PRODUCTS) as ProductId[])
+        .map((p) => {
+          const d = sim.market[p] - sim.marketPrev[p];
+          const arrow = d > 0.02 ? '<span class="pos">▲</span>' : d < -0.02 ? '<span class="neg">▼</span>' : '<span class="sub">●</span>';
+          return `<div class="fl sub"><span>${PRODUCTS[p].name}</span><span>${arrow} ${eur(sim.price(p))}</span></div>`;
+        })
+        .join('')}
       <h3>Kredit</h3>
       <div class="fl sub"><span>Offen</span><span>${eur(sim.loan)} von ${eur(sim.loanLimit)}</span></div>
       <div class="fl sub"><span>Zinsen pro Tag</span><span>${eur(sim.interestPerDay)}</span></div>
@@ -975,7 +1060,7 @@ export class UI {
         <div class="meta">Wartend nach draußen: ${g.apron.length} von ${GATE_APRON_CAP}${sim.level >= 2 ? ` · Export wartet auf Truck: ${g.inApron}` : ''}</div>
         <div class="meta">Abgefertigt: ${num(g.served)}</div>`;
     } else if (sel.kind === 'yard') {
-      html = `<h3>Stapelplatz <span class="tag">${YARD_CAP_PER_TILE} Container pro Feld</span></h3>
+      html = `<h3>Stapelplatz <span class="tag">${sim.capAt(sel.id)} Container pro Feld${sim.rtgCovers(sel.id) ? ' mit Portalkran' : ''}</span></h3>
         <div class="meta">Dieses Feld: ${sim.stock[sel.id]} Import, ${sim.stockExp[sel.id]} Export</div>
         <div class="meta">Gesamt: ${sim.yardStock} von ${sim.yardCapacity}</div>`;
     } else if (sel.kind === 'reefer') {
@@ -989,9 +1074,14 @@ export class UI {
       const cfg = PLANTS[p.kind];
       const pack = p.kind === 'pack';
       html = `<h3>${cfg.name} <span class="tag">${Math.round(60 / cfg.time)} pro Stunde</span></h3>
-        <div class="meta">${pack ? 'Macht aus 2 Einheiten ausgepackter Ware 1 Container Fertigware (900 €).' : p.kind === 'cold' ? 'Verarbeitet Kühlcontainer vom Kühlplatz zu Lebensmitteln (750 € statt 400 €).' : 'Packt Import-Container vom Stapelplatz aus. Die Ware geht weiter zur Veredelung.'}</div>
+        <div class="meta">${pack ? `Macht aus 2 Einheiten ausgepackter Ware 1 Container ${PRODUCTS[p.product].name} (zurzeit ${eur(sim.price(p.product))}).` : p.kind === 'cold' ? `Verarbeitet Kühlcontainer zu Lebensmitteln (zurzeit ${eur(sim.price('food'))} statt 400 €).` : 'Packt Import-Container vom Stapelplatz aus. Die Ware geht weiter zur Veredelung.'}</div>
         <div class="meta">Eingang: ${p.inBuf} von ${PLANT_BUF} · Ausgang: ${p.outBuf} von ${PLANT_BUF} · Hergestellt: ${num(p.made)}</div>
         <div class="meta ${p.outBuf >= PLANT_BUF ? 'neg' : ''}">${p.proc > 0 ? 'Arbeitet' : p.outBuf >= PLANT_BUF ? 'Ausgang voll: Es fehlt ein Truck, der abholt' : p.inBuf < cfg.needs ? 'Wartet auf Nachschub' : 'Bereit'}</div>`;
+      if (pack) {
+        actions = `<div class="rolelabel">Produkt</div><div class="roles">${(['elec', 'cloth'] as ProductId[])
+          .map((q) => `<button data-product="${q}" class="${p.product === q ? 'on' : ''}">${PRODUCTS[q].name} · ${eur(sim.price(q))}</button>`)
+          .join('')}</div>`;
+      }
     } else if (sel.kind === 'shop') {
       const sh = sim.shops.find((q) => q.id === sel.id);
       if (!sh) return gone();

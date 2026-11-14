@@ -34,6 +34,12 @@ Das Spielkonzept steht im Doc „Hafen-Imperium: Spielkonzept“.
 - **Konkurrenz und Entscheidungen (ab Stufe 2):** Hafen Nordstadt wirbt Reedereien ab, wenn du unpünktlicher bist. Ereignisse wie Streik oder Zollverdacht verlangen eine Entscheidung.
 - **Zonen:** Lagerflächen, Kräne, Gates, Hallen, Gleise und Trucks in einer von vier Farben anmalen. Fahrten verbinden nur gleiche Zonen, Trucks mit Zone fahren nur dort.
 - **Aufrüsten:** Kran oder Truck mit „Ansehen“ antippen und im Info-Blatt aufrüsten.
+- **Große Kräne:** Die aufgerüstete Containerbrücke steht über zwei Kai-Feldern (das Feld rechts daneben muss frei sein).
+- **Portalkran (ab Stufe 3):** Auf eine Lager- oder Kühlfläche gesetzt, stapelt er 9 statt 6 Container pro Feld im Umkreis und halbiert die Umschlagzeit der Trucks dort. Braucht einen Kranführer.
+- **Markt:** Elektronik, Kleidung und Lebensmittel haben eigene Preise, die sich täglich ändern (mit Boom und Einbruch). In der Veredelung wählst du, was produziert wird. Kurse stehen in der Bilanz.
+- **Tagesbericht:** Nach jedem Tag eine Karte mit Ergebnis, Containern, Pünktlichkeit, häufigstem Engpass und Stau.
+- **Szenarien:** Marode übernommen (Schulden tilgen), Insel-Express (600 Container an einem Tag), Kühlkette (150 Lebensmittel).
+- **Erfolge und Bestenliste:** 19 Erfolge und eine lokale Bestenliste der Siege, gespeichert nur im Browser.
 
 Alle Werte stehen in `src/sim/data.ts`. Das Balancing ist grob und noch nicht durch Spielen abgestimmt.
 

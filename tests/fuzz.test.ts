@@ -1,17 +1,17 @@
 /** Zufällige Bau- und Abrissfolgen: Das Spiel darf nie abstürzen und keine unmöglichen Zustände erreichen. */
 import { expect, it } from 'vitest';
-import { BuildTool, COAST_ROW, CRANE_BUFFER, CRANE_EXP_BUFFER, GRID_H, GRID_W, T, YARD_CAP_PER_TILE } from '../src/sim/data';
+import { BuildTool, COAST_ROW, CRANE_BUFFER, CRANE_EXP_BUFFER, GRID_H, GRID_W, RTG_CAP, T } from '../src/sim/data';
 import { buildDemo } from '../src/sim/demo';
 import { Sim } from '../src/sim/sim';
 
-const TOOLS: BuildTool[] = ['road', 'road', 'road', 'yard', 'reefer', 'gate', 'truck', 'truck', 'crane', 'kai', 'unpack', 'pack', 'cold', 'workshop', 'rail', 'dredge'];
+const TOOLS: BuildTool[] = ['road', 'road', 'road', 'yard', 'reefer', 'gate', 'truck', 'truck', 'crane', 'kai', 'unpack', 'pack', 'cold', 'workshop', 'rail', 'dredge', 'rtg'];
 
 function check(s: Sim, step: number) {
   const where = `Schritt ${step}`;
   for (let i = 0; i < s.kind.length; i++) {
     if (s.kind[i] === T.Yard || s.kind[i] === T.Reefer) {
       expect(s.stock[i], where).toBeGreaterThanOrEqual(0);
-      expect(s.stock[i] + s.stockExp[i], where).toBeLessThanOrEqual(YARD_CAP_PER_TILE);
+      expect(s.stock[i] + s.stockExp[i], where).toBeLessThanOrEqual(RTG_CAP);
     } else {
       expect(s.stock[i] + s.stockExp[i], `${where}: Ware auf Feld ohne Lager`).toBe(0);
     }

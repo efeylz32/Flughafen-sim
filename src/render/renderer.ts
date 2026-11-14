@@ -1,5 +1,5 @@
 import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture, TilingSprite } from 'pixi.js';
-import { ZONES, COAST_ROW, CRANE_BUFFER, CRANE_EXP_BUFFER, GRID_H, GRID_W, MapId, MIN_PER_DAY, PLOT_W, RAIL_CAP, RAIL_TRAVEL_GM, sizeOf, T, TICK_GM, TILE, YARD_CAP_PER_TILE } from '../sim/data';
+import { ZONES, COAST_ROW, CRANE_BUFFER, CRANE_EXP_BUFFER, GRID_H, GRID_W, MapId, MIN_PER_DAY, PLOT_W, RAIL_CAP, RAIL_TRAVEL_GM, sizeOf, T, TICK_GM, TILE, YARD_CAP_PER_TILE, RTG_CAP } from '../sim/data';
 import type { Crane, Rail, Ship, Sim, Truck } from '../sim/sim';
 
 export interface View {
@@ -137,6 +137,9 @@ interface StoreView {
   sprites: Sprite[];
   key: number;
   reefer: boolean;
+  cap: number;
+  px: number;
+  py: number;
 }
 interface Float {
   text: Text;
@@ -952,13 +955,13 @@ export class Renderer {
       const px = (i % GRID_W) * TILE;
       const py = ((i / GRID_W) | 0) * TILE;
       const sprites: Sprite[] = [];
-      for (let k = 0; k < YARD_CAP_PER_TILE; k++) {
+      for (let k = 0; k < RTG_CAP; k++) {
         const s = this.box(this.boxV, 0xffffff, px + 2.3 + (k % 3) * 9.4, py + 2.6 + Math.floor(k / 3) * 14);
         s.visible = false;
         this.yardLayer.addChild(s);
         sprites.push(s);
       }
-      this.yard.set(i, { sprites, key: -1, reefer });
+      this.yard.set(i, { sprites, key: -1, reefer, cap: YARD_CAP_PER_TILE, px, py });
     }
   }
 
@@ -966,9 +969,19 @@ export class Renderer {
     for (const [i, y] of this.yard) {
       const imp = sim.stock[i];
       const exp = sim.stockExp[i];
-      const key = imp * 16 + exp;
+      const cap = sim.capAt(i);
+      const key = imp * 16 + exp + cap * 256;
       if (key === y.key) continue;
       y.key = key;
+      if (cap !== y.cap) {
+        // Mit Portalkran: drei Reihen flacher gestapelt
+        y.cap = cap;
+        y.sprites.forEach((sp, k) => {
+          const row = Math.floor(k / 3);
+          sp.position.set(y.px + 2.3 + (k % 3) * 9.4, y.py + (cap > YARD_CAP_PER_TILE ? 1.6 + row * 9.8 : 2.6 + row * 14));
+          sp.scale.set(1, cap > YARD_CAP_PER_TILE ? 0.68 : 1);
+        });
+      }
       for (let k = 0; k < y.sprites.length; k++) {
         const sp = y.sprites[k];
         sp.visible = k < imp + exp;
@@ -1207,23 +1220,26 @@ export class Renderer {
     const light = tint(main, 0.35);
     const top = c.big ? -70 : -60;
     const bw = c.big ? 11 : 9;
-    const bx = 16 - bw / 2;
+    // Breite: Mobilkran ein Feld, Containerbrücke zwei Felder
+    const cw = c.big ? 2 * TILE : TILE;
+    const mid = cw / 2;
+    const bx = mid - bw / 2;
     const len = 22 - top;
 
     // Schatten von Ausleger und Portal
     const shadow = new Graphics();
     shadow.rect(bx + 0.5, top, bw - 1, len).fill({ color: 0x06182c, alpha: 0.22 });
-    shadow.rect(1, 2, 30, 4.5).fill({ color: 0x06182c, alpha: 0.22 });
-    shadow.rect(1, 15, 30, 4.5).fill({ color: 0x06182c, alpha: 0.22 });
+    shadow.rect(1, 2, cw - 2, 4.5).fill({ color: 0x06182c, alpha: 0.22 });
+    shadow.rect(1, 15, cw - 2, 4.5).fill({ color: 0x06182c, alpha: 0.22 });
     shadow.position.set(5, 7);
 
     const g = new Graphics();
     // Portal quer zum Ausleger, auf den Schienen
-    g.roundRect(0.5, 1.5, 31, 5, 1.5).fill(dark);
-    g.roundRect(0.5, 14.5, 31, 5, 1.5).fill(dark);
-    g.rect(1.5, 2.3, 29, 1.6).fill(main);
-    g.rect(1.5, 15.3, 29, 1.6).fill(main);
-    for (const lx of [1, 27]) {
+    g.roundRect(0.5, 1.5, cw - 1, 5, 1.5).fill(dark);
+    g.roundRect(0.5, 14.5, cw - 1, 5, 1.5).fill(dark);
+    g.rect(1.5, 2.3, cw - 3, 1.6).fill(main);
+    g.rect(1.5, 15.3, cw - 3, 1.6).fill(main);
+    for (const lx of [1, cw - 5]) {
       g.roundRect(lx, 0.5, 4, 7, 1).fill(0x2b323b);
       g.roundRect(lx, 13.5, 4, 7, 1).fill(0x2b323b);
     }
@@ -1236,15 +1252,15 @@ export class Renderer {
         .lineTo(bx + 1.3, y + 8)
         .stroke({ width: 0.9, color: light, alpha: 0.9 });
     }
-    g.rect(15.2, top + 1, 1.6, len - 2).fill({ color: 0x2b323b, alpha: 0.55 });
+    g.rect(mid - 0.8, top + 1, 1.6, len - 2).fill({ color: 0x2b323b, alpha: 0.55 });
     if (c.big) {
       g.rect(bx - 1.5, top + 14, bw + 3, 2).fill(dark);
       g.rect(bx - 1.5, top + 40, bw + 3, 2).fill(dark);
     }
     // Maschinenhaus
-    g.roundRect(9.5, 6, 13, 9, 1.5).fill({ color: 0x000000, alpha: 0.2 });
-    g.roundRect(8.5, 5, 13, 9, 1.5).fill(C.white);
-    g.rect(9.5, 6, 11, 2).fill(c.big ? 0x9cc4ff : 0xcfd6dc);
+    g.roundRect(mid - 6.5, 6, 13, 9, 1.5).fill({ color: 0x000000, alpha: 0.2 });
+    g.roundRect(mid - 7.5, 5, 13, 9, 1.5).fill(C.white);
+    g.rect(mid - 6.5, 6, 11, 2).fill(c.big ? 0x9cc4ff : 0xcfd6dc);
 
     // Laufkatze mit Container am Haken
     const trolley = new Container();
@@ -1254,22 +1270,22 @@ export class Renderer {
     const hook = this.box(this.boxH, BOX[c.id % BOX.length], -4.5, -4, 1);
     hook.visible = false;
     trolley.addChild(hook, tg);
-    trolley.position.set(16, 11);
+    trolley.position.set(mid, 11);
 
     const lamp = new Graphics();
     lamp.circle(0, 0, 3.2).fill(0xffffff);
-    lamp.position.set(16, top + 3);
+    lamp.position.set(mid, top + 3);
 
     // Am Fuß des Krans: unten entladene Container, darüber Export fürs Schiff
     const buffer: Sprite[] = [];
     for (let k = 0; k < CRANE_BUFFER; k++) {
-      const s = this.box(this.boxV, 0xffffff, 1.6 + k * 7.4, 22.2, 0.8);
+      const s = this.box(this.boxV, 0xffffff, 1.6 + k * (c.big ? 15 : 7.4), 22.2, 0.8);
       s.visible = false;
       buffer.push(s);
     }
     const exp: Sprite[] = [];
     for (let k = 0; k < CRANE_EXP_BUFFER; k++) {
-      const s = this.box(this.boxV, EXPORT_BOX, 2.4 + k * 7.2, 12.6, 0.7);
+      const s = this.box(this.boxV, EXPORT_BOX, 2.4 + k * (c.big ? 15 : 7.2), 12.6, 0.7);
       s.visible = false;
       exp.push(s);
     }
@@ -1616,10 +1632,30 @@ export class Renderer {
       }
     }
 
+    // Portalkräne: Schienen über den Block, Brücke fährt langsam hin und her
+    for (const r of sim.rtgs) {
+      const x0 = (r.x - 1) * TILE + 2;
+      const x1 = (r.x + 2) * TILE - 2;
+      const y0 = (r.y - 1) * TILE + 3;
+      const y1 = (r.y + 2) * TILE - 3;
+      const rail = { color: 0x3a424c, alpha: 0.7 };
+      g.rect(x0, y0, x1 - x0, 2).fill(rail);
+      g.rect(x0, y1 - 2, x1 - x0, 2).fill(rail);
+      const bxp = r.x * TILE + 16 + Math.sin(view.time * 0.7 + r.id) * TILE * (r.staffed ? 0.9 : 0);
+      g.rect(bxp - 6, y0 - 2, 12, y1 - y0 + 4).fill({ color: 0x000000, alpha: 0.18 });
+      g.roundRect(bxp - 7, y0 - 3, 4, y1 - y0 + 6, 1.5).fill(0xf2a030);
+      g.roundRect(bxp + 3, y0 - 3, 4, y1 - y0 + 6, 1.5).fill(0xf2a030);
+      g.roundRect(bxp - 7, y0 - 3, 14, 6, 1.5).fill(0xe0892a);
+      g.roundRect(bxp - 7, y1 - 3, 14, 6, 1.5).fill(0xe0892a);
+      const ty = (y0 + y1) / 2 + Math.cos(view.time * 1.1 + r.id) * TILE * (r.staffed ? 0.8 : 0);
+      g.roundRect(bxp - 5, ty - 4, 10, 8, 1.5).fill(0x2b323b);
+      g.circle(bxp, y0, 1.6).fill(r.staffed ? 0x3fe08a : 0xff5a4a);
+    }
+
     // Kräne mit Zone: farbiger Balken am Fuß
     for (const c of sim.cranes) {
       if (!c.zone) continue;
-      g.roundRect(c.x * TILE + 3, c.y * TILE + TILE - 4, TILE - 6, 4, 2).fill(ZONES[c.zone].color);
+      g.roundRect(c.x * TILE + 3, c.y * TILE + TILE - 4, (c.big ? 2 : 1) * TILE - 6, 4, 2).fill(ZONES[c.zone].color);
     }
 
     // Ausgefallene Geräte: Schraubenschlüssel-Zeichen, abgenutzte Geräte: kleiner gelber Punkt
@@ -1780,6 +1816,7 @@ export class Renderer {
       x = c.x * TILE;
       y = c.y * TILE - up;
       h = TILE + up;
+      w = (c.big ? 2 : 1) * TILE;
     } else if (sel.kind === 'gate') {
       const gt = sim.gates.find((gt) => gt.id === sel.id);
       if (!gt) return;

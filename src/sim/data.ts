@@ -28,7 +28,7 @@ export enum T {
   Rock = 10,
 }
 
-export type Tool = 'view' | 'kai' | 'crane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'assign' | 'zone' | 'oneway' | 'buyland' | 'demolish';
+export type Tool = 'view' | 'kai' | 'crane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'rtg' | 'assign' | 'zone' | 'oneway' | 'buyland' | 'demolish';
 export type BuildTool = Exclude<Tool, 'view' | 'demolish' | 'assign' | 'zone' | 'oneway' | 'buyland'>;
 
 export const COST: Record<BuildTool, number> = {
@@ -45,6 +45,7 @@ export const COST: Record<BuildTool, number> = {
   pack: 90_000,
   cold: 80_000,
   workshop: 40_000,
+  rtg: 60_000,
 };
 /** Ab welcher Hafenstufe ein Werkzeug verfügbar ist. */
 export const UNLOCK: Record<BuildTool, number> = {
@@ -61,6 +62,7 @@ export const UNLOCK: Record<BuildTool, number> = {
   pack: 2,
   cold: 3,
   workshop: 2,
+  rtg: 3,
 };
 export const UPGRADE = {
   /** Mobilkran zur Containerbrücke: doppelt so schnell */
@@ -169,6 +171,18 @@ export const TRUCK_PATIENCE_GM = 10;
 
 // Stapelplatz und Kühlplätze
 export const YARD_CAP_PER_TILE = 6;
+/** Portalkran: höher stapeln und schneller laden im Umkreis von einem Feld */
+export const RTG_CAP = 9;
+export const RTG_RADIUS = 1;
+export const RTG_HANDLE = 0.5;
+
+/** Fertigwaren und ihre Grundpreise. Der Markt schwankt täglich. */
+export type ProductId = 'elec' | 'cloth' | 'food';
+export const PRODUCTS: Record<ProductId, { name: string; base: number }> = {
+  elec: { name: 'Elektronik', base: 1_000 },
+  cloth: { name: 'Kleidung', base: 850 },
+  food: { name: 'Lebensmittel', base: 750 },
+};
 /** So lange hält ein Kühlcontainer auf dem Kühlplatz, bevor er verdirbt. */
 export const REEFER_MAX_GM = 600;
 export const REEFER_SPOIL_PENALTY = 500;

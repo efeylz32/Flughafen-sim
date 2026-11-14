@@ -1,7 +1,11 @@
 import { Sound } from './audio/sound';
 import { Renderer, View } from './render/renderer';
-import { BuildTool, DiffId, GRID_H, GRID_W, MapId, Role, ROLE_NAMES, T, TICKS_PER_SEC, TILE, Tool, TruckRole } from './sim/data';
+import { BuildTool, DiffId, GRID_H, GRID_W, MapId, ProductId, Role, ROLE_NAMES, T, TICKS_PER_SEC, TILE, Tool, TruckRole } from './sim/data';
+import { Progress } from './achievements';
+import { DIFFS, MAPS } from './sim/data';
 import { buildDemo } from './sim/demo';
+import { setupScenario } from './sim/scenario-setup';
+import { SCENARIOS } from './sim/scenarios';
 import { GameEvent, Removed, Sim } from './sim/sim';
 import type { UI } from './ui/ui';
 
@@ -30,6 +34,8 @@ export class Game {
   speed = 1;
   lastSpeed = 1;
   tool: Tool = 'view';
+  progress = new Progress();
+  private achTimer = 0;
   /** Engpass-Färbung auf der Karte */
   overlay = false;
   selected: View['selected'] = null;
@@ -82,6 +88,15 @@ export class Game {
       rect: this.rect,
     });
     this.ui.update(dtSec);
+    // Erfolge etwa einmal pro Sekunde prüfen
+    this.achTimer += dtSec;
+    if (this.achTimer > 1) {
+      this.achTimer = 0;
+      for (const a of this.progress.check(this.sim)) {
+        this.ui.toast(`Erfolg: ${a.name} – ${a.text}`, 'good');
+        this.sound.play('mission');
+      }
+    }
     this.saveTimer += dtSec;
     if (this.saveTimer > 20) {
       this.saveTimer = 0;
@@ -112,10 +127,20 @@ export class Game {
         this.sound.play('level');
         this.ui.showLevelUp();
         break;
-      case 'won':
+      case 'won': {
         this.sound.play('mission');
+        const s = this.sim;
+        const sc = SCENARIOS.find((x) => x.id === s.scenario);
+        this.progress.addRecord({
+          title: sc ? `Szenario: ${sc.name}` : `${DIFFS[s.diff].name} · ${MAPS[s.map].name}`,
+          day: s.day,
+          handled: s.handled,
+          money: Math.round(s.money - s.loan),
+          date: new Date().toISOString().slice(0, 10),
+        });
         this.ui.showEnd();
         break;
+      }
       case 'lost':
         this.sound.play('bad');
         this.ui.showEnd();
@@ -160,6 +185,7 @@ export class Game {
         break;
       case 'day':
         this.sound.play('day');
+        this.ui.showDayReport();
         break;
     }
   }
@@ -203,6 +229,21 @@ export class Game {
     this.sound.toggle();
     this.sound.play('click');
     this.ui.refreshSound();
+  }
+
+  /** Startet ein Szenario mit fester Ausgangslage und eigenem Ziel. */
+  newScenario(id: string) {
+    this.sim = setupScenario(id, Math.floor(Math.random() * 1e9));
+    this.resetTransient();
+    this.setTool('view');
+    this.setSpeed(1);
+    this.fitCamera();
+    this.save();
+  }
+
+  setProduct(plantId: number, p: ProductId) {
+    this.sim.setProduct(plantId, p);
+    this.sound.play('click');
   }
 
   newGame(mode: 'empty' | 'demo', diff: DiffId = 'normal', map: MapId = 'coast') {

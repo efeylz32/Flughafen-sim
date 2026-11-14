@@ -12,7 +12,6 @@ import {
   DiffId,
   EVENT_CHANCE,
   EXPORT_FEE,
-  FOOD_FEE,
   MAPS,
   MapId,
   PLOT_PRICE,
@@ -26,6 +25,11 @@ import {
   WEAR_CRANE_PER_MOVE,
   WEAR_SLOWDOWN,
   WEAR_TRUCK_PER_GM,
+  PRODUCTS,
+  ProductId,
+  RTG_CAP,
+  RTG_HANDLE,
+  RTG_RADIUS,
   ZONES,
   EXPORT_PRESTOCK,
   EXPORT_SHARE,
@@ -42,7 +46,6 @@ import {
   MIN_PER_DAY,
   PLANTS,
   PLANT_BUF,
-  PREMIUM_FEE,
   PlantKind,
   RAIL_CAP,
   RAIL_INTERVAL_GM,
@@ -80,6 +83,7 @@ import {
   YARD_CAP_PER_TILE,
 } from './data';
 import { MISSIONS } from './missions';
+import { SCENARIOS } from './scenarios';
 
 /** Import, Kühlfracht (Import) oder Export */
 export type Cargo = 'imp' | 'reef' | 'exp' | 'ware' | 'prem' | 'food';
@@ -102,8 +106,17 @@ export interface Decision {
   options: string[];
 }
 
+export interface Rtg {
+  id: number;
+  x: number;
+  y: number;
+  staffed: boolean;
+}
+
 export interface Plant {
   id: number;
+  /** Was die Veredelung herstellt */
+  product: ProductId;
   x: number;
   y: number;
   w: number;
@@ -325,6 +338,9 @@ export interface DayBook {
   wages: number;
   interest: number;
   building: number;
+  /** Wie viele Ticks welche Stufe heute der Engpass war, und der höchste Stauanteil */
+  bn: { crane: number; trucks: number; yard: number; gate: number };
+  jamPeak: number;
   /** Umgeschlagene Container, abgefertigte und pünktliche Schiffe */
   handled: number;
   ships: number;
@@ -377,6 +393,12 @@ export interface SaveData {
   cranes: { x: number; y: number; big?: boolean; wear?: number }[];
   shops?: { x: number; y: number }[];
   zone?: number[];
+  rtgs?: { x: number; y: number }[];
+  market?: Record<ProductId, number>;
+  marketPrev?: Record<ProductId, number>;
+  products?: ProductId[];
+  foodDone?: number;
+  scenario?: string | null;
   zones?: { cranes: number[]; gates: number[]; plants: number[]; rails: number[]; trucks: number[] };
   oneway?: number[];
   owned?: number[];
@@ -437,8 +459,9 @@ const covers = (e: Box, x: number, y: number) => x >= e.x && y >= e.y && x < e.x
 
 const UNLOADING = 'Wird entladen.';
 const LOADING = 'Wird beladen.';
-const emptyBook = (): DayBook => ({ fees: 0, exportFees: 0, rail: 0, berth: 0, bonus: 0, penalty: 0, running: 0, wages: 0, interest: 0, building: 0, handled: 0, ships: 0, onTime: 0 });
+const emptyBook = (): DayBook => ({ fees: 0, exportFees: 0, rail: 0, berth: 0, bonus: 0, penalty: 0, running: 0, wages: 0, interest: 0, building: 0, handled: 0, ships: 0, onTime: 0, bn: { crane: 0, trucks: 0, yard: 0, gate: 0 }, jamPeak: 0 });
 const TILE_OF: Partial<Record<BuildTool, T>> = { kai: T.Kai, road: T.Road, yard: T.Yard, reefer: T.Reefer, gate: T.Gate, rail: T.Rail, unpack: T.Plant, pack: T.Plant, cold: T.Plant, workshop: T.Shop };
+const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 const eur = (n: number) => `${Math.round(n).toLocaleString('de-DE')} €`;
 
 export class Sim {
@@ -464,6 +487,13 @@ export class Sim {
   rails: Rail[] = [];
   plants: Plant[] = [];
   shops: Shop[] = [];
+  rtgs: Rtg[] = [];
+  /** Preisfaktor je Ware, 1 = Grundpreis */
+  market: Record<ProductId, number> = { elec: 1, cloth: 1, food: 1 };
+  marketPrev: Record<ProductId, number> = { elec: 1, cloth: 1, food: 1 };
+  foodDone = 0;
+  /** Laufendes Szenario oder null für ein freies Spiel */
+  scenario: string | null = null;
   /** Einbahnstraßen: erlaubte Fahrtrichtung je Feld (0 Ost, 1 Süd, 2 West, 3 Nord), -1 = beide Richtungen */
   oneway = new Int8Array(GRID_W * GRID_H).fill(-1);
   /** Gekaufte Spalten (1 = gehört dir) */
@@ -680,7 +710,23 @@ export class Sim {
     return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
   }
   get yardCapacity(): number {
-    return this.yardTiles.length * YARD_CAP_PER_TILE;
+    return this.yardTiles.reduce((n, i) => n + this.capAt(i), 0);
+  }
+  /** Stellplätze auf einem Lagerfeld: mehr, wenn ein besetzter Portalkran in der Nähe steht */
+  capAt(i: number): number {
+    return this.rtgCovers(i) ? RTG_CAP : YARD_CAP_PER_TILE;
+  }
+  rtgCovers(i: number): boolean {
+    const x = i % GRID_W;
+    const y = (i / GRID_W) | 0;
+    return this.rtgs.some((r) => r.staffed && Math.abs(r.x - x) <= RTG_RADIUS && Math.abs(r.y - y) <= RTG_RADIUS);
+  }
+  rtgAt(x: number, y: number): Rtg | undefined {
+    return this.rtgs.find((r) => r.x === x && r.y === y);
+  }
+  /** Aktueller Verkaufspreis einer Ware */
+  price(p: ProductId): number {
+    return Math.round((PRODUCTS[p].base * this.market[p]) / 10) * 10;
   }
   /** Alle Container auf dem Stapelplatz (Import und Export) */
   get yardStock(): number {
@@ -689,7 +735,7 @@ export class Sim {
     return s;
   }
   get reeferCapacity(): number {
-    return this.reeferTiles.length * YARD_CAP_PER_TILE;
+    return this.reeferTiles.reduce((n, i) => n + this.capAt(i), 0);
   }
   get reeferStock(): number {
     let s = 0;
@@ -777,8 +823,9 @@ export class Sim {
     }
   }
 
+  /** Kran auf dem Feld. Eine Containerbrücke steht auf zwei Kai-Feldern. */
   craneAt(x: number, y: number): Crane | undefined {
-    return this.cranes.find((c) => c.x === x && c.y === y);
+    return this.cranes.find((c) => c.y === y && (c.x === x || (c.big && c.x + 1 === x)));
   }
   gateAt(x: number, y: number): Gate | undefined {
     return this.gates.find((g) => covers(g, x, y));
@@ -931,6 +978,10 @@ export class Sim {
         if (k !== T.Land) reason = k === T.Water ? 'Nicht auf dem Wasser' : 'Das Feld ist belegt';
         else if (x !== GRID_W - 1) reason = 'Gleisanschluss nur am rechten Kartenrand';
         break;
+      case 'rtg':
+        if (k !== T.Yard && k !== T.Reefer) reason = 'Der Portalkran steht auf einer Lagerfläche';
+        else if (this.rtgAt(x, y)) reason = 'Hier steht schon ein Portalkran';
+        break;
       case 'truck':
         if (k !== T.Road) reason = 'Truck braucht eine Straße';
         break;
@@ -995,6 +1046,10 @@ export class Sim {
       case 'dredge':
         this.depth[x] = 1;
         return undefined;
+      case 'rtg':
+        this.rtgs.push({ id: this.nextId++, x, y, staffed: true });
+        this.staff.crane++;
+        return undefined;
       case 'workshop':
         for (const f of this.footprintOf({ x, y, w: 2, h: 2 })) this.kind[f] = T.Shop;
         this.shops.push({ id: this.nextId++, x, y, w: 2, h: 2, staffed: true, target: null });
@@ -1007,7 +1062,7 @@ export class Sim {
           const [w, h] = sizeOf(tool);
           for (const f of this.footprintOf({ x, y, w, h })) this.kind[f] = T.Plant;
         }
-        this.plants.push({ id: this.nextId++, x, y, w: sizeOf(tool)[0], h: sizeOf(tool)[1], kind: tool, inBuf: 0, outBuf: 0, resIn: 0, resOut: 0, proc: 0, made: 0, zone: 0 });
+        this.plants.push({ id: this.nextId++, x, y, w: sizeOf(tool)[0], h: sizeOf(tool)[1], kind: tool, product: 'elec', inBuf: 0, outBuf: 0, resIn: 0, resOut: 0, proc: 0, made: 0, zone: 0 });
         return undefined;
       case 'truck': {
         const id = this.nextId++;
@@ -1067,6 +1122,7 @@ export class Sim {
     const crane = this.craneAt(x, y);
     if (truck) this.takeTruck(truck, factor, removed);
     else if (crane) this.takeCrane(crane, factor, removed);
+    else if (this.rtgAt(x, y)) this.takeRtg(this.rtgAt(x, y)!, factor, removed);
     else this.takeTile(i, factor, removed);
     this.touch();
     this.invalidateJobs();
@@ -1093,6 +1149,12 @@ export class Sim {
     });
   }
 
+  private takeRtg(r: Rtg, factor: number, out: Removed[]) {
+    this.rtgs = this.rtgs.filter((q) => q !== r);
+    this.staff.crane = Math.max(0, this.staff.crane - 1);
+    out.push({ tool: 'rtg', x: r.x, y: r.y, refund: this.give(COST.rtg, factor) });
+  }
+
   private takeCrane(c: Crane, factor: number, out: Removed[]) {
     this.cranes = this.cranes.filter((x) => x !== c);
     this.staff.crane = Math.max(0, this.staff.crane - 1);
@@ -1115,6 +1177,8 @@ export class Sim {
         break;
       case T.Yard:
       case T.Reefer: {
+        const rt = this.rtgAt(x, y);
+        if (rt) this.takeRtg(rt, factor, out);
         const tool: BuildTool = this.kind[i] === T.Yard ? 'yard' : 'reefer';
         out.push({ tool, x, y, refund: this.give(COST[tool], factor), stock: this.stock[i], stockExp: this.stockExp[i] });
         this.stock[i] = 0;
@@ -1176,6 +1240,10 @@ export class Sim {
       const c = this.craneAt(a.x, a.y);
       if (!c) return fail('Der Kran existiert nicht mehr');
       this.takeCrane(c, 1, removed);
+    } else if (a.tool === 'rtg') {
+      const r = this.rtgAt(a.x, a.y);
+      if (!r) return fail('Der Portalkran existiert nicht mehr');
+      this.takeRtg(r, 1, removed);
     } else if (a.tool === 'dredge') {
       if (!this.depth[a.x]) return fail('Hier ist nicht mehr gebaggert');
       if (this.ships.some((s) => SHIP_TYPES[s.type].deep && (s.state === 'sailing' || s.state === 'unloading') && s.berthX <= a.x && a.x < s.berthX + s.len)) {
@@ -1213,6 +1281,8 @@ export class Sim {
         if (k !== T.Road) return fail('Die Straße fehlt inzwischen');
       } else if (r.tool === 'crane') {
         if (k !== T.Kai || this.craneAt(r.x, r.y)) return fail('Der Platz am Kai ist belegt');
+      } else if (r.tool === 'rtg') {
+        if ((k !== T.Yard && k !== T.Reefer) || this.rtgAt(r.x, r.y)) return fail('Der Platz ist belegt');
       } else if (r.tool !== 'dredge') {
         const [w, h] = sizeOf(r.tool);
         for (const f of this.footprintOf({ x: r.x, y: r.y, w, h })) {
@@ -1262,6 +1332,7 @@ export class Sim {
       const c = this.cranes.find((c) => c.id === id);
       if (!c) return fail('Der Kran existiert nicht mehr');
       if (c.big) return fail('Ist schon eine Containerbrücke');
+      if (!this.isKai(c.x + 1) || this.craneAt(c.x + 1, c.y)) return fail('Die Containerbrücke braucht rechts daneben ein freies Kai-Feld');
     } else {
       const t = this.trucks.find((t) => t.id === id);
       if (!t) return fail('Der Truck existiert nicht mehr');
@@ -1296,7 +1367,7 @@ export class Sim {
   // ───────────────────────── Lager und Jobs ─────────────────────────
 
   private freeAt(i: number): number {
-    return YARD_CAP_PER_TILE - this.stock[i] - this.stockExp[i] - this.resIn[i];
+    return this.capAt(i) - this.stock[i] - this.stockExp[i] - this.resIn[i];
   }
   private tilesOf(kind: T): number[] {
     return kind === T.Reefer ? this.reeferTiles : this.yardTiles;
@@ -1673,7 +1744,13 @@ export class Sim {
   }
 
   private dropOff(t: Truck, j: Job): boolean {
-    const fee = j.cargo === 'reef' ? REEFER_FEE : j.cargo === 'prem' ? PREMIUM_FEE : j.cargo === 'food' ? FOOD_FEE : FEE_PER_CONTAINER;
+    let fee = j.cargo === 'reef' ? REEFER_FEE : FEE_PER_CONTAINER;
+    if (j.cargo === 'prem') fee = this.price(this.plants.find((p) => p.id === j.src)?.product ?? 'elec');
+    if (j.cargo === 'food') fee = this.price('food');
+    if (j.dstKind === 'gate' || j.dstKind === 'rail') {
+      if (j.cargo === 'prem') this.premiumDone += j.n;
+      if (j.cargo === 'food') this.foodDone += j.n;
+    }
     if (j.dstKind === 'store') {
       if (j.cargo === 'exp') this.stockExp[j.dst] += j.n;
       else {
@@ -1693,7 +1770,6 @@ export class Sim {
       if (!r) return false;
       r.platform += j.n;
       r.value += j.n * fee;
-      if (j.cargo === 'prem') this.premiumDone += j.n;
     } else if (j.dstKind === 'plant') {
       const p = this.plants.find((p) => p.id === j.dst);
       if (!p) return false;
@@ -1715,6 +1791,8 @@ export class Sim {
 
     if (t.tile === tgt && t.next < 0) {
       t.wait = TRUCK_HANDLE_GM * (t.role === 'auto' ? 1 : ROUTINE_HANDLE);
+      const storeTile = j.stage === 0 ? (j.srcKind === 'store' ? j.src : -1) : j.dstKind === 'store' ? j.dst : -1;
+      if (storeTile >= 0 && this.rtgCovers(storeTile)) t.wait *= RTG_HANDLE;
       const ok = j.stage === 0 ? this.pickUp(t, j) : this.dropOff(t, j);
       if (!ok) this.cancelJob(t);
       return;
@@ -1805,6 +1883,7 @@ export class Sim {
     this.updateReefers();
     this.updateStats();
     this.updateLevel();
+    this.checkScenario();
     this.updateMissions();
     this.rollDay();
   }
@@ -1815,7 +1894,7 @@ export class Sim {
   staffNeed(role: Role): number {
     if (role === 'driver') return this.trucks.filter((t) => !t.agv).length;
     if (role === 'mech') return this.shops.length;
-    return role === 'crane' ? this.cranes.length : this.gates.length;
+    return role === 'crane' ? this.cranes.length + this.rtgs.length : this.gates.length;
   }
   /** Angestellt und nicht krank */
   staffAvail(role: Role): number {
@@ -1842,6 +1921,7 @@ export class Sim {
     for (const t of this.trucks) t.staffed = t.agv || n-- > 0;
     n = this.staffAvail('crane');
     for (const c of this.cranes) c.staffed = n-- > 0;
+    for (const r of this.rtgs) r.staffed = n-- > 0;
     n = this.staffAvail('gate');
     for (const g of this.gates) g.staffed = n-- > 0;
     n = this.staffAvail('mech');
@@ -2331,7 +2411,6 @@ export class Sim {
             this.containersDone++;
             this.handled++, this.today.handled++;
             if (g.procFee === REEFER_FEE) this.reefersHandled++;
-            if (g.procFee === PREMIUM_FEE) this.premiumDone++;
             this.money += g.procFee;
             this.today.fees += g.procFee;
             this.emit(undefined, 'good', { tag: 'container', x: g.x, y: g.y, amount: g.procFee });
@@ -2447,6 +2526,9 @@ export class Sim {
     this.jamShare = ema(this.jamShare, this.trucks.length ? jammed / this.trucks.length : 0);
     const cap = this.yardCapacity;
     this.stats.yard = cap ? this.yardStock / cap : 0;
+    const bnNow = this.tickCount % 10 === 0 ? this.bottleneck() : null;
+    if (bnNow) this.today.bn[bnNow]++;
+    this.today.jamPeak = Math.max(this.today.jamPeak, this.jamShare);
     const busyG = this.gates.filter((g) => g.proc > 0).length;
     this.stats.gate = ema(this.stats.gate, this.gates.length ? busyG / this.gates.length : 0);
   }
@@ -2478,11 +2560,44 @@ export class Sim {
     this.version++;
     this.makeOffers();
     this.emit(`Neue Stufe: ${next.name}. Bonus +${eur(next.bonus)}`, 'good', { tag: 'level', amount: next.bonus });
-    if (this.level === LEVELS.length && this.status === 'play') {
+    if (this.level === LEVELS.length && this.status === 'play' && !this.scenario) {
       this.status = 'won';
       this.endReason = `Weltklasse-Hafen an Tag ${this.day}, Ziel war Tag ${this.goalDay}.`;
       this.emit(undefined, 'good', { tag: 'won' });
     }
+  }
+
+  // ───────────────────────── Markt ─────────────────────────
+
+  setProduct(plantId: number, p: ProductId) {
+    const pl = this.plants.find((q) => q.id === plantId);
+    if (pl && pl.kind === 'pack' && p !== 'food') pl.product = p;
+  }
+
+  /** Preise schwanken jeden Tag und kehren langsam zum Grundpreis zurück. Manchmal gibt es einen Boom oder Einbruch. */
+  private updateMarket() {
+    this.marketPrev = { ...this.market };
+    for (const p of Object.keys(this.market) as ProductId[]) {
+      let m = this.market[p];
+      m += (this.rnd() - 0.5) * 0.24 + (1 - m) * 0.2;
+      if (this.rnd() < 0.08) {
+        const up = this.rnd() < 0.5;
+        m *= up ? 1.4 : 0.65;
+        this.emit(`${up ? 'Nachfrage-Boom' : 'Preiseinbruch'} bei ${PRODUCTS[p].name}: jetzt ${eur(Math.round((PRODUCTS[p].base * clamp(m, 0.5, 1.7)) / 10) * 10)}`, up ? 'good' : 'bad');
+      }
+      this.market[p] = clamp(m, 0.5, 1.7);
+    }
+  }
+
+  // ───────────────────────── Szenarien ─────────────────────────
+
+  private checkScenario() {
+    if (!this.scenario || this.status !== 'play' || this.tickCount % 50 !== 0) return;
+    const sc = SCENARIOS.find((s) => s.id === this.scenario);
+    if (!sc || !sc.done(this)) return;
+    this.status = 'won';
+    this.endReason = `Szenario „${sc.name}“ an Tag ${this.day} geschafft.`;
+    this.emit(undefined, 'good', { tag: 'won' });
   }
 
   // ───────────────────────── Konkurrenz und Entscheidungen ─────────────────────────
@@ -2536,7 +2651,7 @@ export class Sim {
         options: ['Führung geben (5.000 €)', 'Ablehnen'],
       },
     ];
-    if (this.cranes.some((c) => !c.big)) {
+    if (this.cranes.some((c) => !c.big && this.isKai(c.x + 1) && !this.craneAt(c.x + 1, c.y))) {
       list.push({
         id: 'parts',
         title: 'Gebrauchte Teile für eine Containerbrücke',
@@ -2612,7 +2727,7 @@ export class Sim {
         break;
       case 'parts': {
         if (choice !== 0) break;
-        const c = this.cranes.find((c) => !c.big);
+        const c = this.cranes.find((c) => !c.big && this.isKai(c.x + 1) && !this.craneAt(c.x + 1, c.y));
         if (!c || this.money < 60_000) {
           this.emit('Das Geschäft kam nicht zustande.', 'info');
           break;
@@ -2631,7 +2746,8 @@ export class Sim {
 
   /** Bis zu diesem Tag (einschließlich) muss der Weltklasse-Hafen stehen. */
   get goalDay(): number {
-    return DIFFS[this.diff].goalDays;
+    const sc = this.scenario ? SCENARIOS.find((s) => s.id === this.scenario) : null;
+    return sc ? sc.days : DIFFS[this.diff].goalDays;
   }
   get debtLimit(): number {
     return DIFFS[this.diff].debtDays;
@@ -2683,7 +2799,10 @@ export class Sim {
     } else {
       this.debtDays = 0;
     }
-    if (this.day > this.goalDay) this.lose(`Ziel verpasst: Der Weltklasse-Hafen sollte bis Tag ${this.goalDay} stehen.`);
+    if (this.day > this.goalDay) {
+      const sc = this.scenario ? SCENARIOS.find((s) => s.id === this.scenario) : null;
+      this.lose(sc ? `Ziel verpasst: ${sc.goal} bis Tag ${this.goalDay}.` : `Ziel verpasst: Der Weltklasse-Hafen sollte bis Tag ${this.goalDay} stehen.`);
+    }
   }
 
   private makeOffer(): Contract {
@@ -2789,6 +2908,7 @@ export class Sim {
     this.rollSickness();
     this.updateRival();
     this.rollDecision();
+    this.updateMarket();
     this.emit(`Tagesabschluss: Betriebskosten −${eur(cost)}${interest ? `, Zinsen −${eur(interest)}` : ''}`, 'info', { tag: 'day' });
     this.checkEnd();
   }
@@ -2805,6 +2925,12 @@ export class Sim {
       cranes: this.cranes.map((c) => ({ x: c.x, y: c.y, big: c.big, wear: c.wear })),
       shops: this.shops.map((s) => ({ x: s.x, y: s.y })),
       zone: Array.from(this.zone),
+      rtgs: this.rtgs.map((r) => ({ x: r.x, y: r.y })),
+      market: this.market,
+      marketPrev: this.marketPrev,
+      products: this.plants.map((p) => p.product),
+      foodDone: this.foodDone,
+      scenario: this.scenario,
       zones: {
         cranes: this.cranes.map((c) => c.zone),
         gates: this.gates.map((g) => g.zone),
@@ -2894,6 +3020,12 @@ export class Sim {
     for (const p of d.plants ?? []) s.place(p.kind, p.x, p.y);
     for (const p of d.shops ?? []) s.place('workshop', p.x, p.y);
     if (d.zone) s.zone.set(d.zone);
+    for (const r of d.rtgs ?? []) s.place('rtg', r.x, r.y);
+    if (d.market) s.market = { ...s.market, ...d.market };
+    if (d.marketPrev) s.marketPrev = { ...s.marketPrev, ...d.marketPrev };
+    s.plants.forEach((p, i) => (p.product = d.products?.[i] ?? 'elec'));
+    s.foodDone = d.foodDone ?? 0;
+    s.scenario = d.scenario ?? null;
     if (d.zones) {
       s.cranes.forEach((c, i) => (c.zone = d.zones!.cranes[i] ?? 0));
       s.gates.forEach((g, i) => (g.zone = d.zones!.gates[i] ?? 0));

@@ -320,3 +320,27 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 
 .zdot { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+
+/* Szenarien, Erfolge, Tagesbericht */
+.dialog .scen { display: flex; flex-direction: column; gap: 3px; text-align: left; font-weight: 600; }
+.dialog .scen b { font-size: 15px; }
+.dialog .scen span { font-size: 13px; color: var(--muted); font-weight: 500; line-height: 1.35; }
+.achs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.ach { display: flex; gap: 8px; align-items: center; background: #f4f7fb; border-radius: 12px; padding: 8px 10px; opacity: .55; }
+.ach.got { opacity: 1; background: #fdf3d4; }
+.ach .ai { width: 28px; height: 28px; border-radius: 9px; background: #c7cfd9; color: #fff; display: flex; align-items: center; justify-content: center; flex: none; }
+.ach.got .ai { background: #f0b429; }
+.ach .ai svg { width: 17px; height: 17px; }
+.ach b { display: block; font-size: 13.5px; }
+.ach small { display: block; font-size: 12px; color: var(--muted); }
+.board > div { display: flex; gap: 10px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.board .rk { width: 24px; height: 24px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 800; font-size: 13px; display: flex; align-items: center; justify-content: center; flex: none; }
+.board span b { display: block; font-size: 14px; }
+.board small { color: var(--muted); font-size: 12px; }
+.board > div > b { margin-left: auto; white-space: nowrap; }
+.dayrep { cursor: pointer; }
+.dayrep .ctitle .x svg { width: 16px; height: 16px; }
+@media (max-width: 760px) { .achs { grid-template-columns: 1fr; } }
+.dayrep .fl { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; line-height: 1.5; }
+.dayrep .fl b.pos { color: var(--good, #1f9d55); }
+.dayrep .fl b.neg { color: var(--bad, #d64545); }

@@ -384,6 +384,7 @@ describe('Aufrüsten', () => {
     const sim = new Sim();
     sim.level = 2;
     sim.build('kai', 5, k);
+    sim.build('kai', 6, k);
     sim.build('crane', 5, k);
     const c = sim.cranes[0];
     const before = sim.money;
@@ -741,6 +742,83 @@ describe('Zonen', () => {
     const copy = Sim.deserialize(JSON.parse(JSON.stringify(sim.serialize())));
     expect(copy.zone[copy.idx(12, k + 2)]).toBe(4);
     expect(copy.cranes[0].zone).toBe(4);
+  });
+});
+
+describe('Große Kräne und Portalkräne', () => {
+  it('die Containerbrücke belegt zwei Kai-Felder', () => {
+    const sim = new Sim();
+    sim.level = 2;
+    for (let x = 5; x <= 7; x++) sim.build('kai', x, k);
+    sim.build('crane', 5, k);
+    sim.build('crane', 6, k);
+    expect(sim.upgrade('crane', sim.cranes[0].id)).toMatchObject({ ok: false });
+    sim.demolish(6, k);
+    expect(sim.upgrade('crane', sim.cranes[0].id).ok).toBe(true);
+    expect(sim.craneAt(6, k)?.id).toBe(sim.cranes[0].id);
+    expect(sim.canBuild('crane', 6, k)).toMatchObject({ ok: false });
+  });
+
+  it('der Portalkran erhöht die Stellplätze im Umkreis und braucht einen Kranführer', () => {
+    const sim = new Sim();
+    sim.level = 3;
+    for (let x = 5; x <= 9; x++) sim.build('yard', x, k + 3);
+    const before = sim.yardCapacity;
+    expect(sim.build('rtg', 7, k + 3).ok).toBe(true);
+    expect(sim.staffNeed('crane')).toBe(1);
+    run(sim, 0.1);
+    expect(sim.yardCapacity).toBe(before + 3 * 3);
+    sim.fire('crane');
+    run(sim, 0.1);
+    expect(sim.yardCapacity).toBe(before);
+    const res = sim.demolish(7, k + 3);
+    expect(sim.rtgs.length).toBe(0);
+    expect(sim.kind[sim.idx(7, k + 3)]).toBe(4);
+    expect(sim.undoDemolish(res.removed).ok).toBe(true);
+    expect(sim.rtgs.length).toBe(1);
+  });
+});
+
+describe('Markt', () => {
+  it('Preise schwanken täglich in Grenzen, die Veredelung wählt ihr Produkt', () => {
+    const sim = new Sim(5);
+    const seen = new Set<number>();
+    for (let d = 0; d < 30; d++) {
+      run(sim, 24);
+      seen.add(sim.price('elec'));
+      for (const p of ['elec', 'cloth', 'food'] as const) {
+        expect(sim.market[p]).toBeGreaterThanOrEqual(0.5);
+        expect(sim.market[p]).toBeLessThanOrEqual(1.7);
+      }
+    }
+    expect(seen.size).toBeGreaterThan(5);
+    sim.level = 2;
+    sim.build('pack', 5, k + 3);
+    sim.setProduct(sim.plants[0].id, 'cloth');
+    expect(sim.plants[0].product).toBe('cloth');
+  });
+});
+
+describe('Szenarien', () => {
+  it('jedes Szenario startet, hat ein Ziel und lässt sich speichern', async () => {
+    const { SCENARIOS } = await import('../src/sim/scenarios');
+    const { setupScenario } = await import('../src/sim/scenario-setup');
+    for (const sc of SCENARIOS) {
+      const sim = setupScenario(sc.id, 3);
+      expect(sim.scenario).toBe(sc.id);
+      expect(sim.goalDay).toBe(sc.days);
+      expect(sc.done(sim)).toBe(false);
+      run(sim, 12);
+      expect(sim.status === 'play' || sim.status === 'won').toBe(true);
+      const copy = Sim.deserialize(JSON.parse(JSON.stringify(sim.serialize())));
+      expect(copy.scenario).toBe(sc.id);
+    }
+    const m = setupScenario('marode', 1);
+    expect(m.loan).toBe(500_000);
+    m.loan = 0;
+    m.rep = 61;
+    run(m, 1);
+    expect(m.status).toBe('won');
   });
 });
 
