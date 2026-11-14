@@ -104,7 +104,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 /* Info-Blatt */
 .sheet {
-  position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(var(--safe-b) + 108px);
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(var(--safe-b) + 152px);
   width: min(460px, calc(100vw - 20px)); background: var(--surface); border-radius: 20px; box-shadow: var(--shadow); padding: 14px 16px 14px;
 }
 .sheet .x { position: absolute; top: 10px; right: 10px; border: 0; background: #eef2f7; border-radius: 10px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; color: var(--muted); }
@@ -128,10 +128,14 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 /* Werkzeugleiste */
 .toolbar {
-  position: absolute; left: 0; right: 0; bottom: 0; padding: 10px calc(var(--safe-r) + 10px) calc(var(--safe-b) + 10px) calc(var(--safe-l) + 10px);
-  display: flex; gap: 8px; overflow-x: auto; background: rgba(255,255,255,.96); border-radius: 22px 22px 0 0; box-shadow: 0 -4px 18px rgba(20,40,70,.18);
-  scrollbar-width: none; justify-content: safe center;
+  position: absolute; left: 0; right: 0; bottom: 0; padding: 8px calc(var(--safe-r) + 10px) calc(var(--safe-b) + 10px) calc(var(--safe-l) + 10px);
+  display: flex; flex-direction: column; gap: 8px; background: rgba(255,255,255,.96); border-radius: 22px 22px 0 0; box-shadow: 0 -4px 18px rgba(20,40,70,.18);
 }
+.tabs { display: flex; gap: 6px; justify-content: safe center; overflow-x: auto; scrollbar-width: none; }
+.tab { flex: none; border: 0; border-radius: 12px; padding: 8px 14px; background: #eef2f7; color: var(--muted); font-weight: 800; font-size: 14px; }
+.tab.on { background: var(--ink); color: #fff; }
+.tools { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; justify-content: safe center; }
+.tools::-webkit-scrollbar, .tabs::-webkit-scrollbar { display: none; }
 .toolbar::-webkit-scrollbar { display: none; }
 .tool {
   flex: none; width: 76px; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 4px 6px;

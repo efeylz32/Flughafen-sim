@@ -206,7 +206,7 @@ export class Game {
   /** Passt die Kamera an den Platz an, den HUD und Werkzeugleiste frei lassen. */
   fitCamera() {
     const wide = window.innerWidth >= 760;
-    this.renderer.fitCamera({ left: wide ? 350 : 0, top: wide ? 70 : 300, right: wide ? 70 : 0, bottom: 120 });
+    this.renderer.fitCamera({ left: wide ? 350 : 0, top: wide ? 70 : 300, right: wide ? 70 : 0, bottom: 164 });
   }
 
   hasSave(): boolean {

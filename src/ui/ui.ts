@@ -61,26 +61,35 @@ const ICONS: Record<string, string> = {
   trophy: svg('<path d="M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M7 6H4v1.5A3.5 3.5 0 0 0 7.5 11M17 6h3v1.5a3.5 3.5 0 0 1-3.5 3.5M12 14v4M8 20h8"/>'),
 };
 
+type Cat = 'always' | 'land' | 'store' | 'build' | 'gear';
+const CATS: { id: Exclude<Cat, 'always'>; name: string }[] = [
+  { id: 'land', name: 'Gelände' },
+  { id: 'store', name: 'Lager' },
+  { id: 'build', name: 'Gebäude' },
+  { id: 'gear', name: 'Geräte' },
+];
+
 interface ToolDef {
+  cat: Cat;
   tool: Tool;
   label: string;
   sub: string;
   color: string;
 }
 const TOOLS: ToolDef[] = [
-  { tool: 'view', label: 'Ansehen', sub: 'Info', color: '#5b6b82' },
-  { tool: 'kai', label: 'Kai', sub: '5k', color: '#b8b2a3' },
-  { tool: 'crane', label: 'Kran', sub: '80k', color: '#e2582c' },
-  { tool: 'road', label: 'Straße', sub: '500 €', color: '#59606a' },
-  { tool: 'yard', label: 'Stapel', sub: '1k', color: '#c9b88a' },
-  { tool: 'gate', label: 'Gate', sub: '20k', color: '#d9534f' },
-  { tool: 'truck', label: 'Truck', sub: '25k', color: '#e0a030' },
-  { tool: 'unpack', label: 'Packhalle', sub: '60k', color: '#c98a3c' },
-  { tool: 'pack', label: 'Veredeln', sub: '90k', color: '#7a5cc7' },
-  { tool: 'reefer', label: 'Kühlplatz', sub: '4k', color: '#3b9bd6' },
-  { tool: 'rail', label: 'Gleis', sub: '150k', color: '#5f6f82' },
-  { tool: 'dredge', label: 'Baggern', sub: '15k', color: '#1f5f95' },
-  { tool: 'demolish', label: 'Abriss', sub: '50 %', color: '#8a8f98' },
+  { cat: 'always', tool: 'view', label: 'Ansehen', sub: 'Info', color: '#5b6b82' },
+  { cat: 'land', tool: 'kai', label: 'Kai', sub: '5k', color: '#b8b2a3' },
+  { cat: 'gear', tool: 'crane', label: 'Kran', sub: '80k', color: '#e2582c' },
+  { cat: 'land', tool: 'road', label: 'Straße', sub: '500 €', color: '#59606a' },
+  { cat: 'store', tool: 'yard', label: 'Stapel', sub: '1k', color: '#c9b88a' },
+  { cat: 'build', tool: 'gate', label: 'Gate', sub: '20k', color: '#d9534f' },
+  { cat: 'gear', tool: 'truck', label: 'Truck', sub: '25k', color: '#e0a030' },
+  { cat: 'build', tool: 'unpack', label: 'Packhalle', sub: '60k', color: '#c98a3c' },
+  { cat: 'build', tool: 'pack', label: 'Veredeln', sub: '90k', color: '#7a5cc7' },
+  { cat: 'store', tool: 'reefer', label: 'Kühlplatz', sub: '4k', color: '#3b9bd6' },
+  { cat: 'build', tool: 'rail', label: 'Gleis', sub: '150k', color: '#5f6f82' },
+  { cat: 'land', tool: 'dredge', label: 'Baggern', sub: '15k', color: '#1f5f95' },
+  { cat: 'always', tool: 'demolish', label: 'Abriss', sub: '50 %', color: '#8a8f98' },
 ];
 
 const STAGES: { key: 'crane' | 'trucks' | 'yard' | 'gate'; label: string; hint: string }[] = [
@@ -150,6 +159,8 @@ export class UI {
   private diff: DiffId = 'normal';
   private levelUp!: HTMLElement;
   private levelUpBody!: HTMLElement;
+  private cat: Exclude<Cat, 'always'> = 'land';
+  private catBtns = new Map<string, HTMLButtonElement>();
   private speedBeforeModal = 1;
   private lastLevel = 0;
   private lastSheet = '';
@@ -295,6 +306,19 @@ export class UI {
 
     // Werkzeugleiste
     const bar = el('div', 'toolbar');
+    const tabs = el('div', 'tabs');
+    for (const c of CATS) {
+      const b = el('button', 'tab', c.name);
+      b.addEventListener('click', () => {
+        this.cat = c.id;
+        this.refreshTools();
+        click();
+      });
+      this.catBtns.set(c.id, b);
+      tabs.appendChild(b);
+    }
+    const row = el('div', 'tools');
+    bar.append(tabs, row);
     for (const t of TOOLS) {
       const b = el('button', 'tool');
       b.innerHTML = `<span class="ico" style="--c:${t.color}">${ICONS[t.tool]}<span class="lk">${ICONS.lock}</span></span><b>${t.label}</b><small>${t.sub}</small>`;
@@ -309,7 +333,7 @@ export class UI {
       });
       b.title = t.label;
       this.toolBtns.set(t.tool, { btn: b, sub: b.querySelector('small')!, def: t });
-      bar.appendChild(b);
+      row.appendChild(b);
     }
 
     this.toasts = el('div', 'toasts');
@@ -471,7 +495,14 @@ export class UI {
     for (const b of this.speedBtns) b.classList.toggle('on', Number(b.dataset.v) === this.game.speed);
   }
   refreshTools() {
-    for (const [t, v] of this.toolBtns) v.btn.classList.toggle('on', t === this.game.tool);
+    // Die Abteilung folgt dem gewählten Werkzeug (auch bei Tastenkürzeln)
+    const cur = this.toolBtns.get(this.game.tool)?.def.cat;
+    if (cur && cur !== 'always') this.cat = cur;
+    for (const [id, b] of this.catBtns) b.classList.toggle('on', id === this.cat);
+    for (const [t, v] of this.toolBtns) {
+      v.btn.classList.toggle('on', t === this.game.tool);
+      v.btn.classList.toggle('hidden', v.def.cat !== 'always' && v.def.cat !== this.cat);
+    }
   }
   refreshOverlay() {
     this.overlayBtn.classList.toggle('on', this.game.overlay);
