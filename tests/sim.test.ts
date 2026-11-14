@@ -539,6 +539,129 @@ describe('Ziel, Pleite, Kredit', () => {
   });
 });
 
+describe('Kühlhalle', () => {
+  it('macht aus Kühlcontainern Lebensmittel für 750 €', () => {
+    const sim = bigPort(3, 12);
+    for (let x = 10; x <= 15; x++) sim.build('reefer', x, k + 5);
+    for (let x = 9; x <= 22; x++) sim.build('road', x, k + 6);
+    for (let y = k + 2; y <= k + 6; y++) sim.build('road', 9, y);
+    sim.build('cold', 16, k + 5);
+    sim.build('cold', 17, k + 5);
+    (sim as unknown as { addShip(t: string, c: null, r: boolean): void }).addShip('feeder', null, true);
+    run(sim, 30);
+    expect(sim.plants.reduce((n, p) => n + p.made, 0)).toBeGreaterThan(0);
+  });
+});
+
+describe('Einbahnstraßen', () => {
+  it('Wegsuche hält sich an die Richtung', () => {
+    const sim = new Sim();
+    for (let x = 2; x <= 6; x++) sim.build('road', x, k + 2);
+    const a = sim.idx(2, k + 2);
+    const b = sim.idx(6, k + 2);
+    expect(sim.distMap(b)[a]).toBe(4);
+    sim.toggleOneway(4, k + 2); // Ost
+    expect(sim.distMap(b)[a]).toBe(4);
+    expect(sim.distMap(a)[b]).toBe(-1);
+    sim.toggleOneway(4, k + 2); // Süd: gar kein Durchkommen mehr
+    expect(sim.distMap(b)[a]).toBe(-1);
+    for (let i = 0; i < 3; i++) sim.toggleOneway(4, k + 2);
+    expect(sim.oneway[sim.idx(4, k + 2)]).toBe(-1);
+  });
+});
+
+describe('Land', () => {
+  it('erst kaufen, dann bauen; jeder Streifen wird teurer', () => {
+    const sim = new Sim();
+    sim.limitLand();
+    expect(sim.canBuild('road', 19, k + 2).ok).toBe(true);
+    expect(sim.canBuild('road', 20, k + 2).reason).toMatch(/gehört dir noch nicht/);
+    const m = sim.money;
+    expect(sim.buyPlot(21).ok).toBe(true);
+    expect(sim.money).toBe(m - 60_000);
+    expect(sim.canBuild('road', 23, k + 2).ok).toBe(true);
+    expect(sim.plotPrice).toBe(90_000);
+    expect(sim.buyPlot(22)).toMatchObject({ ok: false });
+  });
+});
+
+describe('Verschleiß', () => {
+  it('Geräte nutzen sich ab Stufe 2 ab, die Werkstatt repariert', () => {
+    const sim = bigPort(2, 6);
+    run(sim, 24);
+    const worn = Math.max(...sim.trucks.map((t) => t.wear), ...sim.cranes.map((c) => c.wear));
+    expect(worn).toBeGreaterThan(0.3);
+    sim.trucks[0].wear = 1;
+    sim.build('workshop', 30, k + 2);
+    expect(sim.staff.mech).toBe(1);
+    run(sim, 3);
+    expect(sim.trucks[0].wear).toBeLessThan(1);
+  });
+
+  it('auf Stufe 1 gibt es keinen Verschleiß', () => {
+    const sim = bigPort(1, 6);
+    run(sim, 12);
+    expect(sim.trucks.every((t) => t.wear === 0)).toBe(true);
+  });
+});
+
+describe('Karten', () => {
+  it('Insel hat Wasser am Rand, Felsen kosten beim Sprengen', () => {
+    const isl = new Sim(4, 'normal', 'island');
+    expect(isl.kind[isl.idx(0, k + 5)]).toBe(0);
+    expect(isl.canBuild('rail', GRID_W - 1, k + 2)).toMatchObject({ ok: false });
+    const rocks = new Sim(4, 'normal', 'rocks');
+    const i = rocks.kind.findIndex((v) => v === 10);
+    expect(i).toBeGreaterThan(0);
+    const x = i % GRID_W;
+    const y = Math.floor(i / GRID_W);
+    expect(rocks.canBuild('road', x, y)).toMatchObject({ ok: false });
+    const m = rocks.money;
+    expect(rocks.demolish(x, y).ok).toBe(true);
+    expect(rocks.money).toBe(m - 8000);
+    expect(rocks.canBuild('road', x, y).ok).toBe(true);
+    const copy = Sim.deserialize(JSON.parse(JSON.stringify(rocks.serialize())));
+    expect(copy.map).toBe('rocks');
+  });
+});
+
+describe('Entscheidungen', () => {
+  it('Streik ablehnen legt die Fahrer still, zustimmen erhöht den Lohn', () => {
+    const sim = basicPort(3, 1);
+    const w = sim.wagePerHour('driver');
+    sim.pending = { id: 'strike', title: '', text: '', options: ['a', 'b'] };
+    sim.resolveDecision(0);
+    expect(sim.wagePerHour('driver')).toBeGreaterThan(w);
+    sim.pending = { id: 'strike', title: '', text: '', options: ['a', 'b'] };
+    sim.resolveDecision(1);
+    expect(sim.staffAvail('driver')).toBe(0);
+    run(sim, 9);
+    expect(sim.staffAvail('driver')).toBe(3);
+  });
+
+  it('Sonderfahrt wird als einmaliger Vertrag angelegt', () => {
+    const sim = basicPort(3, 1);
+    sim.pending = { id: 'vip', title: '', text: '', options: ['a', 'b'] };
+    sim.resolveDecision(0);
+    expect(sim.contracts.find((c) => c.line === 'Sonderfahrt')?.calls).toBe(1);
+  });
+
+  it('ab Stufe 2 kommen Entscheidungen und die Konkurrenz zieht an', () => {
+    const sim = bigPort(2, 8);
+    const r = sim.rivalRate;
+    let seen = 0;
+    for (let d = 0; d < 10; d++) {
+      run(sim, 24);
+      if (sim.pending) {
+        seen++;
+        sim.resolveDecision(1);
+      }
+    }
+    expect(seen).toBeGreaterThan(0);
+    expect(sim.rivalRate).toBeGreaterThan(r);
+  });
+});
+
 describe('Verkehr', () => {
   it('in einer Spur steht pro Feld nur ein fahrender Truck, der Rest staut sich', () => {
     const sim = bigPort(1, 24);

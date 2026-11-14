@@ -1,12 +1,12 @@
 import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture, TilingSprite } from 'pixi.js';
-import { COAST_ROW, CRANE_BUFFER, CRANE_EXP_BUFFER, GRID_H, GRID_W, MIN_PER_DAY, RAIL_CAP, RAIL_TRAVEL_GM, T, TICK_GM, TILE, YARD_CAP_PER_TILE } from '../sim/data';
+import { COAST_ROW, CRANE_BUFFER, CRANE_EXP_BUFFER, GRID_H, GRID_W, MapId, MIN_PER_DAY, PLOT_W, RAIL_CAP, RAIL_TRAVEL_GM, T, TICK_GM, TILE, YARD_CAP_PER_TILE } from '../sim/data';
 import type { Crane, Rail, Ship, Sim, Truck } from '../sim/sim';
 
 export interface View {
   overlay: boolean;
   tool: string;
   hover: { x: number; y: number; ok: boolean } | null;
-  selected: { kind: 'ship' | 'crane' | 'gate' | 'yard' | 'reefer' | 'rail' | 'plant' | 'truck'; id: number } | null;
+  selected: { kind: 'ship' | 'crane' | 'gate' | 'yard' | 'reefer' | 'rail' | 'plant' | 'shop' | 'truck'; id: number } | null;
   /** Anteil zwischen letztem und nächstem Tick (0..1) für weiche Bewegung. */
   alpha: number;
   /** Laufzeit in Sekunden (Echtzeit) für Animationen. */
@@ -66,9 +66,10 @@ const REEFER_BOX = 0xf4f9fd;
 /** Ausgepackte Ware ist braun (Kisten), Fertigware gold. */
 const WARE_BOX = 0xb98a52;
 const PREM_BOX = 0xf4c430;
+const FOOD_BOX = 0x5fbf6a;
 /** Farbe der festen Truck-Aufgabe (Automatik hat keinen Punkt) */
 export const ROLE_COLOR: Record<string, number> = { crane: 0xe2582c, out: 0x2f9e6b, export: 0x2f6db0, plant: 0x7a5cc7 };
-const CARGO_TINT: Record<string, number> = { reef: REEFER_BOX, exp: EXPORT_BOX, ware: WARE_BOX, prem: PREM_BOX };
+const CARGO_TINT: Record<string, number> = { reef: REEFER_BOX, exp: EXPORT_BOX, ware: WARE_BOX, prem: PREM_BOX, food: FOOD_BOX };
 
 function hash(x: number, y: number): number {
   let h = Math.imul(x + 374761393, 668265263) ^ Math.imul(y + 1274126177, 2246822519);
@@ -196,6 +197,7 @@ export class Renderer {
   private heatTimer = 0;
   /** 0 = Tag, 1 = Nacht */
   private nightF = 0;
+  private baseMap: MapId = 'coast';
 
   scale = 1;
   ox = 0;
@@ -214,7 +216,7 @@ export class Renderer {
     this.app.canvas.style.touchAction = 'none';
 
     this.makeTextures();
-    this.drawBase();
+    this.drawBase('coast');
     this.drawGrid();
     this.night.rect(-FAR, -FAR, W + 2 * FAR, H + 2 * FAR).fill(0xffffff);
     this.night.alpha = 0;
@@ -461,8 +463,22 @@ export class Renderer {
     }
   }
 
-  private drawBase() {
+  private drawBase(map: MapId) {
     const g = this.base;
+    g.clear();
+    for (const c of this.decor.removeChildren()) c.destroy();
+    this.baseMap = map;
+    if (map === 'island') {
+      // Ringsum Meer, zur Insel hin heller
+      g.rect(-FAR, -FAR, W + 2 * FAR, H + 2 * FAR).fill(C.deep);
+      for (let i = 8; i >= 1; i--) {
+        const p = i * TILE;
+        g.roundRect(-p, COAST - p, W + 2 * p, H - COAST + 2 * p, 40 + i * 12).fill(mix(C.deep, C.shallow, Math.pow((9 - i) / 9, 1.6)));
+      }
+      this.waves.height = this.swell.height = WATER_EXT * 2 + H;
+      return;
+    }
+    this.waves.height = this.swell.height = WATER_EXT + COAST - 4;
     // Meer: weit draußen dunkel, zur Küste hin heller
     g.rect(-FAR, -FAR, W + 2 * FAR, FAR + COAST).fill(C.deep);
     const bands = 11;
@@ -590,6 +606,7 @@ export class Renderer {
             const w = same(-1, 0);
             const e = same(1, 0);
             const cnt = +n + +s + +w + +e;
+            const ow = sim.oneway[y * GRID_W + x];
             const cx = px + TILE / 2;
             const cy = py + TILE / 2;
             const edge = { color: C.roadEdge, alpha: 0.85 };
@@ -613,7 +630,7 @@ export class Renderer {
               g.rect(cx - 1, py + 4, 2, 9).fill(C.roadDash);
               g.rect(cx - 1, py + 20, 2, 9).fill(C.roadDash);
               if (cnt === 1) g.circle(cx, n ? py + TILE - 9 : py + 9, 4).stroke({ width: 1.2, color: C.roadEdge, alpha: 0.6 });
-            } else if (cnt === 2) {
+            } else if (cnt === 2 && ow < 0) {
               // Kurve: Mittellinie als Bogen, Außenecke abgerundet
               const ax = w ? px : px + TILE;
               const ay = n ? py : py + TILE;
@@ -644,8 +661,9 @@ export class Renderer {
             break;
           }
           case T.Plant: {
-            const pack = sim.plantAt(x, y)?.kind === 'pack';
-            const roof = pack ? 0x7a5cc7 : 0xc98a3c;
+            const pk = sim.plantAt(x, y)?.kind;
+            const pack = pk === 'pack';
+            const roof = pk === 'pack' ? 0x7a5cc7 : pk === 'cold' ? 0x3b9bd6 : 0xc98a3c;
             g.rect(px, py, TILE, TILE).fill(0xc9c4b8);
             g.roundRect(px + 3.5, py + 5, 27, 20, 2.5).fill({ color: 0x000000, alpha: 0.25 });
             g.roundRect(px + 2, py + 2.5, 27, 20, 2.5).fill(shade(roof, 0.75));
@@ -659,6 +677,42 @@ export class Renderer {
             // Rampe zur Straße
             g.rect(px + 4, py + 24, 24, 5.5).fill(0x8d949b);
             g.rect(px + 4, py + 24, 24, 1.2).fill(C.yellow);
+            break;
+          }
+          case T.Water: {
+            // Wasser innerhalb der Karte (Insel)
+            g.rect(px, py, TILE, TILE).fill(C.shallow);
+            if (h % 4 === 0) g.moveTo(px + 6, py + 14).lineTo(px + 17, py + 14).stroke({ width: 1.5, color: 0xffffff, alpha: 0.25 });
+            const sandy = { color: C.sand };
+            if (kindAt(x, y - 1) > T.Water) g.rect(px, py, TILE, 4).fill(sandy);
+            if (kindAt(x, y + 1) > T.Water) g.rect(px, py + TILE - 4, TILE, 4).fill(sandy);
+            if (kindAt(x - 1, y) > T.Water) g.rect(px, py, 4, TILE).fill(sandy);
+            if (kindAt(x + 1, y) > T.Water) g.rect(px + TILE - 4, py, 4, TILE).fill(sandy);
+            break;
+          }
+          case T.Rock: {
+            const r1 = 7 + (h % 4);
+            g.ellipse(px + 13 + 2, py + 18 + 3, r1 + 2, r1 * 0.7).fill({ color: 0x000000, alpha: 0.18 });
+            g.circle(px + 13, py + 17, r1).fill(0x8d949b);
+            g.circle(px + 11, py + 14, r1 * 0.55).fill(0xb3b9be);
+            g.circle(px + 23, py + 23, 5.5).fill(0x7c838a);
+            g.circle(px + 22, py + 21.5, 2.8).fill(0xa2a9ae);
+            if (h & 1) g.circle(px + 24, py + 9, 3.6).fill(0x949ba1);
+            break;
+          }
+          case T.Shop: {
+            g.rect(px, py, TILE, TILE).fill(0xc9c4b8);
+            g.roundRect(px + 3.5, py + 5, 27, 19, 2.5).fill({ color: 0x000000, alpha: 0.25 });
+            g.roundRect(px + 2, py + 2.5, 27, 19, 2.5).fill(0x4a5868);
+            g.roundRect(px + 3, py + 3.5, 25, 17, 2).fill(0x5b6b82);
+            // Werkzeugschild
+            g.circle(px + 15.5, py + 12, 5.2).fill(0xf2c230);
+            g.rect(px + 12.2, py + 11.2, 6.6, 1.8).fill(0x2b323b);
+            g.circle(px + 12.2, py + 12.1, 1.8).fill(0x2b323b);
+            g.circle(px + 18.8, py + 12.1, 1.8).fill(0x2b323b);
+            // Rolltor
+            g.rect(px + 7, py + 21.5, 18, 8).fill(0x8d949b);
+            for (let i = 0; i < 4; i++) g.rect(px + 7, py + 22.5 + i * 2, 18, 0.7).fill(0x6d747b);
             break;
           }
           case T.Reefer: {
@@ -708,6 +762,29 @@ export class Renderer {
         }
       }
     }
+    // Einbahnstraßen: weiße Pfeile in Fahrtrichtung
+    for (let i = 0; i < sim.oneway.length; i++) {
+      const ow = sim.oneway[i];
+      if (ow < 0 || sim.kind[i] !== T.Road) continue;
+      const cx = (i % GRID_W) * TILE + TILE / 2;
+      const cy = ((i / GRID_W) | 0) * TILE + TILE / 2;
+      const ang = [0, Math.PI / 2, Math.PI, -Math.PI / 2][ow];
+      const c = Math.cos(ang);
+      const s = Math.sin(ang);
+      const P = (lx: number, ly: number) => [cx + lx * c - ly * s, cy + lx * s + ly * c];
+      g.rect(cx - 7, cy - 7, 14, 14).fill(C.road);
+      g.poly([...P(-8, -2.2), ...P(2, -2.2), ...P(2, -6.5), ...P(9, 0), ...P(2, 6.5), ...P(2, 2.2), ...P(-8, 2.2)]).fill(0xffffff);
+    }
+
+    // Land, das dir noch nicht gehört: abgedunkelt mit Grenzlinie
+    for (let x = 0; x < GRID_W; x++) {
+      if (sim.owned[x]) continue;
+      g.rect(x * TILE, COAST, TILE, H - COAST).fill({ color: 0x14263d, alpha: 0.28 });
+      if (x === 0 || sim.owned[x - 1]) {
+        for (let y = COAST; y < H; y += 14) g.rect(x * TILE - 1, y, 2.5, 8).fill({ color: 0xffffff, alpha: 0.85 });
+      }
+    }
+
     // Ausgebaggerte Fahrrinne vor dem Kai: dunkleres Wasser mit Bojen an den Rändern
     for (let x = 0; x < GRID_W; x++) {
       if (!sim.depth[x]) continue;
@@ -1297,6 +1374,7 @@ export class Renderer {
       this.simRef = sim;
       this.version = -1;
     }
+    if (this.baseMap !== sim.map) this.drawBase(sim.map);
     if (this.version !== sim.version) {
       this.drawTerrain(sim);
       this.syncYard(sim);
@@ -1433,9 +1511,10 @@ export class Renderer {
     for (const p of sim.plants) {
       const px = p.x * TILE;
       const py = p.y * TILE;
-      const pack = p.kind === 'pack';
-      for (let k = 0; k < Math.min(3, p.inBuf); k++) g.rect(px + 5 + k * 3.4, py + 25.4, 2.8, 3.6).fill(pack ? WARE_BOX : 0x3b7fc8);
-      for (let k = 0; k < Math.min(3, p.outBuf); k++) g.rect(px + 24.2 - k * 3.4, py + 25.4, 2.8, 3.6).fill(pack ? PREM_BOX : WARE_BOX);
+      const cin = p.kind === 'pack' ? WARE_BOX : p.kind === 'cold' ? REEFER_BOX : 0x3b7fc8;
+      const cout = p.kind === 'pack' ? PREM_BOX : p.kind === 'cold' ? FOOD_BOX : WARE_BOX;
+      for (let k = 0; k < Math.min(3, p.inBuf); k++) g.rect(px + 5 + k * 3.4, py + 25.4, 2.8, 3.6).fill(cin);
+      for (let k = 0; k < Math.min(3, p.outBuf); k++) g.rect(px + 24.2 - k * 3.4, py + 25.4, 2.8, 3.6).fill(cout);
       g.circle(px + 7, py + 8, 1.9).fill(p.proc > 0 ? (Math.sin(view.time * 8 + p.id) > 0 ? 0x3fe08a : 0x1f8f55) : p.outBuf >= 6 ? 0xff5a4a : 0x9aa5b1);
     }
 
@@ -1460,6 +1539,16 @@ export class Renderer {
       for (let x = 0; x < GRID_W; x++) {
         if (!sim.depth[x]) g.rect(x * TILE + 1.5, COAST - 2 * TILE + 1.5, TILE - 3, 2 * TILE - 10).stroke({ width: 1.5, color: 0xffffff, alpha: 0.4 + 0.2 * Math.sin(view.time * 4) });
       }
+    } else if (view.tool === 'buyland') {
+      for (let x = 0; x < GRID_W; x += PLOT_W) {
+        if (sim.owned[x]) continue;
+        g.rect(x * TILE + 3, COAST + 3, PLOT_W * TILE - 6, H - COAST - 6).stroke({ width: 2.5, color: 0xffffff, alpha: 0.5 + 0.25 * Math.sin(view.time * 4) });
+      }
+    } else if (view.tool === 'oneway') {
+      for (let i = 0; i < sim.kind.length; i++) {
+        if (sim.kind[i] !== T.Road) continue;
+        g.rect((i % GRID_W) * TILE + 1.5, ((i / GRID_W) | 0) * TILE + 1.5, TILE - 3, TILE - 3).stroke({ width: 1.2, color: 0xffffff, alpha: 0.4 });
+      }
     } else if (view.tool === 'rail') {
       for (let y = COAST_ROW + 1; y < GRID_H; y++) {
         if (sim.kind[y * GRID_W + GRID_W - 1] === T.Land) {
@@ -1472,6 +1561,34 @@ export class Renderer {
           g.rect(x * TILE + 2.5, COAST + 2.5, TILE - 5, TILE - 5).stroke({ width: 1.5, color: 0xffffff, alpha: 0.55 + 0.2 * Math.sin(view.time * 4) });
         }
       }
+    }
+
+    // Ausgefallene Geräte: Schraubenschlüssel-Zeichen, abgenutzte Geräte: kleiner gelber Punkt
+    const wrench = (x: number, y: number) => {
+      const by = y + Math.sin(view.time * 4) * 1.4;
+      g.circle(x, by, 8).fill(0xffffff);
+      g.circle(x, by, 6.6).fill(0x2b323b);
+      g.rect(x - 3.6, by - 0.9, 7.2, 1.8).fill(0xf2c230);
+      g.circle(x - 3.6, by, 1.7).fill(0xf2c230);
+      g.circle(x + 3.6, by, 1.7).fill(0xf2c230);
+    };
+    for (const t of sim.trucks) {
+      const cx = (t.px + (t.fx - t.px) * a + 0.5) * TILE;
+      const cy = (t.py + (t.fy - t.py) * a + 0.5) * TILE;
+      if (t.wear >= 1) wrench(cx, cy - 13);
+      else if (t.wear > 0.75) g.circle(cx + 9, cy - 8, 2.6).fill(C.warn);
+    }
+    for (const c of sim.cranes) {
+      if (c.wear >= 1) wrench(c.x * TILE + 16, c.y * TILE - 8);
+      else if (c.wear > 0.75) g.circle(c.x * TILE + 27, c.y * TILE + 4, 2.8).fill(C.warn);
+    }
+    for (const sh of sim.shops) {
+      if (!sh.target) continue;
+      const o = sh.target.kind === 'crane' ? sim.cranes.find((c) => c.id === sh.target!.id) : sim.trucks.find((t) => t.id === sh.target!.id);
+      if (!o) continue;
+      const tx = 'fx' in o ? (o.fx + 0.5) * TILE : (o.x + 0.5) * TILE;
+      const ty = 'fy' in o ? (o.fy + 0.5) * TILE : (o.y + 0.5) * TILE;
+      g.moveTo(sh.x * TILE + 16, sh.y * TILE + 16).lineTo(tx, ty).stroke({ width: 1.5, color: 0xf2c230, alpha: 0.5 + 0.3 * Math.sin(view.time * 6) });
     }
 
     // Warnzeichen an der Stufe, die bremst
@@ -1613,6 +1730,11 @@ export class Renderer {
       if (!p) return;
       x = p.x * TILE;
       y = p.y * TILE;
+    } else if (sel.kind === 'shop') {
+      const sh = sim.shops.find((q) => q.id === sel.id);
+      if (!sh) return;
+      x = sh.x * TILE;
+      y = sh.y * TILE;
     } else if (sel.kind === 'rail') {
       const r = sim.rails.find((r) => r.id === sel.id);
       if (!r) return;

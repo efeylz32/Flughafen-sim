@@ -4,6 +4,9 @@ import {
   CRANE_BUFFER,
   DIFFS,
   DiffId,
+  MAPS,
+  MapId,
+  RIVAL_NAME,
   ROLES,
   Role,
   CRANE_EXP_BUFFER,
@@ -46,6 +49,10 @@ const ICONS: Record<string, string> = {
   pack: svg('<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>'),
   assign: svg('<rect x="3.5" y="5" width="17" height="14" rx="1.5" stroke-dasharray="3 2.4"/><path d="M8 12.5l2.6 2.6L16 9.5"/>'),
   chart: svg('<path d="M4 20V4M4 20h16"/><rect x="7" y="12" width="3" height="6" rx=".6"/><rect x="12" y="8" width="3" height="10" rx=".6"/><rect x="17" y="10.5" width="3" height="7.5" rx=".6"/>'),
+  oneway: svg('<path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M3 5h18M3 19h18" opacity=".5"/>'),
+  buyland: svg('<path d="M4 20V9l8-5 8 5v11z"/><path d="M9 20v-6h6v6"/><path d="M12 4v-1"/>'),
+  cold: svg('<path d="M3 20V9l4.5 3V9l4.5 3V9l4.5 3V5h4.5v15z"/><path d="M12 14v4M10 16h4"/>'),
+  workshop: svg('<path d="M14.5 4.5a4.5 4.5 0 0 0-5.6 5.6L3.5 15.5a2 2 0 0 0 2.8 2.8l5.4-5.4a4.5 4.5 0 0 0 5.6-5.6l-2.8 2.8-2.4-.6-.6-2.4z"/>'),
   dredge: svg('<path d="M3 8c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/><path d="M12 11v9M8.5 16.5L12 20l3.5-3.5"/>'),
   demolish: svg('<path d="M5 5l14 14M19 5L5 19"/>'),
   eye: svg('<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'),
@@ -90,7 +97,11 @@ const TOOLS: ToolDef[] = [
   { cat: 'build', tool: 'unpack', label: 'Packhalle', sub: '60k', color: '#c98a3c' },
   { cat: 'build', tool: 'pack', label: 'Veredeln', sub: '90k', color: '#7a5cc7' },
   { cat: 'store', tool: 'reefer', label: 'Kühlplatz', sub: '4k', color: '#3b9bd6' },
+  { cat: 'build', tool: 'cold', label: 'Kühlhalle', sub: '80k', color: '#3b9bd6' },
+  { cat: 'build', tool: 'workshop', label: 'Werkstatt', sub: '40k', color: '#5b6b82' },
   { cat: 'build', tool: 'rail', label: 'Gleis', sub: '150k', color: '#5f6f82' },
+  { cat: 'land', tool: 'oneway', label: 'Einbahn', sub: 'Gratis', color: '#4b525c' },
+  { cat: 'land', tool: 'buyland', label: 'Land kaufen', sub: '60k', color: '#6aa953' },
   { cat: 'land', tool: 'dredge', label: 'Baggern', sub: '15k', color: '#1f5f95' },
   { cat: 'always', tool: 'demolish', label: 'Abriss', sub: '50 %', color: '#8a8f98' },
 ];
@@ -115,7 +126,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''):
 function jobText(j: Job | null): string {
   if (!j) return 'Wartet auf einen Auftrag';
   const store = j.cargo === 'reef' ? 'Kühlplatz' : 'Stapelplatz';
-  const cargo = { imp: 'Container', reef: 'Kühlcontainer', exp: 'Export-Container', ware: 'ausgepackte Ware', prem: 'Fertigware' }[j.cargo];
+  const cargo = { imp: 'Container', reef: 'Kühlcontainer', exp: 'Export-Container', ware: 'ausgepackte Ware', prem: 'Fertigware', food: 'Lebensmittel' }[j.cargo];
   if (j.stage === 0) return `Fährt zu: ${j.srcKind === 'crane' ? 'Kran' : j.srcKind === 'gate' ? 'Gate' : j.srcKind === 'plant' ? 'Verarbeitung' : store}`;
   const dst = j.dstKind === 'store' ? store : j.dstKind === 'gate' ? 'Gate' : j.dstKind === 'rail' ? 'Gleisanschluss' : j.dstKind === 'plant' ? 'Verarbeitung' : 'Kran';
   return `Bringt ${cargo} zu: ${dst}`;
@@ -160,6 +171,9 @@ export class UI {
   private staffBadge!: HTMLElement;
   private lastStaff = '';
   private diff: DiffId = 'normal';
+  private map: MapId = 'coast';
+  private decision!: HTMLElement;
+  private decisionBody!: HTMLElement;
   private rolePick!: HTMLElement;
   private alertEl!: HTMLElement;
   private lastFin = '';
@@ -259,7 +273,7 @@ export class UI {
     this.bnHint = this.bnCard.querySelector('.hint')!;
 
     this.finCard = el('div', 'modal hidden');
-    this.finCard.innerHTML = `<div class="dialog deals fin"><div class="dhead"><h2>Bilanz</h2><button class="x" aria-label="Schließen">${ICONS.close}</button></div><div class="body"></div></div>`;
+    this.finCard.innerHTML = `<div class="dialog deals fin"><div class="dhead"><h2>Bilanz</h2><button class="x" aria-label="Schließen">${ICONS.close}</button></div><div class="body"></div><div class="pm loanbar"><button class="secondary" data-loan="repay">100.000 € tilgen</button><button class="primary" data-loan="take">100.000 € leihen</button></div></div>`;
     this.finBody = this.finCard.querySelector('.body')!;
     this.finCard.querySelector('.x')!.addEventListener('click', () => this.finCard.classList.add('hidden'));
     this.finCard.addEventListener('click', (e) => {
@@ -331,7 +345,10 @@ export class UI {
       const b = el('button', 'tab', c.name);
       b.addEventListener('click', () => {
         this.cat = c.id;
-        this.refreshTools();
+        // Werkzeug einer anderen Abteilung abwählen, sonst springt die Leiste zurück
+        const cur = this.toolBtns.get(this.game.tool)?.def.cat;
+        if (cur && cur !== 'always' && cur !== c.id) this.game.setTool('view');
+        else this.refreshTools();
         click();
       });
       this.catBtns.set(c.id, b);
@@ -379,6 +396,9 @@ export class UI {
         <div class="difflabel">Schwierigkeit für ein neues Spiel</div>
         <div class="diff">${(Object.keys(DIFFS) as DiffId[]).map((d) => `<button data-diff="${d}">${DIFFS[d].name}</button>`).join('')}</div>
         <p class="sub difftext"></p>
+        <div class="difflabel">Karte für einen neuen leeren Hafen</div>
+        <div class="diff">${(Object.keys(MAPS) as MapId[]).map((m) => `<button data-map="${m}">${MAPS[m].name}</button>`).join('')}</div>
+        <p class="sub maptext"></p>
         <button class="primary demo">Demo-Hafen mit Engpass</button>
         <button class="secondary empty">Neuer leerer Hafen</button>
         <details><summary>Bedienung</summary>
@@ -417,12 +437,25 @@ export class UI {
       });
     }
     showDiff();
+    const mapText = this.menu.querySelector('.maptext')!;
+    const showMap = () => {
+      for (const b of this.menu.querySelectorAll<HTMLElement>('[data-map]')) b.classList.toggle('on', b.dataset.map === this.map);
+      mapText.textContent = `${MAPS[this.map].text} Der Demo-Hafen liegt immer an der Küste.`;
+    };
+    for (const b of this.menu.querySelectorAll<HTMLElement>('[data-map]')) {
+      b.addEventListener('click', () => {
+        this.map = b.dataset.map as MapId;
+        showMap();
+        click();
+      });
+    }
+    showMap();
     this.menu.querySelector('.demo')!.addEventListener('click', () => {
       this.game.newGame('demo', this.diff);
       this.hideMenu();
     });
     this.menu.querySelector('.empty')!.addEventListener('click', () => {
-      this.game.newGame('empty', this.diff);
+      this.game.newGame('empty', this.diff, this.map);
       this.hideMenu();
     });
     this.menu.querySelector('.close-menu')!.addEventListener('click', () => this.hideMenu());
@@ -465,6 +498,18 @@ export class UI {
       this.renderStaff(true);
     });
 
+    // Entscheidung
+    this.decision = el('div', 'modal hidden');
+    this.decision.innerHTML = `<div class="dialog levelup decision"><div class="body"></div><div class="opts"></div></div>`;
+    this.decisionBody = this.decision.querySelector('.body')!;
+    this.decision.querySelector('.opts')!.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-opt]');
+      if (!b) return;
+      this.game.decide(Number(b.dataset.opt));
+      this.decision.classList.add('hidden');
+      this.game.setSpeed(this.speedBeforeModal);
+    });
+
     // Ende: Sieg oder Niederlage
     this.endModal = el('div', 'modal hidden');
     this.endModal.innerHTML = `<div class="dialog levelup"><div class="body"></div><button class="primary free">Ohne Wertung weiterspielen</button><button class="secondary again">Neues Spiel</button></div>`;
@@ -488,7 +533,7 @@ export class UI {
       this.game.setSpeed(this.speedBeforeModal);
     });
 
-    root.append(top, left, side, this.sheet, bar, this.toasts, this.menu, this.deals, this.staffModal, this.finCard, this.endModal, this.levelUp);
+    root.append(top, left, side, this.sheet, bar, this.toasts, this.menu, this.deals, this.staffModal, this.finCard, this.endModal, this.decision, this.levelUp);
     this.refreshSpeed();
     this.refreshTools();
     this.refreshOverlay();
@@ -533,6 +578,18 @@ export class UI {
       ${news.map((n) => `<div class="news"><b>${n.title}</b><span>${n.text}</span></div>`).join('')}`;
     if (this.levelUp.classList.contains('hidden')) this.speedBeforeModal = this.game.speed || this.game.lastSpeed || 1;
     this.levelUp.classList.remove('hidden');
+    this.game.setSpeed(0);
+  }
+
+  showDecision() {
+    const d = this.game.sim.pending;
+    if (!d) return;
+    this.decisionBody.innerHTML = `<div class="eyebrow">Entscheidung</div><h1>${d.title}</h1><p class="sub">${d.text}</p>`;
+    this.decision.querySelector('.opts')!.innerHTML = d.options
+      .map((o, i) => `<button class="${i === 0 ? 'primary' : 'secondary'}" data-opt="${i}">${o}</button>`)
+      .join('');
+    if (this.decision.classList.contains('hidden')) this.speedBeforeModal = this.game.speed || this.game.lastSpeed || 1;
+    this.decision.classList.remove('hidden');
     this.game.setSpeed(0);
   }
 
@@ -615,6 +672,9 @@ export class UI {
         v.sub.textContent = locked ? `Stufe ${need}` : v.def.sub;
       }
     }
+
+    const land = this.toolBtns.get('buyland');
+    if (land && !land.btn.classList.contains('locked')) land.sub.textContent = `${Math.round(sim.plotPrice / 1000)}k`;
 
     // Wetter
     const f = sim.forecast;
@@ -706,10 +766,10 @@ export class UI {
       ${row('Löhne', d.wages)}${row('Bau und Aufrüstung', d.building)}${row('Strafen', d.penalty)}${row('Wartung (Tagesabschluss)', d.running)}${row('Zinsen (Tagesabschluss)', d.interest)}
       <div class="fl total"><b>Ergebnis heute</b><b class="${inc - exp >= 0 ? 'pos' : 'neg'}">${eur(inc - exp)}</b></div>
       <div class="fl sub"><span>Laufend pro Tag: Wartung / Löhne</span><span>${eur(sim.runningCost())} / ${eur((Object.keys(ROLES) as Role[]).reduce((n, r) => n + sim.staff[r] * sim.wagePerHour(r) * 24, 0))}</span></div>
+      ${sim.level >= 2 ? `<h3>Konkurrenz</h3><div class="fl sub"><span>${RIVAL_NAME}: pünktlich</span><span>${Math.round(sim.rivalRate * 100)} %</span></div><div class="fl sub"><span>Du gestern</span><span class="${sim.myRate !== null && sim.myRate < sim.rivalRate - 0.1 ? 'neg' : ''}">${sim.myRate === null ? '–' : `${Math.round(sim.myRate * 100)} %`}</span></div><p class="sub">Liegst du mehr als 10 Punkte darunter, wechseln Reedereien und es kommen weniger freie Schiffe.${sim.lostToRival ? ` Bisher verloren: ${sim.lostToRival} Verträge.` : ''}</p>` : ''}
       <h3>Kredit</h3>
       <div class="fl sub"><span>Offen</span><span>${eur(sim.loan)} von ${eur(sim.loanLimit)}</span></div>
       <div class="fl sub"><span>Zinsen pro Tag</span><span>${eur(sim.interestPerDay)}</span></div>
-      <div class="pm"><button class="secondary" data-loan="repay" ${sim.loan ? '' : 'disabled'}>100.000 € tilgen</button><button class="primary" data-loan="take" ${sim.loan + 100_000 > sim.loanLimit ? 'disabled' : ''}>100.000 € leihen</button></div>
       <h3>Ergebnis pro Tag</h3>
       ${chart(res, maxRes, k, true)}
       <h3>Container pro Tag</h3>
@@ -720,6 +780,9 @@ export class UI {
       this.finBody.innerHTML = html;
       this.lastFin = html;
     }
+    // Die Kredit-Knöpfe stehen fest unten und werden nur umgeschaltet, damit sie sich zuverlässig antippen lassen
+    this.finCard.querySelector<HTMLButtonElement>('[data-loan="repay"]')!.disabled = sim.loan <= 0;
+    this.finCard.querySelector<HTMLButtonElement>('[data-loan="take"]')!.disabled = sim.loan + 100_000 > sim.loanLimit;
   }
 
   private renderStaff(force: boolean) {
@@ -808,6 +871,10 @@ export class UI {
     const gone = () => {
       this.game.selected = null;
     };
+    const wearRow = (w: number) =>
+      sim.level >= 2
+        ? `<div class="meta ${w > 0.75 ? 'neg' : ''}">Zustand ${Math.round((1 - w) * 100)} %${w > 0.3 && !sim.shops.length ? ' · Ohne Werkstatt fällt es irgendwann aus' : ''}</div>`
+        : '';
     const upgradeBtn = (kind: 'crane' | 'truck', label: string) => {
       const u = UPGRADE[kind];
       return sim.level < u.level
@@ -839,7 +906,8 @@ export class UI {
               ? 'Steht wegen Sturm still'
               : 'Wartet auf ein Schiff';
       html = `<h3>${c.big ? 'Containerbrücke' : 'Mobilkran'} <span class="tag">${c.big ? 40 : 20} Moves pro Stunde</span></h3>
-        <div class="meta">${st}</div>
+        <div class="meta">${c.state === 'broken' ? 'Ausgefallen: wartet auf die Werkstatt' : st}</div>
+        ${wearRow(c.wear)}
         <div class="meta">Entladen am Kran: ${c.buffer + c.bufReef} von ${CRANE_BUFFER}${sim.level >= 2 ? ` · Export am Kran: ${c.expBuf} von ${CRANE_EXP_BUFFER}` : ''}</div>`;
       if (!c.big) actions = upgradeBtn('crane', 'Zur Containerbrücke aufrüsten');
     } else if (sel.kind === 'gate') {
@@ -864,9 +932,16 @@ export class UI {
       const cfg = PLANTS[p.kind];
       const pack = p.kind === 'pack';
       html = `<h3>${cfg.name} <span class="tag">${Math.round(60 / cfg.time)} pro Stunde</span></h3>
-        <div class="meta">${pack ? 'Macht aus 2 Einheiten ausgepackter Ware 1 Container Fertigware (900 €).' : 'Packt Import-Container vom Stapelplatz aus. Die Ware geht weiter zur Veredelung.'}</div>
+        <div class="meta">${pack ? 'Macht aus 2 Einheiten ausgepackter Ware 1 Container Fertigware (900 €).' : p.kind === 'cold' ? 'Verarbeitet Kühlcontainer vom Kühlplatz zu Lebensmitteln (750 € statt 400 €).' : 'Packt Import-Container vom Stapelplatz aus. Die Ware geht weiter zur Veredelung.'}</div>
         <div class="meta">Eingang: ${p.inBuf} von ${PLANT_BUF} · Ausgang: ${p.outBuf} von ${PLANT_BUF} · Hergestellt: ${num(p.made)}</div>
         <div class="meta ${p.outBuf >= PLANT_BUF ? 'neg' : ''}">${p.proc > 0 ? 'Arbeitet' : p.outBuf >= PLANT_BUF ? 'Ausgang voll: Es fehlt ein Truck, der abholt' : p.inBuf < cfg.needs ? 'Wartet auf Nachschub' : 'Bereit'}</div>`;
+    } else if (sel.kind === 'shop') {
+      const sh = sim.shops.find((q) => q.id === sel.id);
+      if (!sh) return gone();
+      const tgt = sh.target;
+      html = `<h3>Werkstatt <span class="tag">braucht einen Mechaniker</span></h3>
+        <div class="meta">${!sh.staffed ? 'Kein Mechaniker im Dienst. Stelle im Personal jemanden ein.' : tgt ? `Repariert gerade ${tgt.kind === 'crane' ? 'einen Kran' : 'einen Truck'}` : 'Wartet auf Arbeit. Repariert Geräte ab 30 % Verschleiß, das am stärksten abgenutzte zuerst.'}</div>
+        <div class="meta">Ausgefallen: ${sim.trucks.filter((t) => t.wear >= 1).length + sim.cranes.filter((c) => c.wear >= 1).length} Geräte</div>`;
     } else if (sel.kind === 'rail') {
       const r = sim.rails.find((r) => r.id === sel.id);
       if (!r) return gone();
@@ -886,8 +961,9 @@ export class UI {
       const t = sim.trucks.find((t) => t.id === sel.id);
       if (!t) return gone();
       html = `<h3>${t.agv ? 'Fahrerloses Fahrzeug' : 'Truck'} <span class="tag">2 Container pro Fahrt</span></h3>
-        <div class="meta">${jobText(t.job)}</div>
-        <div class="meta">Geladen: ${t.load}</div>`;
+        <div class="meta">${t.wear >= 1 ? 'Ausgefallen: wartet auf die Werkstatt' : jobText(t.job)}</div>
+        <div class="meta">Geladen: ${t.load}</div>
+        ${wearRow(t.wear)}`;
       const roles = (Object.keys(ROLE_NAMES) as TruckRole[]).filter((r) => r !== 'plant' || sim.level >= 2).filter((r) => r !== 'export' || sim.level >= 2);
       actions = `<div class="rolelabel">Aufgabe</div><div class="roles">${roles
         .map((r) => `<button data-role="${r}" class="${t.role === r ? 'on' : ''}">${ROLE_NAMES[r].name}</button>`)

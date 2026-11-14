@@ -24,6 +24,14 @@ Das Spielkonzept steht im Doc „Hafen-Imperium: Spielkonzept“.
 - **Verarbeitung (ab Stufe 2):** Die Packhalle packt Container aus, die Veredelung macht aus zwei davon Fertigware für 900 €. Trucks fahren die Ware dazwischen.
 - **Aufgaben für Trucks:** Jeder Truck fährt auf Automatik oder bekommt eine feste Aufgabe (Kran räumen, Ausgang, Export, Verarbeitung). Feste Aufgaben sind 25 % schneller und sparen die Funkzeit der Leitstelle.
 - **Personal und Schwierigkeit:** Fahrer, Kranführer und Gate-Kräfte kosten Stundenlohn und können krank werden. Drei Schwierigkeitsgrade im Menü.
+- **Ziel und Pleite:** Weltklasse-Hafen bis Tag 45/35/25 (je Schwierigkeit). Ist das Konto 5/3/2 Tagesabschlüsse in Folge im Minus, ist es die Pleite.
+- **Kredit und Bilanz:** Kredit in Schritten von 100.000 €, Grenze wächst mit der Stufe, Zinsen täglich. Die Bilanz zeigt Tagesfinanzen und den Verlauf der letzten Tage.
+- **Sammelzuweisung:** Werkzeug „Aufgaben“, Rahmen über Trucks ziehen.
+- **Einbahnstraßen und Land:** Straßen auf eine Richtung schalten. Land ist in Streifen geteilt und muss gekauft werden.
+- **Verschleiß (ab Stufe 2):** Kräne und Trucks werden langsamer und fallen bei 100 % aus. Die Werkstatt mit Mechaniker repariert.
+- **Kühlhalle (ab Stufe 3):** Kühlcontainer zu Lebensmitteln für 750 €.
+- **Karten:** Küste, Insel (keine Bahn, mehr Schiffe), Felsen (Sprengen kostet).
+- **Konkurrenz und Entscheidungen (ab Stufe 2):** Hafen Nordstadt wirbt Reedereien ab, wenn du unpünktlicher bist. Ereignisse wie Streik oder Zollverdacht verlangen eine Entscheidung.
 - **Aufrüsten:** Kran oder Truck mit „Ansehen“ antippen und im Info-Blatt aufrüsten.
 
 Alle Werte stehen in `src/sim/data.ts`. Das Balancing ist grob und noch nicht durch Spielen abgestimmt.

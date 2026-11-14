@@ -1,6 +1,6 @@
 import { Sound } from './audio/sound';
 import { Renderer, View } from './render/renderer';
-import { BuildTool, DiffId, GRID_H, GRID_W, Role, ROLE_NAMES, T, TICKS_PER_SEC, TILE, Tool, TruckRole } from './sim/data';
+import { BuildTool, DiffId, GRID_H, GRID_W, MapId, Role, ROLE_NAMES, T, TICKS_PER_SEC, TILE, Tool, TruckRole } from './sim/data';
 import { buildDemo } from './sim/demo';
 import { GameEvent, Removed, Sim } from './sim/sim';
 import type { UI } from './ui/ui';
@@ -119,7 +119,12 @@ export class Game {
         this.ui.showEnd();
         break;
       case 'debt':
+      case 'broken':
         this.sound.play('bad');
+        break;
+      case 'decision':
+        this.sound.play('mission');
+        this.ui.showDecision();
         break;
       case 'weather-warn':
         this.sound.play('bad');
@@ -198,9 +203,11 @@ export class Game {
     this.ui.refreshSound();
   }
 
-  newGame(mode: 'empty' | 'demo', diff: DiffId = 'normal') {
-    this.sim = new Sim(Math.floor(Math.random() * 1e9), diff);
+  newGame(mode: 'empty' | 'demo', diff: DiffId = 'normal', map: MapId = 'coast') {
+    // Der Demo-Hafen ist für die Küste gebaut
+    this.sim = new Sim(Math.floor(Math.random() * 1e9), diff, mode === 'demo' ? 'coast' : map);
     if (mode === 'demo') buildDemo(this.sim);
+    this.sim.limitLand();
     this.resetTransient();
     this.setTool('view');
     this.setSpeed(1);
@@ -282,11 +289,24 @@ export class Game {
 
   /** Wendet das aktive Werkzeug auf ein Feld an. Liefert den Fehlergrund oder null bei Erfolg. */
   applyTool(x: number, y: number): string | null {
-    if (this.tool === 'view') return null;
+    if (this.tool === 'view' || this.tool === 'assign') return null;
+    if (this.tool === 'oneway') {
+      const r = this.sim.toggleOneway(x, y);
+      if (!r.ok) return r.reason ?? 'Nicht möglich';
+      this.sound.play('click');
+      return null;
+    }
+    if (this.tool === 'buyland') {
+      const r = this.sim.buyPlot(x);
+      if (!r.ok) return r.reason ?? 'Nicht möglich';
+      this.sound.play('buildBig');
+      this.ui.toast(`Land gekauft: −${r.cost.toLocaleString('de-DE')} €`, 'good');
+      return null;
+    }
     if (this.tool === 'demolish') {
       const res = this.sim.demolish(x, y);
       if (!res.ok) return res.reason ?? 'Nicht möglich';
-      this.record({ kind: 'demolish', removed: res.removed });
+      if (res.removed.length) this.record({ kind: 'demolish', removed: res.removed });
       this.sound.play('demolish');
       this.renderer.addPop(x, y, 'demolish');
       return null;
@@ -336,6 +356,11 @@ export class Game {
     if (!n) return this.fail('Kein Truck im Rahmen');
     this.ui.toast(`${n} ${n === 1 ? 'Truck' : 'Trucks'}: ${ROLE_NAMES[this.assignRole].name}`, 'good');
     this.sound.play('upgrade');
+  }
+
+  decide(choice: number) {
+    this.sim.resolveDecision(choice);
+    this.sound.play('click');
   }
 
   takeLoan() {
@@ -434,7 +459,9 @@ export class Game {
   }
 
   previewOk(x: number, y: number): boolean {
-    if (this.tool === 'view') return true;
+    if (this.tool === 'view' || this.tool === 'assign') return true;
+    if (this.tool === 'oneway') return this.sim.kind[this.sim.idx(x, y)] === T.Road;
+    if (this.tool === 'buyland') return x >= 0 && x < GRID_W && !this.sim.owned[x];
     if (this.tool === 'demolish') return this.sim.canDemolish(x, y).ok;
     return this.sim.canBuild(this.tool as BuildTool, x, y).ok;
   }
@@ -471,6 +498,7 @@ export class Game {
       else if (g) this.selected = { kind: 'gate', id: g.id };
       else if (r) this.selected = { kind: 'rail', id: r.id };
       else if (sim.plantAt(tx, ty)) this.selected = { kind: 'plant', id: sim.plantAt(tx, ty)!.id };
+      else if (k === T.Shop) this.selected = { kind: 'shop', id: sim.shops.find((q) => q.x === tx && q.y === ty)!.id };
       else if (k === T.Yard) this.selected = { kind: 'yard', id: sim.idx(tx, ty) };
       else if (k === T.Reefer) this.selected = { kind: 'reefer', id: sim.idx(tx, ty) };
     }

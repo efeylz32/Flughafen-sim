@@ -9,6 +9,7 @@ const KEY_TOOLS: Record<string, Tool> = {
   y: 'yard',
   g: 'gate',
   t: 'truck',
+  e: 'oneway',
   a: 'assign',
   x: 'demolish',
 };

@@ -24,10 +24,12 @@ export enum T {
   Reefer = 6,
   Rail = 7,
   Plant = 8,
+  Shop = 9,
+  Rock = 10,
 }
 
-export type Tool = 'view' | 'kai' | 'crane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'assign' | 'demolish';
-export type BuildTool = Exclude<Tool, 'view' | 'demolish' | 'assign'>;
+export type Tool = 'view' | 'kai' | 'crane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'assign' | 'oneway' | 'buyland' | 'demolish';
+export type BuildTool = Exclude<Tool, 'view' | 'demolish' | 'assign' | 'oneway' | 'buyland'>;
 
 export const COST: Record<BuildTool, number> = {
   kai: 5_000,
@@ -41,6 +43,8 @@ export const COST: Record<BuildTool, number> = {
   dredge: 15_000,
   unpack: 60_000,
   pack: 90_000,
+  cold: 80_000,
+  workshop: 40_000,
 };
 /** Ab welcher Hafenstufe ein Werkzeug verfügbar ist. */
 export const UNLOCK: Record<BuildTool, number> = {
@@ -55,6 +59,8 @@ export const UNLOCK: Record<BuildTool, number> = {
   dredge: 3,
   unpack: 2,
   pack: 2,
+  cold: 3,
+  workshop: 2,
 };
 export const UPGRADE = {
   /** Mobilkran zur Containerbrücke: doppelt so schnell */
@@ -74,6 +80,7 @@ export const RUN_COST_PER_DAY = {
   gate: 400,
   rail: 2_500,
   plant: 1_800,
+  shop: 300,
   yardTile: 15,
   reeferTile: 80,
   kaiTile: 10,
@@ -98,13 +105,41 @@ export const LOAN_LIMIT_PER_LEVEL = 250_000;
 /** Zinsen pro Tag auf die offene Kreditsumme */
 export const LOAN_RATE = 0.004;
 
-export type Role = 'driver' | 'crane' | 'gate';
+export type Role = 'driver' | 'crane' | 'gate' | 'mech';
 /** Personal: Stundenlohn und wofür die Stelle gebraucht wird */
 export const ROLES: Record<Role, { name: string; plural: string; wage: number; need: string }> = {
   driver: { name: 'Fahrer', plural: 'Fahrer', wage: 22, need: 'einer pro Truck, fahrerlose Fahrzeuge brauchen keinen' },
   crane: { name: 'Kranführer', plural: 'Kranführer', wage: 60, need: 'einer pro Kran' },
   gate: { name: 'Gate-Personal', plural: 'Gate-Kräfte', wage: 30, need: 'eine Kraft pro Gate' },
+  mech: { name: 'Mechaniker', plural: 'Mechaniker', wage: 35, need: 'einer pro Werkstatt' },
 };
+
+// Verschleiß (ab Stufe 2): Bei 100 % fällt das Gerät aus, vorher wird es langsamer.
+export const WEAR_TRUCK_PER_GM = 0.0004;
+export const WEAR_CRANE_PER_MOVE = 0.0015;
+export const WEAR_SLOWDOWN = 0.4;
+/** So viel Verschleiß baut eine besetzte Werkstatt pro Spielminute ab */
+export const REPAIR_PER_GM = 1 / 90;
+
+// Land: Die Karte ist in Streifen von 4 Spalten geteilt. Zu Beginn gehören dir die ersten fünf.
+export const PLOT_W = 4;
+export const START_PLOTS = 5;
+export const PLOT_PRICE = 60_000;
+export const PLOT_PRICE_STEP = 30_000;
+
+// Karten
+export type MapId = 'coast' | 'island' | 'rocks';
+export const MAPS: Record<MapId, { name: string; text: string; ships: number }> = {
+  coast: { name: 'Küste', text: 'Viel Platz, Bahnanschluss am rechten Rand.', ships: 1 },
+  island: { name: 'Insel', text: 'Wenig Land, keine Bahn, dafür kommen Schiffe öfter.', ships: 0.8 },
+  rocks: { name: 'Felsen', text: 'Felsen versperren Bauland. Sprengen kostet 8.000 € pro Feld.', ships: 1 },
+};
+export const ROCK_COST = 8_000;
+
+// Konkurrenz und Ereignisse
+export const RIVAL_NAME = 'Hafen Nordstadt';
+export const RIVAL_START: Record<DiffId, number> = { easy: 0.55, normal: 0.68, hard: 0.8 };
+export const EVENT_CHANCE = 0.35;
 export const START_REP = 50;
 export const REP_MAX = 100;
 
@@ -164,11 +199,14 @@ export const FEE_PER_CONTAINER = 200;
 export const PREMIUM_FEE = 900;
 
 /** Verarbeitung im Hafen: Packhalle packt Container aus, die Veredelung macht daraus Fertigware. */
-export type PlantKind = 'unpack' | 'pack';
+export type PlantKind = 'unpack' | 'pack' | 'cold';
 export const PLANTS: Record<PlantKind, { name: string; needs: number; time: number }> = {
   unpack: { name: 'Packhalle', needs: 1, time: 4 },
   pack: { name: 'Veredelung', needs: 2, time: 6 },
+  cold: { name: 'Kühlhalle', needs: 1, time: 3 },
 };
+/** Lebensmittel aus der Kühlhalle */
+export const FOOD_FEE = 750;
 export const PLANT_BUF = 6;
 
 /** Feste Aufgabe eines Trucks. Automatik wählt selbst, braucht aber vor jeder Fahrt Funkzeit. */
@@ -204,10 +242,13 @@ export const LEVEL_NEWS: { title: string; text: string }[][] = [
     { title: 'Verträge', text: 'Reedereien bieten feste Anläufe mit Bonus an. Bis zu 2 Verträge gleichzeitig.' },
     { title: 'Containerbrücke', text: 'Tippe einen Kran an und rüste ihn auf. Er arbeitet dann doppelt so schnell.' },
     { title: 'Verarbeitung', text: 'Die Packhalle packt Container aus, die Veredelung macht aus zwei davon Fertigware für 900 €. Trucks fahren die Ware dazwischen.' },
+    { title: 'Verschleiß und Werkstatt', text: 'Kräne und Trucks nutzen sich ab, werden langsamer und fallen bei 100 % aus. Eine Werkstatt mit Mechaniker repariert sie.' },
+    { title: 'Konkurrenz und Ereignisse', text: 'Hafen Nordstadt wirbt Reedereien ab, wenn du unpünktlich bist. Ab und zu musst du Entscheidungen treffen.' },
     { title: 'Wetter', text: 'Bei Sturm stehen die Kräne still, bei Nebel ist die Einfahrt gesperrt. Es gibt eine Vorwarnung.' },
   ],
   [
     { title: 'Kühlfracht', text: 'Kühlcontainer brauchen Kühlplätze mit Strom und verderben nach 10 Stunden. Sie bringen 400 € pro Stück.' },
+    { title: 'Kühlhalle', text: 'Verarbeitet Kühlcontainer vom Kühlplatz zu Lebensmitteln für 750 € statt 400 €.' },
     { title: 'Gleisanschluss', text: 'Am rechten Kartenrand: Alle 6 Stunden holt ein Zug bis zu 40 Container auf einmal ab.' },
     { title: 'Baggern', text: 'Vertiefe das Wasser vor dem Kai. Ein tiefer Liegeplatz mit 6 Feldern nimmt große Schiffe mit 300 Containern auf.' },
     { title: 'Bis zu 3 Verträge', text: 'Auch für Kühlfracht und große Schiffe.' },

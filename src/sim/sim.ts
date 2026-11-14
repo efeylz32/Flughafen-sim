@@ -10,7 +10,22 @@ import {
   DIFFS,
   DISPATCH_GM,
   DiffId,
+  EVENT_CHANCE,
   EXPORT_FEE,
+  FOOD_FEE,
+  MAPS,
+  MapId,
+  PLOT_PRICE,
+  PLOT_PRICE_STEP,
+  PLOT_W,
+  REPAIR_PER_GM,
+  RIVAL_NAME,
+  RIVAL_START,
+  ROCK_COST,
+  START_PLOTS,
+  WEAR_CRANE_PER_MOVE,
+  WEAR_SLOWDOWN,
+  WEAR_TRUCK_PER_GM,
   EXPORT_PRESTOCK,
   EXPORT_SHARE,
   FEE_PER_CONTAINER,
@@ -65,7 +80,23 @@ import {
 import { MISSIONS } from './missions';
 
 /** Import, Kühlfracht (Import) oder Export */
-export type Cargo = 'imp' | 'reef' | 'exp' | 'ware' | 'prem';
+export type Cargo = 'imp' | 'reef' | 'exp' | 'ware' | 'prem' | 'food';
+
+export interface Shop {
+  id: number;
+  x: number;
+  y: number;
+  staffed: boolean;
+  /** Gerät in Reparatur */
+  target: { kind: 'crane' | 'truck'; id: number } | null;
+}
+
+export interface Decision {
+  id: 'strike' | 'customs' | 'vip' | 'parts' | 'press';
+  title: string;
+  text: string;
+  options: string[];
+}
 
 export interface Plant {
   id: number;
@@ -95,7 +126,9 @@ export interface Crane {
   expBuf: number;
   resExpIn: number;
   cd: number;
-  state: 'idle' | 'working' | 'blocked' | 'storm';
+  state: 'idle' | 'working' | 'blocked' | 'storm' | 'broken';
+  /** Verschleiß 0..1, bei 1 ausgefallen */
+  wear: number;
   /** Letzter Zug war ein Beladen (für abwechselndes Ent- und Beladen) */
   lastLoad: boolean;
   /** Ein Kranführer ist im Dienst */
@@ -172,6 +205,7 @@ export interface Truck {
   /** Ein Fahrer ist im Dienst (fahrerlose Fahrzeuge brauchen keinen) */
   staffed: boolean;
   role: TruckRole;
+  wear: number;
 }
 
 export type ShipState = 'queued' | 'sailing' | 'unloading' | 'leaving';
@@ -252,7 +286,9 @@ export type EventTag =
   | 'contract'
   | 'won'
   | 'lost'
-  | 'debt';
+  | 'debt'
+  | 'decision'
+  | 'broken';
 
 export interface GameEvent {
   /** Text für eine Meldung. Fehlt er, ist das Ereignis nur für Ton und Effekte da. */
@@ -325,10 +361,20 @@ export interface SaveData {
   stock: number[];
   stockExp?: number[];
   depth?: number[];
-  cranes: { x: number; y: number; big?: boolean }[];
+  cranes: { x: number; y: number; big?: boolean; wear?: number }[];
+  shops?: { x: number; y: number }[];
+  oneway?: number[];
+  owned?: number[];
+  plotsBought?: number;
+  map?: MapId;
+  rivalRate?: number;
+  lostToRival?: number;
+  wageBoost?: Record<Role, number>;
+  strikeLeft?: number;
+  pending?: Decision | null;
   gates: { x: number; y: number; served: number }[];
   rails?: { x: number; y: number; platform: number; value: number }[];
-  trucks: { tile: number; agv?: boolean; role?: TruckRole }[];
+  trucks: { tile: number; agv?: boolean; role?: TruckRole; wear?: number }[];
   plants?: { x: number; y: number; kind: PlantKind }[];
   premiumDone?: number;
   money: number;
@@ -373,7 +419,7 @@ const LINES: { line: string; prefix: string; color: number }[] = [
 const UNLOADING = 'Wird entladen.';
 const LOADING = 'Wird beladen.';
 const emptyBook = (): DayBook => ({ fees: 0, exportFees: 0, rail: 0, berth: 0, bonus: 0, penalty: 0, running: 0, wages: 0, interest: 0, building: 0, handled: 0, ships: 0, onTime: 0 });
-const TILE_OF: Partial<Record<BuildTool, T>> = { kai: T.Kai, road: T.Road, yard: T.Yard, reefer: T.Reefer, gate: T.Gate, rail: T.Rail, unpack: T.Plant, pack: T.Plant };
+const TILE_OF: Partial<Record<BuildTool, T>> = { kai: T.Kai, road: T.Road, yard: T.Yard, reefer: T.Reefer, gate: T.Gate, rail: T.Rail, unpack: T.Plant, pack: T.Plant, cold: T.Plant, workshop: T.Shop };
 const eur = (n: number) => `${Math.round(n).toLocaleString('de-DE')} €`;
 
 export class Sim {
@@ -396,6 +442,19 @@ export class Sim {
   gates: Gate[] = [];
   rails: Rail[] = [];
   plants: Plant[] = [];
+  shops: Shop[] = [];
+  /** Einbahnstraßen: erlaubte Fahrtrichtung je Feld (0 Ost, 1 Süd, 2 West, 3 Nord), -1 = beide Richtungen */
+  oneway = new Int8Array(GRID_W * GRID_H).fill(-1);
+  /** Gekaufte Spalten (1 = gehört dir) */
+  owned = new Uint8Array(GRID_W).fill(1);
+  plotsBought = 0;
+  rivalRate = 0.68;
+  lostToRival = 0;
+  wageBoost: Record<Role, number> = { driver: 1, crane: 1, gate: 1, mech: 1 };
+  /** Spielminuten, die die Fahrer noch streiken */
+  strikeLeft = 0;
+  pending: Decision | null = null;
+  private brokeNote = -999;
   premiumDone = 0;
   loan = 0;
   /** Tagesabschlüsse in Folge mit negativem Kontostand */
@@ -409,9 +468,9 @@ export class Sim {
 
   money: number;
   /** Angestellte je Aufgabe */
-  staff: Record<Role, number> = { driver: 0, crane: 0, gate: 0 };
+  staff: Record<Role, number> = { driver: 0, crane: 0, gate: 0, mech: 0 };
   /** Krankmeldungen je Aufgabe: verbleibende Tage */
-  sick: Record<Role, number[]> = { driver: [], crane: [], gate: [] };
+  sick: Record<Role, number[]> = { driver: [], crane: [], gate: [], mech: [] };
   rep = START_REP;
   gm = START_GM;
   tickCount = 0;
@@ -457,15 +516,75 @@ export class Sim {
   constructor(
     seed = 1234,
     readonly diff: DiffId = 'normal',
+    readonly map: MapId = 'coast',
   ) {
     this.seed = seed >>> 0;
     this.money = DIFFS[diff].money;
+    this.rivalRate = RIVAL_START[diff];
     this.lastDay = Math.floor(this.gm / MIN_PER_DAY);
     for (let y = 0; y < GRID_H; y++) {
       for (let x = 0; x < GRID_W; x++) {
-        this.kind[y * GRID_W + x] = y < COAST_ROW ? T.Water : T.Land;
+        let k = y < COAST_ROW ? T.Water : T.Land;
+        if (map === 'island' && (x < 2 || x >= GRID_W - 2 || y >= GRID_H - 3)) k = T.Water;
+        this.kind[y * GRID_W + x] = k;
       }
     }
+    if (map === 'rocks') {
+      // Felsbrocken in Gruppen, die erste Reihe am Wasser bleibt frei
+      for (let n = 0; n < 26; n++) {
+        const cx = Math.floor(this.rnd() * GRID_W);
+        const cy = COAST_ROW + 2 + Math.floor(this.rnd() * (GRID_H - COAST_ROW - 2));
+        const r = 1 + this.rnd() * 1.6;
+        for (let y = Math.floor(cy - r); y <= cy + r; y++) {
+          for (let x = Math.floor(cx - r); x <= cx + r; x++) {
+            if (!this.inBounds(x, y) || y <= COAST_ROW + 1 || Math.hypot(x - cx, y - cy) > r || this.rnd() < 0.25) continue;
+            this.kind[y * GRID_W + x] = T.Rock;
+          }
+        }
+      }
+    }
+  }
+
+  /** Gibt nur die ersten Landstreifen frei. Streifen mit Bebauung bleiben in Besitz. */
+  limitLand() {
+    for (let p = START_PLOTS; p * PLOT_W < GRID_W; p++) {
+      let used = false;
+      for (let x = p * PLOT_W; x < Math.min(GRID_W, (p + 1) * PLOT_W); x++) {
+        for (let y = COAST_ROW; y < GRID_H; y++) {
+          const k = this.kind[this.idx(x, y)];
+          if (k !== T.Land && k !== T.Water && k !== T.Rock) used = true;
+        }
+      }
+      if (used) continue;
+      for (let x = p * PLOT_W; x < Math.min(GRID_W, (p + 1) * PLOT_W); x++) this.owned[x] = 0;
+    }
+    this.version++;
+  }
+
+  get plotPrice(): number {
+    return PLOT_PRICE + this.plotsBought * PLOT_PRICE_STEP;
+  }
+  buyPlot(x: number): BuildCheck {
+    const cost = this.plotPrice;
+    if (x < 0 || x >= GRID_W) return { ok: false, reason: 'Außerhalb der Karte', cost };
+    if (this.owned[x]) return { ok: false, reason: 'Dieses Land gehört dir schon', cost };
+    if (this.money < cost) return { ok: false, reason: 'Zu wenig Geld', cost };
+    const p = Math.floor(x / PLOT_W);
+    for (let c = p * PLOT_W; c < Math.min(GRID_W, (p + 1) * PLOT_W); c++) this.owned[c] = 1;
+    this.money -= cost;
+    this.today.building += cost;
+    this.plotsBought++;
+    this.touch();
+    return { ok: true, cost };
+  }
+
+  /** Schaltet eine Straße weiter: beide Richtungen, Ost, Süd, West, Nord. */
+  toggleOneway(x: number, y: number): BuildCheck {
+    if (!this.inBounds(x, y) || this.kind[this.idx(x, y)] !== T.Road) return { ok: false, reason: 'Einbahnstraße geht nur auf einer Straße', cost: 0 };
+    const i = this.idx(x, y);
+    this.oneway[i] = this.oneway[i] >= 3 ? -1 : this.oneway[i] + 1;
+    this.touch();
+    return { ok: true, cost: 0 };
   }
 
   // ───────────────────────── Hilfen ─────────────────────────
@@ -542,7 +661,7 @@ export class Sim {
     return Math.min(1, Math.max(0, (this.handled - base) / (next.need - base)));
   }
   moveTime(c: Crane): number {
-    return c.big ? CRANE_BIG_MOVE_GM : CRANE_MOVE_GM;
+    return (c.big ? CRANE_BIG_MOVE_GM : CRANE_MOVE_GM) / (1 - WEAR_SLOWDOWN * Math.min(1, c.wear));
   }
   /** Ältester Kühlcontainer auf einem Kühlplatz: verbleibende Spielminuten, oder null */
   reeferTimeLeft(tile: number): number | null {
@@ -574,9 +693,14 @@ export class Sim {
         const c = q[qi];
         const cx = c % GRID_W;
         const cy = (c / GRID_W) | 0;
+        // Von n nach c wird in Richtung dir gefahren: n westlich von c heißt Fahrt nach Osten usw.
         const cand = [cx > 0 ? c - 1 : -1, cx < GRID_W - 1 ? c + 1 : -1, cy > 0 ? c - GRID_W : -1, cy < GRID_H - 1 ? c + GRID_W : -1];
-        for (const n of cand) {
-          if (n >= 0 && d[n] < 0 && this.kind[n] === T.Road) {
+        const dirs = [0, 2, 1, 3];
+        const ow = this.oneway;
+        for (let ci = 0; ci < 4; ci++) {
+          const n = cand[ci];
+          const dir = dirs[ci];
+          if (n >= 0 && d[n] < 0 && this.kind[n] === T.Road && (ow[n] < 0 || ow[n] === dir) && (ow[c] < 0 || ow[c] === dir)) {
             d[n] = d[c] + 1;
             q.push(n);
           }
@@ -701,6 +825,8 @@ export class Sim {
     if (this.level < UNLOCK[tool]) return { ok: false, reason: `Erst ab Stufe ${UNLOCK[tool]} (${LEVELS[UNLOCK[tool] - 1].name})`, cost };
     const i = this.idx(x, y);
     const k = this.kind[i];
+    if (!this.owned[x]) return { ok: false, reason: `Das Land gehört dir noch nicht. Kaufe es mit „Land kaufen“ (${eur(this.plotPrice)}).`, cost };
+    if (k === T.Rock) return { ok: false, reason: `Hier liegt ein Felsen. Sprenge ihn mit „Abriss“ (${eur(ROCK_COST)}).`, cost };
     let reason: string | undefined;
     switch (tool) {
       case 'kai':
@@ -717,6 +843,8 @@ export class Sim {
       case 'gate':
       case 'unpack':
       case 'pack':
+      case 'cold':
+      case 'workshop':
         if (k !== T.Land) reason = k === T.Water ? 'Nicht auf dem Wasser' : 'Das Feld ist belegt';
         break;
       case 'rail':
@@ -769,6 +897,7 @@ export class Sim {
           state: 'idle',
           lastLoad: false,
           staffed: true,
+          wear: 0,
         });
         this.staff.crane++;
         return undefined;
@@ -784,14 +913,20 @@ export class Sim {
       case 'dredge':
         this.depth[x] = 1;
         return undefined;
+      case 'workshop':
+        this.kind[i] = T.Shop;
+        this.shops.push({ id: this.nextId++, x, y, staffed: true, target: null });
+        this.staff.mech++;
+        return undefined;
       case 'unpack':
       case 'pack':
+      case 'cold':
         this.kind[i] = T.Plant;
         this.plants.push({ id: this.nextId++, x, y, kind: tool, inBuf: 0, outBuf: 0, resIn: 0, resOut: 0, proc: 0, made: 0 });
         return undefined;
       case 'truck': {
         const id = this.nextId++;
-        this.trucks.push({ id, tile: i, next: -1, prog: 0, fx: x, fy: y, px: x, py: y, wait: 0, load: 0, cargo: 'imp', agv: false, job: null, angle: 0, dir: -1, stuck: 0, staffed: true, role: 'auto' });
+        this.trucks.push({ id, tile: i, next: -1, prog: 0, fx: x, fy: y, px: x, py: y, wait: 0, load: 0, cargo: 'imp', agv: false, job: null, angle: 0, dir: -1, stuck: 0, staffed: true, role: 'auto', wear: 0 });
         this.staff.driver++;
         return id;
       }
@@ -812,6 +947,11 @@ export class Sim {
     if (!this.inBounds(x, y)) return { ok: false, reason: 'Außerhalb der Karte', cost: 0 };
     const i = this.idx(x, y);
     const k = this.kind[i];
+    if (k === T.Rock && !this.owned[x]) return { ok: false, reason: 'Das Land gehört dir nicht', cost: 0 };
+    if (k === T.Rock) {
+      return this.money >= ROCK_COST ? { ok: true, cost: ROCK_COST } : { ok: false, reason: `Sprengen kostet ${eur(ROCK_COST)}`, cost: ROCK_COST };
+    }
+    if (!this.owned[x]) return { ok: false, reason: 'Das Land gehört dir nicht', cost: 0 };
     if (k === T.Water || k === T.Land) {
       return this.truckAtTile(i) ? { ok: true, cost: 0 } : { ok: false, reason: 'Hier ist nichts', cost: 0 };
     }
@@ -831,6 +971,13 @@ export class Sim {
     if (!chk.ok) return { ...chk, removed: [] };
     const i = this.idx(x, y);
     const removed: Removed[] = [];
+    if (this.kind[i] === T.Rock) {
+      this.kind[i] = T.Land;
+      this.money -= ROCK_COST;
+      this.today.building += ROCK_COST;
+      this.touch();
+      return { ...chk, removed };
+    }
     const truck = this.truckAtTile(i);
     const crane = this.craneAt(x, y);
     if (truck) this.takeTruck(truck, factor, removed);
@@ -900,6 +1047,13 @@ export class Sim {
         this.staff.gate = Math.max(0, this.staff.gate - 1);
         break;
       }
+      case T.Shop: {
+        const sh = this.shops.find((q) => q.x === x && q.y === y);
+        out.push({ tool: 'workshop', x, y, refund: this.give(COST.workshop, factor) });
+        this.shops = this.shops.filter((q) => q !== sh);
+        this.staff.mech = Math.max(0, this.staff.mech - 1);
+        break;
+      }
       case T.Plant: {
         const p = this.plantAt(x, y);
         const tool: BuildTool = p?.kind ?? 'unpack';
@@ -941,7 +1095,7 @@ export class Sim {
     } else {
       const i = this.idx(a.x, a.y);
       if (this.kind[i] !== TILE_OF[a.tool]) return fail('Das Feld wurde inzwischen geändert');
-      if ((a.tool === 'unpack' || a.tool === 'pack') && this.plantAt(a.x, a.y)?.kind !== a.tool) return fail('Das Feld wurde inzwischen geändert');
+      if ((a.tool === 'unpack' || a.tool === 'pack' || a.tool === 'cold') && this.plantAt(a.x, a.y)?.kind !== a.tool) return fail('Das Feld wurde inzwischen geändert');
       if (a.tool === 'kai') {
         if (this.craneAt(a.x, a.y)) return fail('Auf dem Kai steht ein Kran');
         if (this.shipUsesKai(a.x)) return fail('Ein Schiff liegt am Kai');
@@ -1293,6 +1447,22 @@ export class Sim {
           });
         }
       }
+      if (room > 0 && p.kind === 'cold') {
+        const src = this.findSource(T.Reefer, 'reef', t.tile);
+        const acc = src ? this.nearestAccess(pi, src.access) : null;
+        if (src && acc) {
+          offer('plant', hungry ? 2.2 : 1.5, src.d + acc.d, {
+            cargo: 'reef',
+            stage: 0,
+            srcKind: 'store',
+            src: src.tile,
+            dstKind: 'plant',
+            dst: p.id,
+            tgt: [src.access, acc.access],
+            n: Math.min(TRUCK_CAP, src.avail, room),
+          });
+        }
+      }
       if (room > 0 && p.kind === 'pack') {
         for (const q of this.plants) {
           const avail = q.outBuf - q.resOut;
@@ -1312,7 +1482,8 @@ export class Sim {
           });
         }
       }
-      const done = p.kind === 'pack' ? p.outBuf - p.resOut : 0;
+      const done = p.kind !== 'unpack' ? p.outBuf - p.resOut : 0;
+      const sold: Cargo = p.kind === 'cold' ? 'food' : 'prem';
       if (done > 0) {
         const a1 = this.nearestAccess(pi, t.tile);
         if (!a1) continue;
@@ -1320,14 +1491,14 @@ export class Sim {
           const gr = GATE_APRON_CAP - g.apron.length - g.resIn;
           const a2 = gr > 0 ? this.nearestAccess(this.idx(g.x, g.y), a1.access) : null;
           if (a2) {
-            offer('plant out', 2.2, a1.d + a2.d, { cargo: 'prem', stage: 0, srcKind: 'plant', src: p.id, dstKind: 'gate', dst: g.id, tgt: [a1.access, a2.access], n: Math.min(TRUCK_CAP, done, gr) });
+            offer('plant out', 2.2, a1.d + a2.d, { cargo: sold, stage: 0, srcKind: 'plant', src: p.id, dstKind: 'gate', dst: g.id, tgt: [a1.access, a2.access], n: Math.min(TRUCK_CAP, done, gr) });
           }
         }
         for (const r of this.rails) {
           const rr = RAIL_CAP - r.platform - r.resIn;
           const a2 = rr > 0 ? this.nearestAccess(this.idx(r.x, r.y), a1.access) : null;
           if (a2) {
-            offer('plant out', 1.8, a1.d + a2.d, { cargo: 'prem', stage: 0, srcKind: 'plant', src: p.id, dstKind: 'rail', dst: r.id, tgt: [a1.access, a2.access], n: Math.min(TRUCK_CAP, done, rr) });
+            offer('plant out', 1.8, a1.d + a2.d, { cargo: sold, stage: 0, srcKind: 'plant', src: p.id, dstKind: 'rail', dst: r.id, tgt: [a1.access, a2.access], n: Math.min(TRUCK_CAP, done, rr) });
           }
         }
       }
@@ -1400,7 +1571,7 @@ export class Sim {
   }
 
   private dropOff(t: Truck, j: Job): boolean {
-    const fee = j.cargo === 'reef' ? REEFER_FEE : j.cargo === 'prem' ? PREMIUM_FEE : FEE_PER_CONTAINER;
+    const fee = j.cargo === 'reef' ? REEFER_FEE : j.cargo === 'prem' ? PREMIUM_FEE : j.cargo === 'food' ? FOOD_FEE : FEE_PER_CONTAINER;
     if (j.dstKind === 'store') {
       if (j.cargo === 'exp') this.stockExp[j.dst] += j.n;
       else {
@@ -1481,7 +1652,11 @@ export class Sim {
       t.stuck = 0;
     }
 
-    t.prog += (t.agv ? AGV_SPEED : TRUCK_SPEED) * (t.role === 'auto' ? 1 : ROUTINE_SPEED) * dt;
+    t.prog += (t.agv ? AGV_SPEED : TRUCK_SPEED) * (t.role === 'auto' ? 1 : ROUTINE_SPEED) * (1 - WEAR_SLOWDOWN * t.wear) * dt;
+    if (this.level >= 2) {
+      t.wear = Math.min(1, t.wear + WEAR_TRUCK_PER_GM * dt);
+      if (t.wear >= 1) this.noteBroken('Ein Truck');
+    }
     const nx = t.next % GRID_W;
     const ny = (t.next / GRID_W) | 0;
     const cx = t.tile % GRID_W;
@@ -1537,14 +1712,16 @@ export class Sim {
   /** So viele Leute braucht der jetzige Ausbau. */
   staffNeed(role: Role): number {
     if (role === 'driver') return this.trucks.filter((t) => !t.agv).length;
+    if (role === 'mech') return this.shops.length;
     return role === 'crane' ? this.cranes.length : this.gates.length;
   }
   /** Angestellt und nicht krank */
   staffAvail(role: Role): number {
+    if (role === 'driver' && this.strikeLeft > 0) return 0;
     return Math.max(0, this.staff[role] - this.sick[role].length);
   }
   wagePerHour(role: Role): number {
-    return Math.round(ROLES[role].wage * DIFFS[this.diff].wage);
+    return Math.round(ROLES[role].wage * DIFFS[this.diff].wage * this.wageBoost[role]);
   }
   hire(role: Role) {
     this.staff[role]++;
@@ -1565,11 +1742,52 @@ export class Sim {
     for (const c of this.cranes) c.staffed = n-- > 0;
     n = this.staffAvail('gate');
     for (const g of this.gates) g.staffed = n-- > 0;
+    n = this.staffAvail('mech');
+    for (const s of this.shops) s.staffed = n-- > 0;
+    if (this.strikeLeft > 0) {
+      this.strikeLeft -= dt;
+      if (this.strikeLeft <= 0) this.emit('Der Streik ist vorbei. Die Fahrer arbeiten wieder.', 'good');
+    }
+    this.updateShops(dt);
     let perHour = 0;
     for (const r of Object.keys(ROLES) as Role[]) perHour += this.staff[r] * this.wagePerHour(r);
     const pay = (perHour * dt) / 60;
     this.money -= pay;
     this.today.wages += pay;
+  }
+
+  private noteBroken(what: string) {
+    if (this.gm - this.brokeNote < 120) return;
+    this.brokeNote = this.gm;
+    this.emit(
+      `${what} ist ausgefallen. ${this.shops.length ? 'Die Werkstatt kümmert sich darum.' : 'Baue eine Werkstatt mit Mechaniker.'}`,
+      'bad',
+      { tag: 'broken' },
+    );
+  }
+
+  /** Jede besetzte Werkstatt repariert das am stärksten abgenutzte Gerät. */
+  private updateShops(dt: number) {
+    const busy = new Set(this.shops.map((s) => (s.target ? `${s.target.kind}${s.target.id}` : '')));
+    for (const s of this.shops) {
+      if (!s.staffed) continue;
+      let obj: { wear: number } | undefined = s.target
+        ? s.target.kind === 'crane'
+          ? this.cranes.find((c) => c.id === s.target!.id)
+          : this.trucks.find((t) => t.id === s.target!.id)
+        : undefined;
+      if (!obj || obj.wear <= 0.02) {
+        s.target = null;
+        let best: { kind: 'crane' | 'truck'; id: number; wear: number } | null = null;
+        for (const c of this.cranes) if (c.wear > 0.3 && !busy.has(`crane${c.id}`) && (!best || c.wear > best.wear)) best = { kind: 'crane', id: c.id, wear: c.wear };
+        for (const t of this.trucks) if (t.wear > 0.3 && !busy.has(`truck${t.id}`) && (!best || t.wear > best.wear)) best = { kind: 'truck', id: t.id, wear: t.wear };
+        if (!best) continue;
+        s.target = { kind: best.kind, id: best.id };
+        busy.add(`${best.kind}${best.id}`);
+        obj = best.kind === 'crane' ? this.cranes.find((c) => c.id === best!.id) : this.trucks.find((t) => t.id === best!.id);
+      }
+      if (obj) obj.wear = Math.max(0, obj.wear - REPAIR_PER_GM * dt);
+    }
   }
 
   /** Jeden Morgen: Kranke werden gesund, neue melden sich krank. */
@@ -1697,7 +1915,10 @@ export class Sim {
     const big = this.level >= 3 && this.hasDeepBerth() && this.rnd() < 0.25;
     const reefer = this.level >= 3 && this.reeferCapacity >= 12 && this.rnd() < 0.4;
     this.addShip(big ? 'panamax' : 'feeder', null, reefer);
-    const base = Math.min(300, Math.max(120, 300 - this.rep * 1.5)) + this.contracts.length * 90;
+    // Ist die Konkurrenz pünktlicher als du, kommen weniger freie Schiffe
+    const mine = this.myRate;
+    const rival = this.level >= 2 && mine !== null ? 1 + Math.max(0, this.rivalRate - mine) : 1;
+    const base = (Math.min(300, Math.max(120, 300 - this.rep * 1.5)) + this.contracts.length * 90) * MAPS[this.map].ships * rival;
     this.nextShipIn = base * (0.8 + this.rnd() * 0.4);
   }
 
@@ -1886,6 +2107,10 @@ export class Sim {
         c.state = 'storm';
         continue;
       }
+      if (c.wear >= 1) {
+        c.state = 'broken';
+        continue;
+      }
       if (!ship || !c.staffed) {
         c.state = 'idle';
         c.cd = mt;
@@ -1899,6 +2124,8 @@ export class Sim {
         c.cd = Math.min(c.cd, mt) - dt;
         if (c.cd <= 0) {
           c.cd += mt;
+          if (this.level >= 2) c.wear = Math.min(1, c.wear + WEAR_CRANE_PER_MOVE);
+          if (c.wear >= 1) this.noteBroken('Ein Kran');
           // Abwechselnd ent- und beladen, wenn beides geht
           const load = canLoad && (!canUnload || !c.lastLoad);
           c.lastLoad = load;
@@ -1945,6 +2172,8 @@ export class Sim {
     }
     if (this.tickCount % 5 === 0) for (let i = 0; i < this.roadJam.length; i++) this.roadJam[i] *= 0.93;
     for (const t of this.trucks) {
+      // Ausgefallen: bleibt stehen, wo er ist, bis die Werkstatt kommt
+      if (t.wear >= 1) continue;
       if (t.wait > 0) {
         t.wait -= dt;
         continue;
@@ -2148,6 +2377,148 @@ export class Sim {
     }
   }
 
+  // ───────────────────────── Konkurrenz und Entscheidungen ─────────────────────────
+
+  /** Pünktlichkeit gestern (0..1), oder null ohne Schiffe */
+  get myRate(): number | null {
+    const y = this.history.at(-1);
+    return y && y.ships ? y.onTime / y.ships : null;
+  }
+
+  /** Hafen Nordstadt wird langsam besser und wirbt Reedereien ab, wenn du schlechter bist. */
+  private updateRival() {
+    if (this.level < 2) return;
+    this.rivalRate = Math.min(0.95, this.rivalRate + 0.004);
+    const mine = this.myRate;
+    if (mine === null || mine >= this.rivalRate - 0.1 || !this.contracts.length) return;
+    if (this.rnd() > 0.5) return;
+    const c = this.pick(this.contracts);
+    this.contracts = this.contracts.filter((x) => x !== c);
+    this.lostToRival++;
+    this.rep = Math.max(0, this.rep - 2);
+    this.emit(`${c.line} wechselt zu ${RIVAL_NAME}: Dort werden ${Math.round(this.rivalRate * 100)} % der Schiffe pünktlich abgefertigt, bei dir ${Math.round(mine * 100)} %.`, 'bad', { tag: 'contract' });
+  }
+
+  private rollDecision() {
+    if (this.level < 2 || this.pending || this.status === 'lost' || this.rnd() > EVENT_CHANCE) return;
+    const pen = DIFFS[this.diff].penalty;
+    const list: Decision[] = [
+      {
+        id: 'strike',
+        title: 'Die Fahrer drohen mit Streik',
+        text: 'Sie fordern 10 % mehr Lohn. Lehnst du ab, legen sie 8 Stunden lang die Arbeit nieder. Fahrerlose Fahrzeuge fahren weiter.',
+        options: ['10 % mehr Lohn zahlen', 'Ablehnen'],
+      },
+      {
+        id: 'customs',
+        title: 'Verdacht beim Zoll',
+        text: `Ein Container könnte Schmuggelware enthalten. Eine Prüfung kostet 8.000 €. Winkst du ihn durch und es war Schmuggel, zahlst du ${eur(40_000 * pen)} Strafe und verlierst Ruf.`,
+        options: ['Prüfen lassen (8.000 €)', 'Durchwinken'],
+      },
+      {
+        id: 'vip',
+        title: 'Anfrage für eine Sonderfahrt',
+        text: `Eine Reederei will ein Schiff mit 120 Containern in höchstens 6 Stunden abgefertigt haben. Pünktlich gibt es 25.000 €, sonst ${eur(15_000 * pen)} Strafe.`,
+        options: ['Annehmen', 'Ablehnen'],
+      },
+      {
+        id: 'press',
+        title: 'Ein Fernsehteam will berichten',
+        text: 'Eine Führung durch den Hafen kostet 5.000 € für Absperrung und Personal und bringt dir Ruf.',
+        options: ['Führung geben (5.000 €)', 'Ablehnen'],
+      },
+    ];
+    if (this.cranes.some((c) => !c.big)) {
+      list.push({
+        id: 'parts',
+        title: 'Gebrauchte Teile für eine Containerbrücke',
+        text: 'Ein Händler bietet Teile an, mit denen ein Mobilkran zur Containerbrücke wird. Halber Preis: 60.000 €.',
+        options: ['Kaufen (60.000 €)', 'Ablehnen'],
+      });
+    }
+    this.pending = this.pick(list);
+    this.emit(undefined, 'info', { tag: 'decision' });
+  }
+
+  /** Setzt die Wahl des Spielers um (0 = erste Möglichkeit). */
+  resolveDecision(choice: number) {
+    const d = this.pending;
+    if (!d) return;
+    this.pending = null;
+    const pay = (n: number) => {
+      this.money -= n;
+      this.today.penalty += n;
+    };
+    switch (d.id) {
+      case 'strike':
+        if (choice === 0) {
+          this.wageBoost.driver *= 1.1;
+          this.emit('Die Fahrer bekommen 10 % mehr Lohn.', 'info');
+        } else {
+          this.strikeLeft = 480;
+          this.emit('Streik! Die Fahrer arbeiten 8 Stunden lang nicht.', 'bad');
+        }
+        break;
+      case 'customs':
+        if (choice === 0) {
+          pay(8_000);
+          this.rep = Math.min(REP_MAX, this.rep + 2);
+          this.emit('Der Container war sauber. Der Zoll lobt die Zusammenarbeit. Ruf +2', 'good');
+        } else if (this.rnd() < 0.35) {
+          const fine = Math.round(40_000 * DIFFS[this.diff].penalty);
+          pay(fine);
+          this.rep = Math.max(0, this.rep - 6);
+          this.emit(`Es war Schmuggel. Strafe −${eur(fine)}, Ruf −6`, 'bad');
+        } else {
+          this.emit('Glück gehabt: Der Container war sauber.', 'info');
+        }
+        break;
+      case 'vip': {
+        if (choice !== 0) break;
+        const pen = DIFFS[this.diff].penalty;
+        const c: Contract = {
+          id: this.nextId++,
+          line: 'Sonderfahrt',
+          prefix: 'SF',
+          color: 0xf4c430,
+          ship: 'feeder',
+          reefer: false,
+          interval: 99_999,
+          calls: 1,
+          callsTotal: 1,
+          dwell: 360,
+          bonus: 25_000,
+          penalty: Math.round(15_000 * pen),
+          next: 20,
+        };
+        this.contracts.push(c);
+        this.emit('Die Sonderfahrt kommt in etwa 20 Minuten.', 'info');
+        break;
+      }
+      case 'press':
+        if (choice === 0) {
+          pay(5_000);
+          this.rep = Math.min(REP_MAX, this.rep + 5);
+          this.emit('Der Bericht läuft heute Abend. Ruf +5', 'good');
+        }
+        break;
+      case 'parts': {
+        if (choice !== 0) break;
+        const c = this.cranes.find((c) => !c.big);
+        if (!c || this.money < 60_000) {
+          this.emit('Das Geschäft kam nicht zustande.', 'info');
+          break;
+        }
+        this.money -= 60_000;
+        this.today.building += 60_000;
+        c.big = true;
+        this.version++;
+        this.emit('Ein Mobilkran ist jetzt eine Containerbrücke.', 'good');
+        break;
+      }
+    }
+  }
+
   // ───────────────────────── Ziel, Pleite, Kredit ─────────────────────────
 
   /** Bis zu diesem Tag (einschließlich) muss der Weltklasse-Hafen stehen. */
@@ -2286,7 +2657,7 @@ export class Sim {
     let cost = 0;
     for (const c of this.cranes) cost += c.big ? R.craneBig : R.crane;
     for (const t of this.trucks) cost += t.agv ? R.agv : R.truck;
-    cost += this.gates.length * R.gate + this.rails.length * R.rail + this.plants.length * R.plant;
+    cost += this.gates.length * R.gate + this.rails.length * R.rail + this.plants.length * R.plant + this.shops.length * R.shop;
     cost += this.yardTiles.length * R.yardTile + this.reeferTiles.length * R.reeferTile;
     for (let x = 0; x < GRID_W; x++) if (this.isKai(x)) cost += R.kaiTile;
     return cost;
@@ -2308,6 +2679,8 @@ export class Sim {
     this.makeOffers();
     this.planWeather();
     this.rollSickness();
+    this.updateRival();
+    this.rollDecision();
     this.emit(`Tagesabschluss: Betriebskosten −${eur(cost)}${interest ? `, Zinsen −${eur(interest)}` : ''}`, 'info', { tag: 'day' });
     this.checkEnd();
   }
@@ -2321,10 +2694,20 @@ export class Sim {
       stock: Array.from(this.stock),
       stockExp: Array.from(this.stockExp),
       depth: Array.from(this.depth),
-      cranes: this.cranes.map((c) => ({ x: c.x, y: c.y, big: c.big })),
+      cranes: this.cranes.map((c) => ({ x: c.x, y: c.y, big: c.big, wear: c.wear })),
+      shops: this.shops.map((s) => ({ x: s.x, y: s.y })),
+      oneway: Array.from(this.oneway),
+      owned: Array.from(this.owned),
+      plotsBought: this.plotsBought,
+      map: this.map,
+      rivalRate: this.rivalRate,
+      lostToRival: this.lostToRival,
+      wageBoost: this.wageBoost,
+      strikeLeft: this.strikeLeft,
+      pending: this.pending,
       gates: this.gates.map((g) => ({ x: g.x, y: g.y, served: g.served })),
       rails: this.rails.map((r) => ({ x: r.x, y: r.y, platform: r.platform, value: r.value })),
-      trucks: this.trucks.map((t) => ({ tile: t.tile, agv: t.agv, role: t.role })),
+      trucks: this.trucks.map((t) => ({ tile: t.tile, agv: t.agv, role: t.role, wear: t.wear })),
       plants: this.plants.map((p) => ({ x: p.x, y: p.y, kind: p.kind })),
       premiumDone: this.premiumDone,
       money: this.money,
@@ -2358,14 +2741,23 @@ export class Sim {
   }
 
   static deserialize(d: SaveData): Sim {
-    const s = new Sim(d.seed, d.diff ?? 'normal');
+    const s = new Sim(d.seed, d.diff ?? 'normal', d.map ?? 'coast');
     s.kind.set(d.kind);
+    if (d.oneway) s.oneway.set(d.oneway);
+    if (d.owned) s.owned.set(d.owned);
+    s.plotsBought = d.plotsBought ?? 0;
+    if (d.rivalRate) s.rivalRate = d.rivalRate;
+    s.lostToRival = d.lostToRival ?? 0;
+    if (d.wageBoost) s.wageBoost = { ...s.wageBoost, ...d.wageBoost };
+    s.strikeLeft = d.strikeLeft ?? 0;
+    s.pending = d.pending ?? null;
     s.stock.set(d.stock);
     if (d.stockExp) s.stockExp.set(d.stockExp);
     if (d.depth) s.depth.set(d.depth);
     for (const c of d.cranes) {
       s.place('crane', c.x, c.y);
       if (c.big) s.cranes[s.cranes.length - 1].big = true;
+      s.cranes[s.cranes.length - 1].wear = c.wear ?? 0;
     }
     for (const g of d.gates) {
       s.place('gate', g.x, g.y);
@@ -2381,8 +2773,10 @@ export class Sim {
       s.place('truck', t.tile % GRID_W, (t.tile / GRID_W) | 0);
       if (t.agv) s.trucks[s.trucks.length - 1].agv = true;
       s.trucks[s.trucks.length - 1].role = t.role ?? 'auto';
+      s.trucks[s.trucks.length - 1].wear = t.wear ?? 0;
     }
     for (const p of d.plants ?? []) s.place(p.kind, p.x, p.y);
+    for (const p of d.shops ?? []) s.place('workshop', p.x, p.y);
     s.premiumDone = d.premiumDone ?? 0;
     s.money = d.money;
     s.rep = d.rep;
@@ -2406,9 +2800,9 @@ export class Sim {
     s.debtDays = d.debtDays ?? 0;
     s.status = d.status ?? 'free';
     s.endReason = d.endReason ?? '';
-    if (d.staff) s.staff = { ...d.staff };
+    if (d.staff) s.staff = { ...s.staff, ...d.staff };
     else s.staff.driver = s.trucks.filter((t) => !t.agv).length;
-    if (d.sick) s.sick = { driver: [...d.sick.driver], crane: [...d.sick.crane], gate: [...d.sick.gate] };
+    if (d.sick) s.sick = { driver: [...d.sick.driver], crane: [...d.sick.crane], gate: [...d.sick.gate], mech: [...(d.sick.mech ?? [])] };
     s.nextId = Math.max(s.nextId, ...s.contracts.map((c) => c.id + 1), ...s.offers.map((c) => c.id + 1));
     s.today = { ...emptyBook(), ...d.today };
     s.history = d.history.map((h) => ({ ...emptyBook(), ...h }));
