@@ -87,7 +87,8 @@ export const TRUCK_SPEED = 2; // Felder pro gm
 export const AGV_SPEED = 3;
 export const TRUCK_HANDLE_GM = 0.4;
 export const TRUCK_CAP = 2; // Container pro Fahrt
-export const TRUCK_JAM = 0.35; // Verlangsamung pro zusätzlichem Truck auf demselben Feld
+/** Nach so vielen Spielminuten im Stau drängelt sich ein Truck durch, damit nichts für immer feststeckt. */
+export const TRUCK_PATIENCE_GM = 10;
 
 // Stapelplatz und Kühlplätze
 export const YARD_CAP_PER_TILE = 6;

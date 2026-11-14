@@ -68,6 +68,9 @@ export class Sound {
   unlock() {
     if (!this.enabled) return;
     try {
+      // iPhone: Ton auch bei stummgeschaltetem Klingelschalter abspielen (ab iOS 17)
+      const session = (navigator as unknown as { audioSession?: { type: string } }).audioSession;
+      if (session && session.type !== 'playback') session.type = 'playback';
       if (!this.ctx) {
         const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
         if (!AC) return;
@@ -77,7 +80,7 @@ export class Sound {
         this.master.connect(this.ctx.destination);
         this.startAmbient();
       }
-      if (this.ctx.state === 'suspended') void this.ctx.resume();
+      if (this.ctx.state !== 'running') void this.ctx.resume();
     } catch {
       this.ctx = null;
     }

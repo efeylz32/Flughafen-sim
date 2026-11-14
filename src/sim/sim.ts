@@ -42,7 +42,7 @@ import {
   TICK_GM,
   TRUCK_CAP,
   TRUCK_HANDLE_GM,
-  TRUCK_JAM,
+  TRUCK_PATIENCE_GM,
   TRUCK_SPEED,
   UNLOCK,
   UPGRADE,
@@ -135,6 +135,10 @@ export interface Truck {
   job: Job | null;
   /** Blickrichtung in Radiant für die Darstellung */
   angle: number;
+  /** Fahrtrichtung der belegten Spur: 0 Ost, 1 Süd, 2 West, 3 Nord, -1 noch keine */
+  dir: number;
+  /** Spielminuten, die der Truck gerade im Stau steht */
+  stuck: number;
 }
 
 export type ShipState = 'queued' | 'sailing' | 'unloading' | 'leaving';
@@ -377,7 +381,10 @@ export class Sim {
   private distCache = new Map<number, Int16Array>();
   private yardTiles: number[] = [];
   private reeferTiles: number[] = [];
-  private truckCount = new Int16Array(GRID_W * GRID_H);
+  /** Belegte Fahrspuren: je Straßenfeld eine Spur pro Fahrtrichtung, darauf passt ein Truck */
+  private lane = new Uint8Array(GRID_W * GRID_H * 4);
+  /** Wie stark sich der Verkehr auf einem Feld zuletzt gestaut hat (klingt von selbst ab) */
+  roadJam = new Float32Array(GRID_W * GRID_H);
   private lastDay: number;
   private exportNeed = 0;
   private spoilNote = 0;
@@ -698,7 +705,7 @@ export class Sim {
         return undefined;
       case 'truck': {
         const id = this.nextId++;
-        this.trucks.push({ id, tile: i, next: -1, prog: 0, fx: x, fy: y, px: x, py: y, wait: 0, load: 0, cargo: 'imp', agv: false, job: null, angle: 0 });
+        this.trucks.push({ id, tile: i, next: -1, prog: 0, fx: x, fy: y, px: x, py: y, wait: 0, load: 0, cargo: 'imp', agv: false, job: null, angle: 0, dir: -1, stuck: 0 });
         return id;
       }
     }
@@ -1027,6 +1034,7 @@ export class Sim {
     t.load = 0;
     t.next = -1;
     t.prog = 0;
+    t.stuck = 0;
   }
 
   private jobValid(j: Job): boolean {
@@ -1268,26 +1276,43 @@ export class Sim {
       if (here < 0) return this.cancelJob(t);
       const x = t.tile % GRID_W;
       const y = (t.tile / GRID_W) | 0;
-      const cand = [x < GRID_W - 1 ? t.tile + 1 : -1, x > 0 ? t.tile - 1 : -1, y < GRID_H - 1 ? t.tile + GRID_W : -1, y > 0 ? t.tile - GRID_W : -1];
-      for (const n of cand) {
-        if (n >= 0 && d[n] === here - 1) {
-          t.next = n;
-          break;
+      // Nachbarn in der Reihenfolge Ost, Süd, West, Nord (entspricht der Spurrichtung)
+      const cand = [x < GRID_W - 1 ? t.tile + 1 : -1, y < GRID_H - 1 ? t.tile + GRID_W : -1, x > 0 ? t.tile - 1 : -1, y > 0 ? t.tile - GRID_W : -1];
+      let pick = -1;
+      let pickDir = -1;
+      for (let dir = 0; dir < 4; dir++) {
+        const n = cand[dir];
+        if (n < 0 || d[n] !== here - 1) continue;
+        // Unter gleich kurzen Wegen den nehmen, dessen Spur frei ist
+        if (pick < 0 || this.lane[n * 4 + dir] === 0) {
+          pick = n;
+          pickDir = dir;
+          if (this.lane[n * 4 + dir] === 0) break;
         }
       }
-      if (t.next < 0) return this.cancelJob(t);
+      if (pick < 0) return this.cancelJob(t);
+      t.angle = [0, Math.PI / 2, Math.PI, -Math.PI / 2][pickDir];
+      // Die Spur im nächsten Feld ist belegt: warten. Das ist der Stau.
+      if (this.lane[pick * 4 + pickDir] > 0 && t.stuck < TRUCK_PATIENCE_GM) {
+        t.stuck += dt;
+        this.roadJam[t.tile] += dt;
+        return;
+      }
+      this.lane[pick * 4 + pickDir]++;
+      t.next = pick;
       t.prog = 0;
+      t.stuck = 0;
     }
 
-    const crowd = Math.max(1, this.truckCount[t.tile]);
-    const factor = 1 / (1 + TRUCK_JAM * (crowd - 1));
-    t.prog += (t.agv ? AGV_SPEED : TRUCK_SPEED) * dt * factor;
+    t.prog += (t.agv ? AGV_SPEED : TRUCK_SPEED) * dt;
     const nx = t.next % GRID_W;
     const ny = (t.next / GRID_W) | 0;
     const cx = t.tile % GRID_W;
     const cy = (t.tile / GRID_W) | 0;
     t.angle = Math.atan2(ny - cy, nx - cx);
     if (t.prog >= 1) {
+      if (t.dir >= 0 && this.lane[t.tile * 4 + t.dir] > 0) this.lane[t.tile * 4 + t.dir]--;
+      t.dir = ny > cy ? 1 : ny < cy ? 3 : nx > cx ? 0 : 2;
       t.tile = t.next;
       t.next = -1;
       t.prog = 0;
@@ -1666,14 +1691,24 @@ export class Sim {
   }
 
   private updateTrucks(dt: number) {
-    this.truckCount.fill(0);
-    for (const t of this.trucks) if (t.job) this.truckCount[t.tile]++;
+    // Spuren neu belegen: Wer arbeitet oder fährt, steht in seiner Spur. Wer frei hat, parkt am Rand.
+    this.lane.fill(0);
+    for (const t of this.trucks) {
+      if (!t.job && t.wait <= 0) continue;
+      if (t.dir >= 0) this.lane[t.tile * 4 + t.dir]++;
+      if (t.next >= 0) {
+        const d = t.next - t.tile;
+        this.lane[t.next * 4 + (d === 1 ? 0 : d === GRID_W ? 1 : d === -1 ? 2 : 3)]++;
+      }
+    }
+    if (this.tickCount % 5 === 0) for (let i = 0; i < this.roadJam.length; i++) this.roadJam[i] *= 0.93;
     for (const t of this.trucks) {
       if (t.wait > 0) {
         t.wait -= dt;
         continue;
       }
       if (!t.job) {
+        t.stuck = 0;
         this.assignJob(t);
         if (!t.job) continue;
       }

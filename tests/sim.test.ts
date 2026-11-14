@@ -403,6 +403,39 @@ describe('Aufrüsten', () => {
   });
 });
 
+describe('Verkehr', () => {
+  it('in einer Spur steht pro Feld nur ein fahrender Truck, der Rest staut sich', () => {
+    const sim = bigPort(1, 24);
+    let jammed = 0;
+    let worst = 0;
+    for (let i = 0; i < 3000; i++) {
+      sim.tick();
+      const seen = new Map<number, number>();
+      for (const t of sim.trucks) {
+        if (t.stuck > 0) jammed++;
+        if (t.next < 0 || t.dir < 0) continue;
+        const key = t.tile * 4 + t.dir;
+        seen.set(key, (seen.get(key) ?? 0) + 1);
+      }
+      for (const n of seen.values()) worst = Math.max(worst, n);
+    }
+    expect(jammed).toBeGreaterThan(0);
+    expect(Math.max(...sim.roadJam)).toBeGreaterThan(0);
+    expect(worst).toBeLessThanOrEqual(2);
+    expect(sim.containersDone).toBeGreaterThan(100);
+  });
+
+  it('eine zweite Straße entlastet: mehr Durchsatz als mit einer', () => {
+    const one = bigPort(1, 24);
+    const two = bigPort(1, 24);
+    for (let x = 4; x <= GRID_W - 1; x++) two.build('road', x, k + 5);
+    for (const x of [9, 20, 21, 26]) for (let y = k + 2; y <= k + 4; y++) two.build('road', x, y);
+    run(one, 30);
+    run(two, 30);
+    expect(two.containersDone).toBeGreaterThanOrEqual(one.containersDone);
+  });
+});
+
 describe('Speichern', () => {
   it('Roundtrip erhält Gebäude, Geld und Fortschritt', () => {
     const sim = new Sim(9);

@@ -99,6 +99,9 @@ interface ShipView {
 interface TruckView {
   root: Container;
   load: Sprite[];
+  brake: Graphics;
+  /** Seitlicher Versatz: fahrend in der rechten Spur, ohne Auftrag am Rand geparkt */
+  lat: number;
   /** Ladung und Art, um Änderungen zu erkennen */
   key: string;
   agv: boolean;
@@ -577,19 +580,45 @@ export class Renderer {
             const s = same(0, 1);
             const w = same(-1, 0);
             const e = same(1, 0);
+            const cnt = +n + +s + +w + +e;
+            const cx = px + TILE / 2;
+            const cy = py + TILE / 2;
             const edge = { color: C.roadEdge, alpha: 0.85 };
             if (!n) g.rect(px, py + 1.5, TILE, 1.3).fill(edge);
             if (!s) g.rect(px, py + TILE - 2.8, TILE, 1.3).fill(edge);
             if (!w) g.rect(px + 1.5, py, 1.3, TILE).fill(edge);
             if (!e) g.rect(px + TILE - 2.8, py, 1.3, TILE).fill(edge);
-            const horiz = w || e;
-            const vert = n || s;
-            if (horiz && !vert) {
-              g.rect(px + 4, py + TILE / 2 - 1, 9, 2).fill(C.roadDash);
-              g.rect(px + 20, py + TILE / 2 - 1, 9, 2).fill(C.roadDash);
-            } else if (vert && !horiz) {
-              g.rect(px + TILE / 2 - 1, py + 4, 2, 9).fill(C.roadDash);
-              g.rect(px + TILE / 2 - 1, py + 20, 2, 9).fill(C.roadDash);
+            if (cnt >= 3) {
+              // Kreuzung: Haltelinie an jeder Zufahrt, jeweils auf der rechten Spur
+              const stop = { color: 0xffffff, alpha: 0.9 };
+              if (w) g.rect(px + 1, cy + 1.5, 2.2, 13).fill(stop);
+              if (e) g.rect(px + TILE - 3.2, py + 1.5, 2.2, 13).fill(stop);
+              if (n) g.rect(px + 1.5, py + 1, 13, 2.2).fill(stop);
+              if (s) g.rect(cx + 1.5, py + TILE - 3.2, 13, 2.2).fill(stop);
+            } else if ((w || e) && !(n || s)) {
+              g.rect(px + 4, cy - 1, 9, 2).fill(C.roadDash);
+              g.rect(px + 20, cy - 1, 9, 2).fill(C.roadDash);
+              // Sackgasse: Wendeplatz andeuten
+              if (cnt === 1) g.circle(w ? px + TILE - 9 : px + 9, cy, 4).stroke({ width: 1.2, color: C.roadEdge, alpha: 0.6 });
+            } else if ((n || s) && !(w || e)) {
+              g.rect(cx - 1, py + 4, 2, 9).fill(C.roadDash);
+              g.rect(cx - 1, py + 20, 2, 9).fill(C.roadDash);
+              if (cnt === 1) g.circle(cx, n ? py + TILE - 9 : py + 9, 4).stroke({ width: 1.2, color: C.roadEdge, alpha: 0.6 });
+            } else if (cnt === 2) {
+              // Kurve: Mittellinie als Bogen, Außenecke abgerundet
+              const ax = w ? px : px + TILE;
+              const ay = n ? py : py + TILE;
+              const ox = w ? px + TILE : px;
+              const oy = n ? py + TILE : py;
+              const dx = w ? -1 : 1;
+              const dy = n ? -1 : 1;
+              g.moveTo(cx, ay).quadraticCurveTo(cx, cy, ax, cy).stroke({ width: 2, color: C.roadDash });
+              g.moveTo(ox, oy + dy * 11)
+                .quadraticCurveTo(ox, oy, ox + dx * 11, oy)
+                .lineTo(ox, oy)
+                .closePath()
+                .fill(C.grassA);
+              g.moveTo(ox, oy + dy * 12.5).quadraticCurveTo(ox + dx * 1.5, oy + dy * 1.5, ox + dx * 12.5, oy).stroke({ width: 1.3, color: C.roadEdge, alpha: 0.85 });
             }
             break;
           }
@@ -947,7 +976,13 @@ export class Renderer {
       g.roundRect(10.2, -3.8, 2.4, 7.6, 1).fill(0x22344b);
       g.rect(6.8, -3.6, 2.6, 7.2).fill(tint(cab, 0.3));
     }
-    root.addChild(g);
+    const brake = new Graphics();
+    brake.circle(-13.2, -3, 1.9).fill(0xff3b30);
+    brake.circle(-13.2, 3, 1.9).fill(0xff3b30);
+    brake.circle(-13.2, -3, 3.6).fill({ color: 0xff3b30, alpha: 0.3 });
+    brake.circle(-13.2, 3, 3.6).fill({ color: 0xff3b30, alpha: 0.3 });
+    brake.visible = false;
+    root.addChild(g, brake);
     const load: Sprite[] = [];
     for (let k = 0; k < 2; k++) {
       const s = this.box(this.boxH, 0xffffff, (t.agv ? -10 : -12.4) + k * (t.agv ? 10.4 : 8.9), -3.9, 0.96);
@@ -955,7 +990,7 @@ export class Renderer {
       root.addChild(s);
       load.push(s);
     }
-    return { root, load, key: '', agv: t.agv, rot: t.angle };
+    return { root, load, brake, lat: 7, key: '', agv: t.agv, rot: t.angle };
   }
 
   private syncTrucks(sim: Sim, a: number, view: View) {
@@ -972,12 +1007,19 @@ export class Renderer {
         this.trucks.set(t.id, v);
         this.truckLayer.addChild(v.root);
       }
-      v.root.position.set((t.px + (t.fx - t.px) * a + 0.5) * TILE, (t.py + (t.fy - t.py) * a + 0.5) * TILE);
       // Weich in die neue Richtung drehen (kürzester Weg)
       let d = t.angle - v.rot;
       d = Math.atan2(Math.sin(d), Math.cos(d));
-      v.rot += d * Math.min(1, view.dt * 16);
+      v.rot += d * Math.min(1, view.dt * 12);
       v.root.rotation = v.rot;
+      // Rechtsverkehr: in Fahrtrichtung rechts von der Mittellinie
+      const idle = !t.job && t.wait <= 0;
+      v.lat += ((idle ? 10.5 : 7) - v.lat) * Math.min(1, view.dt * 6);
+      v.root.position.set(
+        (t.px + (t.fx - t.px) * a + 0.5) * TILE - Math.sin(v.rot) * v.lat,
+        (t.py + (t.fy - t.py) * a + 0.5) * TILE + Math.cos(v.rot) * v.lat,
+      );
+      v.brake.visible = t.stuck > 0;
       const key = t.load + t.cargo;
       if (key !== v.key) {
         v.key = key;
@@ -1320,6 +1362,13 @@ export class Renderer {
       const L = s.len * TILE;
       g.moveTo(x + 9, y + 56).lineTo(x + 8, COAST + 4.6).stroke(rope);
       g.moveTo(x + L - 28, y + 56).lineTo(x + L - 8, COAST + 4.6).stroke(rope);
+    }
+
+    // Stau: Felder, auf denen Trucks zuletzt warten mussten, färben sich rot
+    for (let i = COAST_ROW * GRID_W; i < sim.roadJam.length; i++) {
+      const j = sim.roadJam[i];
+      if (j < 1.2 || sim.kind[i] !== T.Road) continue;
+      g.rect((i % GRID_W) * TILE, ((i / GRID_W) | 0) * TILE, TILE, TILE).fill({ color: C.bad, alpha: Math.min(0.42, 0.1 + j * 0.035) });
     }
 
     // Gates: wartende Container, Schranke, Ampel

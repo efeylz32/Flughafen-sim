@@ -15,8 +15,8 @@ async function boot() {
 
   // Ton darf erst nach einer Nutzeraktion starten
   const unlock = () => game.sound.unlock();
-  window.addEventListener('pointerdown', unlock, { capture: true });
-  window.addEventListener('keydown', unlock, { capture: true });
+  // iPhone und iPad zählen erst das Loslassen als Nutzeraktion, deshalb mehrere Ereignisse
+  for (const ev of ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown']) window.addEventListener(ev, unlock, { capture: true });
   document.addEventListener('visibilitychange', () => game.sound.setHidden(document.hidden));
 
   // Letzten Spielstand laden, sonst Menü zeigen
