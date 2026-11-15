@@ -755,6 +755,27 @@ export class Renderer {
             if (!same(1, 0)) g.rect(px + TILE - 2, py, 2, TILE).fill(0x3b9bd6);
             break;
           }
+          case T.Solar: {
+            // Solarfläche: blaue Module mit Rahmen
+            g.rect(px, py, TILE, TILE).fill(0xd6dbe0);
+            for (let r = 0; r < 2; r++) for (let c = 0; c < 2; c++) {
+              g.roundRect(px + 2.5 + c * 14, py + 2.5 + r * 14, 13, 13, 1.5).fill(0x1f4f8a);
+              g.rect(px + 2.5 + c * 14, py + 2.5 + r * 14 + 6, 13, 0.8).fill({ color: 0x9cc4ff, alpha: 0.6 });
+              g.rect(px + 2.5 + c * 14 + 6, py + 2.5 + r * 14, 0.8, 13).fill({ color: 0x9cc4ff, alpha: 0.6 });
+              g.poly([px + 3 + c * 14, py + 3 + r * 14, px + 9 + c * 14, py + 3 + r * 14, px + 3 + c * 14, py + 9 + r * 14]).fill({ color: 0xffffff, alpha: 0.18 });
+            }
+            break;
+          }
+          case T.Battery: {
+            // Batteriespeicher: Container mit Lüftern und grüner Ladeanzeige
+            g.roundRect(px + 3, py + 6, TILE - 4, TILE - 9, 2).fill({ color: 0x000000, alpha: 0.2 });
+            g.roundRect(px + 2, py + 4, TILE - 4, TILE - 9, 2).fill(0xe9edf1);
+            g.rect(px + 2, py + 4, TILE - 4, 3).fill(0x2f9e6b);
+            for (let k = 0; k < 3; k++) g.circle(px + 8 + k * 8, py + 14, 2.6).fill(0x6d7a87);
+            g.roundRect(px + 6, py + 20, TILE - 12, 3.5, 1.5).fill(0x2a3442);
+            g.roundRect(px + 6, py + 20, (TILE - 12) * (sim.batteryCap ? sim.batteryCharge / sim.batteryCap : 0), 3.5, 1.5).fill(0x3fe08a);
+            break;
+          }
           case T.Hazmat: {
             // Gefahrgut: Warnstreifen, rote Umrandung
             g.rect(px, py, TILE, TILE).fill(0xe9d8b4);

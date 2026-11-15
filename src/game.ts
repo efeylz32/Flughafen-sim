@@ -2,7 +2,7 @@ import { Sound } from './audio/sound';
 import { Renderer, View } from './render/renderer';
 import { BuildTool, DiffId, GRID_H, GRID_W, MapId, ProductId, Role, ROLE_NAMES, T, TICKS_PER_SEC, TILE, Tool, TruckRole } from './sim/data';
 import { Progress } from './achievements';
-import { CRANE_MODELS, DIFFS, dimsOf, MAPS, movesPerHour, sizeOf, TechId } from './sim/data';
+import { CRANE_MODELS, TRAITS, DIFFS, dimsOf, MAPS, movesPerHour, sizeOf, TechId } from './sim/data';
 import { buildDemo, buildShowcase } from './sim/demo';
 import { setupScenario } from './sim/scenario-setup';
 import { SCENARIOS } from './sim/scenarios';
@@ -329,6 +329,8 @@ export class Game {
     this.sim = new Sim(Math.floor(Math.random() * 1e9), diff, mode === 'demo' ? 'coast' : map);
     if (mode === 'demo') buildDemo(this.sim);
     this.sim.limitLand();
+    this.sim.rollTraits();
+    setTimeout(() => this.ui.toast(`Dein Hafen: ${this.sim.traits.map((t) => `${TRAITS[t].name} (${TRAITS[t].text})`).join(', ')}`, 'info'), 600);
     this.resetTransient();
     this.setTool('view');
     this.setSpeed(1);

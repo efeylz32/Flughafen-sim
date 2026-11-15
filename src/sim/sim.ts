@@ -38,6 +38,19 @@ import {
   GRID_H,
   GRID_W,
   LEVELS,
+  TRAITS,
+  TraitId,
+  WORLD,
+  WorldId,
+  POWER_PRICE,
+  SOLAR_KW,
+  BATTERY_KWH,
+  POWER_KW,
+  RuleCond,
+  RuleAct,
+  RULE_CONDS,
+  RULE_ACTS,
+  MAX_RULES,
   ROAD_SPEED,
   DIST_UNIT,
   ROAD_LANES,
@@ -206,7 +219,9 @@ export interface Crane {
   expBuf: number;
   resExpIn: number;
   cd: number;
-  state: 'idle' | 'working' | 'blocked' | 'storm' | 'broken' | 'building';
+  state: 'idle' | 'working' | 'blocked' | 'storm' | 'broken' | 'building' | 'power';
+  /** Moves in der laufenden Stunde (für den Leitstand) */
+  moves?: number;
   /** Verschleiß 0..1, bei 1 ausgefallen */
   wear: number;
   /** Letzter Zug war ein Beladen (für abwechselndes Ent- und Beladen) */
@@ -429,6 +444,8 @@ export interface DayBook {
   /** Wie viele Ticks welche Stufe heute der Engpass war, und der höchste Stauanteil */
   bn: { crane: number; trucks: number; yard: number; gate: number };
   jamPeak: number;
+  /** Stromkosten aus dem Netz */
+  power?: number;
   /** Umgeschlagene Container, abgefertigte und pünktliche Schiffe */
   handled: number;
   ships: number;
@@ -534,6 +551,10 @@ export interface SaveData {
   usedMarket?: { factor: number; lo: number; hi: number; label: string };
   nextInspect?: number;
   sandbox?: boolean;
+  traits?: TraitId[];
+  world?: { id: WorldId; left: number; product?: ProductId } | null;
+  batteryCharge?: number;
+  rules?: { cond: RuleCond; act: RuleAct; on: boolean }[];
   trainLeft?: Record<Role, number>;
   tech?: Partial<Record<TechId, number>>;
   megaDone?: number;
@@ -572,8 +593,8 @@ const covers = (e: Box, x: number, y: number) => x >= e.x && y >= e.y && x < e.x
 
 const UNLOADING = 'Wird entladen.';
 const LOADING = 'Wird beladen.';
-const emptyBook = (): DayBook => ({ fees: 0, exportFees: 0, rail: 0, berth: 0, bonus: 0, penalty: 0, running: 0, wages: 0, interest: 0, building: 0, handled: 0, ships: 0, onTime: 0, bn: { crane: 0, trucks: 0, yard: 0, gate: 0 }, jamPeak: 0 });
-const TILE_OF: Partial<Record<BuildTool, T>> = { kai: T.Kai, road: T.Road, yard: T.Yard, road2: T.Road, hwy: T.Road, reefer: T.Reefer, hazard: T.Hazmat, emptyyard: T.Empty, fill: T.Plant, gate: T.Gate, rail: T.Rail, unpack: T.Plant, pack: T.Plant, cold: T.Plant, workshop: T.Shop };
+const emptyBook = (): DayBook => ({ fees: 0, exportFees: 0, rail: 0, berth: 0, bonus: 0, penalty: 0, running: 0, wages: 0, interest: 0, building: 0, handled: 0, ships: 0, onTime: 0, bn: { crane: 0, trucks: 0, yard: 0, gate: 0 }, jamPeak: 0, power: 0 });
+const TILE_OF: Partial<Record<BuildTool, T>> = { kai: T.Kai, road: T.Road, yard: T.Yard, road2: T.Road, hwy: T.Road, solar: T.Solar, battery: T.Battery, reefer: T.Reefer, hazard: T.Hazmat, emptyyard: T.Empty, fill: T.Plant, gate: T.Gate, rail: T.Rail, unpack: T.Plant, pack: T.Plant, cold: T.Plant, workshop: T.Shop };
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 
 const eur = (n: number) => `${Math.round(n).toLocaleString('de-DE')} €`;
@@ -690,6 +711,25 @@ export class Sim {
   nextInspect = 12;
   /** Sandbox: frei bauen, keine Frist, keine Pleite */
   sandbox = false;
+  /** Zwei Besonderheiten dieses Hafens */
+  traits: TraitId[] = [];
+  /** Laufendes Weltereignis */
+  world: { id: WorldId; left: number; product?: ProductId } | null = null;
+  /** Ladung aller Batterien in kWh */
+  batteryCharge = 0;
+  /** Spielminuten, die ein Stromausfall noch dauert */
+  powerOutLeft = 0;
+  /** Bei Stromausfall und leerer Batterie stehen Kräne und Hallen */
+  powerDown = false;
+  /** Regeln für den Leitstand */
+  rules: { cond: RuleCond; act: RuleAct; on: boolean }[] = [];
+  /** Stündliche Messwerte der letzten 48 Stunden (nicht gespeichert) */
+  hourly: { yard: number; wait: number; idle: number; jam: number; kw: number; solar: number; done: number }[] = [];
+  /** Moves pro Stunde je Kran und Abfertigungen je Gate (letzte 24 Stunden) */
+  craneHist = new Map<number, number[]>();
+  gateHist = new Map<number, number[]>();
+  private gateLast = new Map<number, number>();
+  private doneLast = 0;
   /** Tage, die eine Weiterbildung noch läuft (eine Kraft fehlt) */
   trainLeft: Record<Role, number> = { driver: 0, crane: 0, gate: 0, mech: 0 };
   /** Gebäude beim nächsten Bauen gedreht (Breite und Höhe getauscht). Nur Bedienung, wird nicht gespeichert. */
@@ -759,7 +799,7 @@ export class Sim {
   }
 
   get plotPrice(): number {
-    return PLOT_PRICE + this.plotsBought * PLOT_PRICE_STEP;
+    return Math.round((PLOT_PRICE + this.plotsBought * PLOT_PRICE_STEP) * (this.traits.includes('cheapland') ? 0.6 : 1));
   }
   buyPlot(x: number): BuildCheck {
     const cost = this.plotPrice;
@@ -929,6 +969,7 @@ export class Sim {
     if (p === 'food' && si === 3) m *= 1.1;
     if (this.spec === 'logi' && p !== 'food') m *= 1.1;
     if (this.spec === 'cold' && p === 'food') m *= 1.15;
+    if (this.world?.id === 'embargo' && this.world.product === p) m *= 0.6;
     return Math.round((PRODUCTS[p].base * m) / 10) * 10;
   }
   /** Alle Container auf dem Stapelplatz (Import und Export) */
@@ -1290,6 +1331,8 @@ export class Sim {
       case 'reefer':
       case 'emptyyard':
       case 'hazard':
+      case 'solar':
+      case 'battery':
       case 'gate':
       case 'unpack':
       case 'pack':
@@ -1356,6 +1399,10 @@ export class Sim {
     const [bw, bh] = dimsOf(tool, rot);
     const i = this.idx(x, y);
     switch (tool) {
+      case 'solar':
+      case 'battery':
+        this.kind[i] = TILE_OF[tool]!;
+        return undefined;
       case 'kai':
       case 'road':
         this.kind[i] = TILE_OF[tool]!;
@@ -1585,6 +1632,12 @@ export class Sim {
         this.zone[i] = 0;
         break;
       }
+      case T.Solar:
+      case T.Battery: {
+        const tool: BuildTool = this.kind[i] === T.Solar ? 'solar' : 'battery';
+        out.push({ tool, x, y, refund: this.give(this.costOf(tool), factor) });
+        break;
+      }
       case T.Gate: {
         const g = this.gateAt(x, y);
         if (!g) return;
@@ -1794,7 +1847,9 @@ export class Sim {
   }
   /** Heutiger Neupreis */
   costOf(tool: BuildTool): number {
-    return Math.round((COST[tool] * this.inflation) / 100) * 100;
+    const t = this.traits;
+    const mul = (t.includes('rocky') ? 1.15 : 1) * (tool === 'dredge' && t.includes('deepwater') ? 0.4 : 1);
+    return Math.round((COST[tool] * this.inflation * mul) / 100) * 100;
   }
   /** Gibt es dieses Werkzeug auch gebraucht? */
   static usable(tool: string): boolean {
@@ -2360,7 +2415,7 @@ export class Sim {
     let fee = j.cargo === 'reef' ? REEFER_FEE : j.cargo === 'haz' ? HAZ_FEE : j.cargo === 'empty' ? EMPTY_FEE : FEE_PER_CONTAINER;
     if (j.cargo === 'prem') fee = this.price(this.plants.find((p) => p.id === j.src)?.product ?? 'elec');
     if (j.cargo === 'food') fee = this.price('food');
-    fee = Math.round(fee * (1 + 0.05 * this.tech.sales) * CYCLES[this.cycle.kind].fee * (j.cargo === 'reef' && this.spec === 'cold' ? 1.25 : 1));
+    fee = Math.round(fee * (1 + 0.05 * this.tech.sales) * (this.traits.includes('freezone') ? 1.1 : 1) * (this.world ? WORLD[this.world.id].fee : 1) * CYCLES[this.cycle.kind].fee * (j.cargo === 'reef' && this.spec === 'cold' ? 1.25 : 1));
     if (j.dstKind === 'gate' || j.dstKind === 'rail') {
       if (j.cargo === 'prem') this.premiumDone += j.n;
       if (j.cargo === 'food') this.foodDone += j.n;
@@ -2501,7 +2556,11 @@ export class Sim {
     }
 
     this.updateConstruction(dt);
-    if (this.tickCount % 150 === 0) this.rollBreakdowns();
+    if (this.tickCount % 150 === 0) {
+      this.rollBreakdowns();
+      this.hourTick();
+    }
+    this.updatePower(dt);
     this.updateWeather(dt);
     this.updateStaff(dt);
     this.spawnShips(dt);
@@ -2534,7 +2593,7 @@ export class Sim {
   }
   wagePerHour(role: Role): number {
     // Größere Häfen zahlen Tariflohn: +8 % je Stufe
-    const night = this.nightShift && this.isNight ? NIGHT_WAGE : 1;
+    const night = (this.nightShift && this.isNight ? NIGHT_WAGE : 1) * (this.traits.includes('union') ? 1.15 : 1);
     return Math.round(ROLES[role].wage * DIFFS[this.diff].wage * this.wageBoost[role] * (1 + 0.08 * (Math.min(this.level, 7) - 1)) * WAGE_POLICY[this.wagePolicy].mul * night);
   }
   /** Ein wartendes Schiff vorziehen: kostet Lotsengebühr, die anderen Wartenden werden ungeduldiger */
@@ -2640,6 +2699,163 @@ export class Sim {
     for (const r of this.rtgs) step(r, 'Portalkran');
     for (const sh of this.shops) step(sh, 'Werkstatt');
     for (const t of this.trucks) step(t, '');
+  }
+
+  // ───────────────────────── Strom ─────────────────────────
+
+  /** Verbrauch des Hafens in kW */
+  powerDemand(): number {
+    const K = POWER_KW;
+    let kw = 0;
+    for (const c of this.cranes) if (!c.build) kw += K[c.model];
+    kw += this.rtgs.length * K.rtg + this.reeferTiles.length * K.reeferTile + this.gates.length * K.gate + this.shops.length * K.shop;
+    for (const p of this.plants) kw += p.kind === 'cold' ? K.cold : K.plant;
+    return kw;
+  }
+  get solarTiles(): number {
+    let n = 0;
+    for (let i = 0; i < this.kind.length; i++) if (this.kind[i] === T.Solar) n++;
+    return n;
+  }
+  get batteryCap(): number {
+    let n = 0;
+    for (let i = 0; i < this.kind.length; i++) if (this.kind[i] === T.Battery) n++;
+    return n * BATTERY_KWH;
+  }
+  /** Leistung der Solarflächen gerade jetzt (Sonne zwischen 6 und 20 Uhr) */
+  solarNow(): number {
+    const h = this.hour;
+    if (h < 6 || h > 20) return 0;
+    const sun = Math.sin(((h - 6) / 14) * Math.PI);
+    return this.solarTiles * SOLAR_KW * sun * (this.weather === 'clear' ? 1 : 0.3);
+  }
+  /** Stromausfall: Batterien überbrücken, sonst stehen Kräne und Hallen, Kühlcontainer verderben schneller */
+  private updatePower(dt: number) {
+    if (this.powerOutLeft <= 0) {
+      this.powerDown = false;
+      return;
+    }
+    this.powerOutLeft -= dt;
+    const need = Math.max(0, this.powerDemand() - this.solarNow()) * (dt / 60);
+    if (this.batteryCharge >= need) {
+      this.batteryCharge -= need;
+      this.powerDown = false;
+    } else {
+      this.batteryCharge = 0;
+      this.powerDown = true;
+      for (const i of this.reeferTiles) {
+        const q = this.reefTimes.get(i);
+        if (q) for (let k = 0; k < q.length; k++) q[k] -= dt;
+      }
+    }
+    if (this.powerOutLeft <= 0) {
+      this.powerDown = false;
+      this.emit('Der Strom ist wieder da.', 'good');
+    }
+  }
+
+  /** Stündlich: Strom abrechnen, Messwerte sammeln, Regeln ausführen */
+  private hourTick() {
+    const kw = this.powerDemand();
+    const solar = this.solarNow();
+    const net = kw - solar;
+    if (net < 0) this.batteryCharge = Math.min(this.batteryCap, this.batteryCharge - net);
+    else if (this.powerOutLeft <= 0) {
+      const cost = net * POWER_PRICE;
+      this.money -= cost;
+      this.today.power = (this.today.power ?? 0) + cost;
+    }
+    // Akkus laden auch nachts etwas aus dem Netz nach, damit sie beim Ausfall helfen
+    if (this.batteryCharge < this.batteryCap) {
+      const add = Math.min(this.batteryCap - this.batteryCharge, this.batteryCap * 0.05);
+      this.batteryCharge += add;
+      this.money -= add * POWER_PRICE;
+      this.today.power = (this.today.power ?? 0) + add * POWER_PRICE;
+    }
+    // Stromausfall würfeln (ab Stufe 2, bei Sturm öfter)
+    if (this.level >= 2 && this.powerOutLeft <= 0 && this.rnd() < 0.008 * (this.weather === 'storm' ? 3 : 1)) {
+      this.powerOutLeft = 90 + this.rnd() * 90;
+      this.emit(this.batteryCap > 0 ? 'Stromausfall! Die Batterien übernehmen.' : 'Stromausfall! Kräne und Hallen stehen, Kühlcontainer verderben schneller. Batterien würden überbrücken.', 'bad', { tag: 'broken' });
+    }
+    // Messwerte
+    const cap = this.yardCapacity;
+    const tr = this.trucks.length || 1;
+    this.hourly.push({
+      yard: cap ? this.yardStock / cap : 0,
+      wait: this.ships.filter((x) => x.state === 'queued').length,
+      idle: this.trucks.filter((t) => !t.job && t.wait <= 0).length / tr,
+      jam: this.trucks.filter((t) => t.stuck > 0).length / tr,
+      kw,
+      solar,
+      done: this.containersDone - this.doneLast,
+    });
+    this.doneLast = this.containersDone;
+    if (this.hourly.length > 48) this.hourly.shift();
+    for (const c of this.cranes) {
+      const h = this.craneHist.get(c.id) ?? [];
+      h.push(c.moves ?? 0);
+      if (h.length > 24) h.shift();
+      this.craneHist.set(c.id, h);
+      c.moves = 0;
+    }
+    for (const g of this.gates) {
+      const h = this.gateHist.get(g.id) ?? [];
+      h.push(g.served - (this.gateLast.get(g.id) ?? g.served));
+      if (h.length > 24) h.shift();
+      this.gateHist.set(g.id, h);
+      this.gateLast.set(g.id, g.served);
+    }
+    this.applyRules();
+  }
+
+  // ───────────────────────── Regeln ─────────────────────────
+
+  ruleTrue(c: RuleCond): boolean {
+    switch (c) {
+      case 'yardHigh':
+        return this.yardCapacity > 0 && this.yardStock / this.yardCapacity > 0.8;
+      case 'yardLow':
+        return this.yardCapacity > 0 && this.yardStock / this.yardCapacity < 0.3;
+      case 'shipsWait':
+        return this.ships.filter((x) => x.state === 'queued').length >= 2;
+      case 'night':
+        return this.isNight;
+      case 'day':
+        return !this.isNight;
+      case 'reeferHigh':
+        return this.reeferCapacity > 0 && this.reeferStock / this.reeferCapacity > 0.7;
+      case 'powerOut':
+        return this.powerOutLeft > 0;
+    }
+  }
+  private applyRules() {
+    for (const r of this.rules) {
+      if (!r.on || !this.ruleTrue(r.cond)) continue;
+      if (r.act.startsWith('role:')) {
+        const role = r.act.slice(5) as TruckRole;
+        if (this.trucks.every((t) => t.role === role)) continue;
+        for (const t of this.trucks) t.role = role;
+      } else {
+        const on = r.act === 'shift:on';
+        if (this.nightShift === on) continue;
+        this.nightShift = on;
+      }
+      this.emit(`Regel: ${RULE_CONDS[r.cond]} → ${RULE_ACTS[r.act]}`, 'info');
+    }
+  }
+  addRule(cond: RuleCond, act: RuleAct): BuildCheck {
+    if (this.rules.length >= MAX_RULES) return { ok: false, reason: `Höchstens ${MAX_RULES} Regeln`, cost: 0 };
+    this.rules.push({ cond, act, on: true });
+    return { ok: true, cost: 0 };
+  }
+
+  /** Zwei zufällige Besonderheiten für einen neuen Hafen */
+  rollTraits() {
+    const ids = Object.keys(TRAITS) as TraitId[];
+    const a = this.pick(ids);
+    let b = this.pick(ids);
+    while (b === a) b = this.pick(ids);
+    this.traits = [a, b];
   }
 
   /** Stündlich: Alte Geräte fallen öfter einfach aus (ab Stufe 2, wenn es Werkstätten gibt) */
@@ -2785,7 +3001,7 @@ export class Sim {
   }
 
   private planWeather() {
-    if (this.level < 2 || this.forecast || this.weather !== 'clear' || this.rnd() > (this.season.index === 3 ? 0.75 : 0.55)) return;
+    if (this.level < 2 || this.forecast || this.weather !== 'clear' || this.rnd() > (this.season.index === 3 ? 0.75 : 0.55) + (this.traits.includes('stormy') ? 0.2 : 0)) return;
     const kind = this.rnd() < 0.5 ? 'storm' : 'fog';
     this.forecast = { kind, in: 180 + this.rnd() * 900, dur: kind === 'storm' ? 120 + this.rnd() * 120 : 120 + this.rnd() * 90, warned: false };
   }
@@ -2865,12 +3081,12 @@ export class Sim {
       this.nextShipIn = 60;
       return;
     }
-    const reefer = this.level >= 3 && this.reeferCapacity >= 12 && this.rnd() < (this.season.index === 1 ? 0.5 : 0.3) * (this.spec === 'cold' ? 1.5 : 1);
+    const reefer = this.level >= 3 && this.reeferCapacity >= 12 && this.rnd() < (this.season.index === 1 ? 0.5 : 0.3) * (this.spec === 'cold' ? 1.5 : 1) * (this.traits.includes('coldregion') ? 1.5 : 1);
     this.addShip('coaster', null, reefer);
     // Ist die Konkurrenz pünktlicher als du, kommen weniger freie Schiffe
     const mine = this.myRate;
     const rival = this.level >= 2 && mine !== null ? 1 + Math.max(0, this.rivalRate - mine) : 1;
-    const base = (Math.min(300, Math.max(120, 300 - this.rep * 1.5)) + this.contracts.length * 90) * (this.level >= 2 ? MAPS[this.map].ships : 1) * rival * CYCLES[this.cycle.kind].ships;
+    const base = (Math.min(300, Math.max(120, 300 - this.rep * 1.5)) + this.contracts.length * 90) * (this.level >= 2 ? MAPS[this.map].ships : 1) * rival * CYCLES[this.cycle.kind].ships * (this.world ? WORLD[this.world.id].ships : 1);
     this.nextShipIn = base * (0.8 + this.rnd() * 0.4);
   }
 
@@ -2974,6 +3190,7 @@ export class Sim {
 
   private berthStatus(s: Ship): { text: string; blocked: boolean } {
     const bad = (text: string) => ({ text, blocked: true });
+    if (this.powerDown) return { text: 'Stromausfall: Die Kräne stehen. Batterien hätten überbrückt.', blocked: true };
     if (this.weather === 'storm') return { text: 'Sturm: Die Kräne stehen still. Die Liegezeit läuft nicht weiter.', blocked: false };
     const cr = this.cranesAtBerth(s.berthX, s.len);
     if (cr.length === 0) return bad('Kein Kran am Liegeplatz. Setze einen Kran auf eines der Kai-Felder am Schiff.');
@@ -3095,6 +3312,10 @@ export class Sim {
         c.state = 'building';
         continue;
       }
+      if (this.powerDown) {
+        c.state = 'power';
+        continue;
+      }
       if (c.wear >= 1) {
         c.state = 'broken';
         continue;
@@ -3112,6 +3333,7 @@ export class Sim {
         c.cd = Math.min(c.cd, mt) - dt;
         if (c.cd <= 0) {
           c.cd += mt;
+          c.moves = (c.moves ?? 0) + 1;
           if (this.level >= 2) this.addWear(c, WEAR_CRANE_PER_MOVE * this.wearMul);
           if (c.wear >= 1) this.noteBroken('Ein Kran');
           // Abwechselnd ent- und beladen, wenn beides geht
@@ -3293,7 +3515,7 @@ export class Sim {
         }
         case 'leaving':
           r.state = 'away';
-          r.timer = RAIL_INTERVAL_GM - 2 * RAIL_TRAVEL_GM - RAIL_STAY_GM;
+          r.timer = RAIL_INTERVAL_GM * (this.traits.includes('railhub') ? 0.67 : 1) - 2 * RAIL_TRAVEL_GM - RAIL_STAY_GM;
           break;
       }
     }
@@ -3301,7 +3523,7 @@ export class Sim {
 
   private updatePlants(dt: number) {
     for (const p of this.plants) {
-      if (p.build) continue;
+      if (p.build || this.powerDown) continue;
       const cfg = PLANTS[p.kind];
       if (p.proc > 0) {
         p.proc -= dt;
@@ -3782,7 +4004,7 @@ export class Sim {
     // Stimmung strebt ihrem Ziel zu
     const heads = (Object.keys(ROLES) as Role[]).reduce((n, r) => n + this.staff[r], 0);
     const sick = (Object.keys(ROLES) as Role[]).reduce((n, r) => n + this.sick[r].length, 0);
-    let target = 0.6 + WAGE_POLICY[this.wagePolicy].mood - (this.nightShift ? 0.08 : 0) - (this.tech.akkord ? 0.1 : 0) - (heads ? (sick / heads) * 0.3 : 0) - (this.strikeLeft > 0 ? 0.2 : 0);
+    let target = 0.6 + (this.traits.includes('union') ? 0.1 : 0) + WAGE_POLICY[this.wagePolicy].mood - (this.nightShift ? 0.08 : 0) - (this.tech.akkord ? 0.1 : 0) - (heads ? (sick / heads) * 0.3 : 0) - (this.strikeLeft > 0 ? 0.2 : 0);
     target = clamp(target, 0, 1);
     this.mood = clamp(this.mood + (target - this.mood) * 0.35, 0, 1);
     if (this.mood < 0.25 && this.level >= 2 && this.strikeLeft <= 0 && this.rnd() < 0.3) {
@@ -3798,6 +4020,21 @@ export class Sim {
       if (kind === 'boom') this.emit(`Konjunktur: Boom für ${this.cycle.left} Tage. Mehr Schiffe, höhere Gebühren, Gebrauchtes wird teurer.`, 'good');
       else if (kind === 'crisis') this.emit(`Konjunktur: Krise für ${this.cycle.left} Tage. Weniger Schiffe, niedrigere Gebühren, aber Gebrauchtes ist billig.`, 'bad');
       else this.emit('Konjunktur: Wieder normale Lage.', 'info');
+    }
+    // Weltereignisse: Handel und Politik
+    if (this.world) {
+      this.world.left--;
+      if (this.world.left <= 0) {
+        this.emit(`Vorbei: ${WORLD[this.world.id].name}.`, 'info');
+        this.world = null;
+      }
+    } else if (this.level >= 2 && this.rnd() < 0.12) {
+      const id = this.pick(Object.keys(WORLD) as WorldId[]);
+      const [a, b] = WORLD[id].days;
+      this.world = { id, left: a + Math.floor(this.rnd() * (b - a + 1)) };
+      if (id === 'embargo') this.world.product = this.pick(['elec', 'cloth', 'food'] as ProductId[]);
+      const extra = id === 'embargo' ? ` (${PRODUCTS[this.world.product!].name})` : '';
+      this.emit(`Weltlage: ${WORLD[id].name}${extra}. ${WORLD[id].text}. Dauer ${this.world.left} Tage.`, id === 'portstrike' || id === 'newroute' ? 'good' : 'bad');
     }
     // Gebrauchtmarkt: täglich wechselnde Ware
     const q = this.rnd();
@@ -3815,7 +4052,7 @@ export class Sim {
     }
     // Kontrolle durch Zoll und Arbeitsschutz
     if (this.level >= 2 && this.day >= this.nextInspect) {
-      this.nextInspect = this.day + 10 + Math.floor(this.rnd() * 8);
+      this.nextInspect = this.day + (this.traits.includes('freezone') ? 6 : 10) + Math.floor(this.rnd() * 8);
       const old = [...this.cranes, ...this.trucks].filter((o) => o.cap < 0.5).length;
       const tired = this.nightShift && this.mood < 0.4 ? 1 : 0;
       const bad = old + tired * 2;
@@ -3918,6 +4155,10 @@ export class Sim {
       usedMarket: this.usedMarket,
       nextInspect: this.nextInspect,
       sandbox: this.sandbox,
+      traits: this.traits,
+      world: this.world,
+      batteryCharge: this.batteryCharge,
+      rules: this.rules,
       trainLeft: this.trainLeft,
       tech: this.tech,
       megaDone: this.megaDone,
@@ -4026,6 +4267,10 @@ export class Sim {
     if (d.usedMarket) s.usedMarket = d.usedMarket;
     s.nextInspect = d.nextInspect ?? 12;
     s.sandbox = d.sandbox ?? false;
+    s.traits = d.traits ?? [];
+    s.world = d.world ?? null;
+    s.batteryCharge = d.batteryCharge ?? 0;
+    s.rules = d.rules ?? [];
     if (d.trainLeft) s.trainLeft = { ...s.trainLeft, ...d.trainLeft };
     s.bigShipsDone = d.bigShipsDone ?? 0;
     if (d.tech) s.tech = { ...s.tech, ...d.tech };

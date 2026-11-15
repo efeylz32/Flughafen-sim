@@ -28,9 +28,11 @@ export enum T {
   Rock = 10,
   Hazmat = 11,
   Empty = 12,
+  Solar = 13,
+  Battery = 14,
 }
 
-export type Tool = 'view' | 'kai' | 'crane' | 'lcrane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'road2' | 'hwy' | 'rtg' | 'hazard' | 'emptyyard' | 'fill' | 'assign' | 'copy' | 'paste' | 'zone' | 'oneway' | 'buyland' | 'demolish';
+export type Tool = 'view' | 'kai' | 'crane' | 'lcrane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'road2' | 'hwy' | 'solar' | 'battery' | 'rtg' | 'hazard' | 'emptyyard' | 'fill' | 'assign' | 'copy' | 'paste' | 'zone' | 'oneway' | 'buyland' | 'demolish';
 export type BuildTool = Exclude<Tool, 'view' | 'demolish' | 'assign' | 'copy' | 'paste' | 'zone' | 'oneway' | 'buyland'>;
 
 export const COST: Record<BuildTool, number> = {
@@ -50,6 +52,8 @@ export const COST: Record<BuildTool, number> = {
   workshop: 40_000,
   rtg: 60_000,
   road2: 1_800,
+  solar: 15_000,
+  battery: 40_000,
   hwy: 4_000,
   hazard: 12_000,
   emptyyard: 2_000,
@@ -73,6 +77,8 @@ export const UNLOCK: Record<BuildTool, number> = {
   workshop: 2,
   rtg: 3,
   road2: 2,
+  solar: 2,
+  battery: 3,
   hwy: 3,
   hazard: 3,
   emptyyard: 2,
@@ -461,3 +467,59 @@ export const ROAD_LANES = [1, 2, 2];
 export const ROAD_RUN = [0, 6, 20];
 /** Entfernungen werden in Zehnteln eines Feldes gerechnet, damit schnelle Straßen Bruchteile kosten */
 export const DIST_UNIT = 10;
+
+// ───────── Hafen-Eigenschaften: zwei zufällige Besonderheiten pro neuem Spiel ─────────
+export type TraitId = 'rocky' | 'stormy' | 'union' | 'freezone' | 'deepwater' | 'railhub' | 'coldregion' | 'cheapland';
+export const TRAITS: Record<TraitId, { name: string; text: string }> = {
+  rocky: { name: 'Fester Baugrund', text: 'Bauen kostet 15 % mehr' },
+  stormy: { name: 'Sturmküste', text: 'Deutlich mehr Stürme und Nebel' },
+  union: { name: 'Starke Gewerkschaft', text: 'Löhne +15 %, dafür bessere Stimmung' },
+  freezone: { name: 'Freihandelszone', text: 'Gebühren +10 %, aber öfter Kontrollen' },
+  deepwater: { name: 'Tiefes Fahrwasser', text: 'Baggern kostet 60 % weniger' },
+  railhub: { name: 'Bahnknoten', text: 'Züge kommen alle 4 statt 6 Stunden' },
+  coldregion: { name: 'Kühlregion', text: 'Mehr Schiffe mit Kühlfracht' },
+  cheapland: { name: 'Günstiges Hinterland', text: 'Land kostet 40 % weniger' },
+};
+
+// ───────── Weltereignisse: Handel und Politik ─────────
+export type WorldId = 'embargo' | 'portstrike' | 'tariff' | 'newroute' | 'canal';
+export const WORLD: Record<WorldId, { name: string; text: string; days: [number, number]; ships: number; fee: number }> = {
+  embargo: { name: 'Embargo', text: 'Eine Ware ist mit einem Embargo belegt: Ihr Preis bricht ein', days: [4, 7], ships: 1, fee: 1 },
+  portstrike: { name: 'Streik im Nachbarhafen', text: 'Reedereien weichen zu dir aus: deutlich mehr Schiffe', days: [3, 5], ships: 0.6, fee: 1 },
+  tariff: { name: 'Neuer Zoll', text: 'Neue Zölle drücken die Containergebühren um 10 %', days: [5, 8], ships: 1, fee: 0.9 },
+  newroute: { name: 'Neue Handelsroute', text: 'Eine neue Route bringt mehr Schiffe', days: [6, 10], ships: 0.8, fee: 1 },
+  canal: { name: 'Kanal gesperrt', text: 'Ein wichtiger Kanal ist blockiert: weniger Schiffe', days: [3, 6], ships: 1.5, fee: 1 },
+};
+
+// ───────── Strom ─────────
+/** Strompreis aus dem Netz in Euro pro kWh */
+export const POWER_PRICE = 0.3;
+/** Leistung einer Solarfläche bei Sonne in kW */
+export const SOLAR_KW = 30;
+/** Speicher einer Batterie in kWh */
+export const BATTERY_KWH = 400;
+/** Verbrauch in kW */
+export const POWER_KW = { light: 30, mobile: 50, bridge: 120, super: 160, rtg: 40, reeferTile: 8, plant: 40, cold: 60, gate: 5, shop: 10 };
+
+// ───────── Regeln für den Leitstand ─────────
+export type RuleCond = 'yardHigh' | 'yardLow' | 'shipsWait' | 'night' | 'day' | 'reeferHigh' | 'powerOut';
+export type RuleAct = 'role:auto' | 'role:crane' | 'role:out' | 'role:export' | 'role:plant' | 'shift:on' | 'shift:off';
+export const RULE_CONDS: Record<RuleCond, string> = {
+  yardHigh: 'Stapelplatz über 80 % voll',
+  yardLow: 'Stapelplatz unter 30 % voll',
+  shipsWait: 'Zwei oder mehr Schiffe warten',
+  night: 'Es ist Nacht (22 bis 6 Uhr)',
+  day: 'Es ist Tag',
+  reeferHigh: 'Kühlplätze über 70 % voll',
+  powerOut: 'Stromausfall',
+};
+export const RULE_ACTS: Record<RuleAct, string> = {
+  'role:auto': 'alle Trucks auf Automatik',
+  'role:crane': 'alle Trucks auf „Kran räumen“',
+  'role:out': 'alle Trucks auf „Ausgang“',
+  'role:export': 'alle Trucks auf „Export“',
+  'role:plant': 'alle Trucks auf „Verarbeitung“',
+  'shift:on': 'Nachtschicht einschalten',
+  'shift:off': 'Nachtschicht ausschalten',
+};
+export const MAX_RULES = 6;

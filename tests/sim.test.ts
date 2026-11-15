@@ -342,7 +342,7 @@ describe('Kühlfracht', () => {
     expect(sim.stock[i]).toBe(3);
     run(sim, 2);
     expect(sim.stock[i]).toBe(0);
-    expect(sim.money).toBe(money - 1500);
+    expect(sim.money).toBeCloseTo(money - 1500 - (sim.today.power ?? 0), 2);
   });
 });
 
@@ -1423,5 +1423,58 @@ describe('Sandbox', () => {
     expect(sim.status).toBe('free');
     const copy = Sim.deserialize(JSON.parse(JSON.stringify(sim.serialize())));
     expect(copy.sandbox).toBe(true);
+  });
+});
+
+describe('Eigenschaften, Weltlage, Strom, Regeln', () => {
+  it('Eigenschaften wirken und werden gespeichert', () => {
+    const sim = new Sim(3);
+    const base = sim.costOf('crane');
+    sim.traits = ['rocky', 'cheapland'];
+    expect(sim.costOf('crane')).toBeGreaterThan(base);
+    expect(sim.plotPrice).toBeLessThan(new Sim(3).plotPrice);
+    sim.rollTraits();
+    expect(sim.traits.length).toBe(2);
+    expect(sim.traits[0]).not.toBe(sim.traits[1]);
+    const copy = Sim.deserialize(JSON.parse(JSON.stringify(sim.serialize())));
+    expect(copy.traits).toEqual(sim.traits);
+  });
+
+  it('Embargo drückt den Preis einer Ware', () => {
+    const sim = new Sim();
+    const p = sim.price('elec');
+    sim.world = { id: 'embargo', left: 3, product: 'elec' };
+    expect(sim.price('elec')).toBeLessThan(p);
+  });
+
+  it('Strom kostet, Solar spart, Batterie überbrückt den Ausfall', () => {
+    const sim = basicPort(2, 1);
+    sim.level = 3;
+    sim.money = 1e7;
+    expect(sim.powerDemand()).toBeGreaterThan(0);
+    run(sim, 6);
+    expect(sim.today.power ?? 0).toBeGreaterThan(0);
+    // Ausfall ohne Batterie: Kräne stehen
+    sim.powerOutLeft = 60;
+    sim.tick();
+    expect(sim.powerDown).toBe(true);
+    run(sim, 1.2);
+    expect(sim.powerDown).toBe(false);
+    // Mit voller Batterie läuft alles weiter
+    sim.build('battery', 22, k + 2);
+    sim.batteryCharge = sim.batteryCap;
+    sim.powerOutLeft = 60;
+    sim.tick();
+    expect(sim.powerDown).toBe(false);
+    expect(sim.batteryCharge).toBeLessThan(sim.batteryCap);
+  });
+
+  it('Regeln greifen stündlich', () => {
+    const sim = basicPort(4, 1);
+    sim.gm = 1440 + 21.5 * 60; // kurz vor 22 Uhr
+    sim.addRule('night', 'role:out');
+    run(sim, 1.5);
+    expect(sim.trucks.every((t) => t.role === 'out')).toBe(true);
+    expect(sim.hourly.length).toBeGreaterThan(0);
   });
 });

@@ -29,6 +29,12 @@ import {
   sizeOf,
   SHIP_PATIENCE_GM,
   GOAL_LEVEL,
+  TRAITS,
+  WORLD,
+  RULE_CONDS,
+  RULE_ACTS,
+  RuleCond,
+  RuleAct,
   WAGE_POLICY,
   WagePolicy,
   SPECS,
@@ -56,6 +62,9 @@ const ICONS: Record<string, string> = {
   view: svg('<path d="M7 3.5l11 7-4.6 1.4 2.8 5.6-2.6 1.3-2.8-5.6L5.8 16z"/>'),
   kai: svg('<rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M3 9h18M7 9v4M12 9v4M17 9v4"/>'),
   crane: svg('<path d="M6 21V6M3 21h6M6 6h14M17 6v6"/><rect x="15" y="12" width="4" height="3" rx=".6"/><path d="M6 6l6-3"/>'),
+  solar: svg('<rect x="3" y="6" width="18" height="12" rx="1"/><path d="M3 12h18M9 6v12M15 6v12"/>'),
+  battery: svg('<rect x="3" y="7" width="16" height="10" rx="2"/><path d="M21 10v4M7 10v4M11 10v4"/>'),
+  monitor: svg('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4M6 12l3-3 3 2 5-5"/>'),
   copy: svg('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>'),
   paste: svg('<rect x="5" y="5" width="14" height="16" rx="2"/><path d="M9 5V3h6v2M9 12h6M9 16h4"/>'),
   road2: svg('<path d="M8 3v18M16 3v18"/><path d="M12 5v3M12 11v3M12 17v3" stroke-dasharray="1 2"/>'),
@@ -137,6 +146,8 @@ const TOOLS: ToolDef[] = [
   { cat: 'store', tool: 'emptyyard', label: 'Leerlager', sub: '2k', color: '#7d8da0' },
   { cat: 'build', tool: 'fill', label: 'Befüllhalle', sub: '110k · 3×2', color: '#3f9a6b' },
   { cat: 'build', tool: 'cold', label: 'Kühlhalle', sub: '80k · 2×2', color: '#3b9bd6' },
+  { cat: 'build', tool: 'solar', label: 'Solar', sub: '15k', color: '#f2c230' },
+  { cat: 'build', tool: 'battery', label: 'Batterie', sub: '40k', color: '#2f9e6b' },
   { cat: 'build', tool: 'workshop', label: 'Werkstatt', sub: '40k · 2×2', color: '#5b6b82' },
   { cat: 'build', tool: 'rail', label: 'Gleis', sub: '150k', color: '#5f6f82' },
   { cat: 'land', tool: 'oneway', label: 'Einbahn', sub: 'Gratis', color: '#4b525c' },
@@ -226,6 +237,11 @@ export class UI {
   private achModal!: HTMLElement;
   private zonePick!: HTMLElement;
   private rotPick!: HTMLElement;
+  private ctlModal!: HTMLElement;
+  private ctlBody!: HTMLElement;
+  private ctlTab: 'overview' | 'devices' | 'rules' | 'power' = 'overview';
+  private ctlKey = '';
+  private newRule: { cond: RuleCond; act: RuleAct } = { cond: 'yardHigh', act: 'role:out' };
   private ghostBar!: HTMLElement;
   private ghostKey = '';
   private usedPick!: HTMLElement;
@@ -395,13 +411,18 @@ export class UI {
     });
     this.techBadge = el('span', 'badge hidden', '!');
     techBtn.appendChild(this.techBadge);
+    const ctlBtn = mk(ICONS.monitor, 'Leitstand', () => {
+      this.ctlModal.classList.remove('hidden');
+      this.renderCtl(true);
+      click();
+    });
     const finBtn = mk(ICONS.chart, 'Bilanz und Statistik', () => {
       this.toggleCard(this.finCard);
       click();
     });
     this.soundBtn = mk(ICONS.sound, 'Ton an oder aus', () => this.game.toggleSound());
     const menuBtn = mk(ICONS.menu, 'Menü', () => this.showMenu());
-    side.append(this.undoBtn, this.dealBtn, this.staffBtn, techBtn, this.overlayBtn, finBtn, this.soundBtn, menuBtn);
+    side.append(this.undoBtn, this.dealBtn, this.staffBtn, techBtn, ctlBtn, this.overlayBtn, finBtn, this.soundBtn, menuBtn);
 
     // Info-Blatt
     this.sheet = el('div', 'sheet hidden');
@@ -536,6 +557,43 @@ export class UI {
       this.renderDeals(true);
     });
 
+    // Leitstand: Verläufe, Anlagen, Regeln, Strom
+    this.ctlModal = el('div', 'modal hidden');
+    this.ctlModal.innerHTML = `<div class="dialog deals ctl"><div class="dhead"><h2>Leitstand</h2><button class="x" aria-label="Schließen">${ICONS.close}</button></div><div class="tabs ctltabs">${[
+      ['overview', 'Verlauf'],
+      ['devices', 'Anlagen'],
+      ['rules', 'Regeln'],
+      ['power', 'Strom'],
+    ]
+      .map(([k, n]) => `<button data-tab="${k}">${n}</button>`)
+      .join('')}</div><div class="body"></div></div>`;
+    this.ctlBody = this.ctlModal.querySelector('.body')!;
+    this.ctlModal.querySelector('.x')!.addEventListener('click', () => this.ctlModal.classList.add('hidden'));
+    this.ctlModal.addEventListener('click', (e) => {
+      const t = e.target as HTMLElement;
+      if (t === this.ctlModal) return this.ctlModal.classList.add('hidden');
+      const tab = t.closest<HTMLElement>('[data-tab]');
+      if (tab) this.ctlTab = tab.dataset.tab as typeof this.ctlTab;
+      const sim = this.game.sim;
+      const ra = t.closest<HTMLElement>('[data-rule]');
+      if (ra) {
+        const [what, idx] = ra.dataset.rule!.split(':');
+        const i = Number(idx);
+        if (what === 'del') sim.rules.splice(i, 1);
+        else if (what === 'toggle') sim.rules[i].on = !sim.rules[i].on;
+        else if (what === 'add') {
+          const r = sim.addRule(this.newRule.cond, this.newRule.act);
+          if (!r.ok) this.game.fail(r.reason ?? 'Nicht möglich');
+        }
+      }
+      this.renderCtl(true);
+    });
+    this.ctlModal.addEventListener('change', (e) => {
+      const t = e.target as HTMLSelectElement;
+      if (t.name === 'cond') this.newRule.cond = t.value as RuleCond;
+      if (t.name === 'act') this.newRule.act = t.value as RuleAct;
+    });
+
     // Verbesserungen
     this.techModal = el('div', 'modal hidden');
     this.techModal.innerHTML = `<div class="dialog deals"><div class="dhead"><h2>Verbesserungen</h2><button class="x" aria-label="Schließen">${ICONS.close}</button></div><div class="body"></div></div>`;
@@ -609,7 +667,7 @@ export class UI {
       this.game.setSpeed(this.speedBeforeModal);
     });
 
-    root.append(top, left, side, this.sheet, bar, this.ghostBar, this.toasts, this.menu, this.deals, this.techModal, this.staffModal, this.finCard, this.endModal, this.decision, this.levelUp, this.buildAchModal());
+    root.append(top, left, side, this.sheet, bar, this.ghostBar, this.toasts, this.menu, this.deals, this.ctlModal, this.techModal, this.staffModal, this.finCard, this.endModal, this.decision, this.levelUp, this.buildAchModal());
     this.refreshSpeed();
     this.refreshTools();
     this.refreshOverlay();
@@ -786,6 +844,7 @@ export class UI {
             <div><span>Modus</span><b>${sc ? sc.name : sim.sandbox ? `Sandbox, ${MAPS[sim.map].name}` : `${DIFFS[sim.diff].name}, ${MAPS[sim.map].name}`}</b></div>
             <div><span>Ziel</span><b>${sim.status === 'free' ? 'ohne Wertung' : sc ? `${sc.goal} bis Tag ${sim.goalDay}` : `Stufe ${GOAL_LEVEL} bis Tag ${sim.goalDay}`}</b></div>
             <div><span>Aufträge</span><b>${sim.contracts.length} Verträge · ${sim.shipsDone} Schiffe</b></div>
+            ${sim.traits.length ? `<div class="wide"><span>Besonderheiten</span><b>${sim.traits.map((t) => `${TRAITS[t].name}: ${TRAITS[t].text}`).join(' · ')}</b></div>` : ''}
           </div>
           <button class="primary" data-act="close">Weiterspielen</button>
           <button class="secondary" data-act="view" data-arg="saves">Speichern und Laden</button>
@@ -1144,6 +1203,7 @@ export class UI {
     this.staffBadge.classList.toggle('hidden', !short);
     if (!this.staffModal.classList.contains('hidden')) this.renderStaff(false);
     if (!this.techModal.classList.contains('hidden')) this.renderTech(false);
+    if (!this.ctlModal.classList.contains('hidden')) this.renderCtl(false);
     this.techBadge.classList.toggle('hidden', !TECH_IDS.some((id) => sim.canBuyTech(id).ok && sim.money > 2 * sim.canBuyTech(id).cost));
 
     // Mission
@@ -1180,7 +1240,7 @@ export class UI {
   private renderFinance(sim: Sim) {
     const d = sim.today;
     const income = (b: typeof d) => b.fees + b.rail + b.exportFees + b.berth + b.bonus;
-    const costs = (b: typeof d) => b.running + b.building + b.penalty + b.wages + b.interest;
+    const costs = (b: typeof d) => b.running + b.building + b.penalty + b.wages + b.interest + (b.power ?? 0);
     const inc = income(d);
     const exp = costs(d);
     const row = (label: string, v: number) => (v ? `<div class="fl sub"><span>${label}</span><span>${eur(v)}</span></div>` : '');
@@ -1216,11 +1276,13 @@ export class UI {
       ${row('Container am Gate', d.fees)}${row('Container per Bahn', d.rail)}${row('Export aufs Schiff', d.exportFees)}
       ${row('Liegegebühren', d.berth)}${row('Vertrags- und Stufenbonus', d.bonus)}
       <div class="fl"><b>Ausgaben</b><b>${eur(exp)}</b></div>
-      ${row('Löhne', d.wages)}${row('Bau und Aufrüstung', d.building)}${row('Strafen', d.penalty)}${row('Wartung (Tagesabschluss)', d.running)}${row('Zinsen (Tagesabschluss)', d.interest)}
+      ${row('Löhne', d.wages)}${row('Bau und Aufrüstung', d.building)}${row('Strafen', d.penalty)}${row('Wartung (Tagesabschluss)', d.running)}${row('Zinsen (Tagesabschluss)', d.interest)}${row('Strom aus dem Netz', d.power ?? 0)}
       <div class="fl total"><b>Ergebnis heute</b><b class="${inc - exp >= 0 ? 'pos' : 'neg'}">${eur(inc - exp)}</b></div>
       <div class="fl sub"><span>Laufend pro Tag: Wartung / Löhne</span><span>${eur(sim.runningCost())} / ${eur((Object.keys(ROLES) as Role[]).reduce((n, r) => n + sim.staff[r] * sim.wagePerHour(r) * 24, 0))}</span></div>
       ${sim.level >= 2 ? `<h3>Konkurrenz</h3><div class="fl sub"><span>${RIVAL_NAME}: pünktlich</span><span>${Math.round(sim.rivalRate * 100)} %</span></div><div class="fl sub"><span>Du gestern</span><span class="${sim.myRate !== null && sim.myRate < sim.rivalRate - 0.1 ? 'neg' : ''}">${sim.myRate === null ? '–' : `${Math.round(sim.myRate * 100)} %`}</span></div><p class="sub">Liegst du mehr als 10 Punkte darunter, wechseln Reedereien und es kommen weniger freie Schiffe.${sim.lostToRival ? ` Bisher verloren: ${sim.lostToRival} Verträge.` : ''}</p>` : ''}
       <h3>Lage</h3>
+      <div class="fl sub"><span>Weltlage</span><span class="${sim.world ? 'neg' : ''}">${sim.world ? `${WORLD[sim.world.id].name}${sim.world.product ? ` (${PRODUCTS[sim.world.product].name})` : ''}, noch ${sim.world.left} Tage` : 'ruhig'}</span></div>
+      ${sim.traits.length ? `<div class="fl sub"><span>Hafen</span><span>${sim.traits.map((t) => TRAITS[t].name).join(', ')}</span></div>` : ''}
       <div class="fl sub"><span>Konjunktur</span><span class="${sim.cycle.kind === 'crisis' ? 'neg' : sim.cycle.kind === 'boom' ? 'pos' : ''}">${sim.cycleInfo.name} (noch ${sim.cycle.left} ${sim.cycle.left === 1 ? 'Tag' : 'Tage'})</span></div>
       <div class="fl sub"><span>Jahreszeit</span><span>${sim.season.name}: ${sim.season.text}</span></div>
       <div class="fl sub"><span>Richtung</span><span>${sim.spec ? SPECS[sim.spec].name : sim.level >= 3 ? 'noch offen' : 'ab Stufe 3'}</span></div>
@@ -1348,6 +1410,79 @@ export class UI {
       </div>${condText ? `<div class="meta">${condText}</div>` : ''}${active && c.missed ? '<div class="warn">Verwarnt: Der nächste verpasste Anlauf beendet den Vertrag.</div>' : ''}${need}${btn}</div>`;
   }
 
+  /** Kleine Verlaufskurve als SVG */
+  private spark(vals: number[], max: number, color: string, label: string, fmt: (v: number) => string): string {
+    const w = 260;
+    const h = 46;
+    const m = Math.max(max, 1e-9);
+    const n = vals.length;
+    const pts = vals.map((v, i) => `${n < 2 ? 0 : (i / (n - 1)) * w},${h - 3 - (Math.min(v, m) / m) * (h - 6)}`).join(' ');
+    const last = vals.at(-1) ?? 0;
+    return `<div class="spark"><div class="sl"><span>${label}</span><b>${fmt(last)}</b></div><svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linejoin="round"/></svg></div>`;
+  }
+
+  private renderCtl(force: boolean) {
+    const sim = this.game.sim;
+    const key = `${this.ctlTab}|${sim.hourly.length}|${sim.tickCount >> 6}|${sim.rules.map((r) => `${r.cond}${r.act}${r.on}`).join()}`;
+    if (!force && key === this.ctlKey) return;
+    this.ctlKey = key;
+    for (const b of this.ctlModal.querySelectorAll<HTMLElement>('[data-tab]')) b.classList.toggle('on', b.dataset.tab === this.ctlTab);
+    const pct = (v: number) => `${Math.round(v * 100)} %`;
+    const H = sim.hourly;
+    let html = '';
+    if (this.ctlTab === 'overview') {
+      html = H.length < 2
+        ? '<p class="sub">Die Messwerte sammeln sich stündlich. Lass das Spiel ein paar Stunden laufen.</p>'
+        : `<p class="sub">Die letzten ${H.length} Stunden.</p>
+          ${this.spark(H.map((h) => h.done), Math.max(...H.map((h) => h.done), 1), '#2f6db0', 'Container pro Stunde', (v) => String(v))}
+          ${this.spark(H.map((h) => h.yard), 1, '#c9a227', 'Stapelplatz belegt', pct)}
+          ${this.spark(H.map((h) => h.wait), Math.max(...H.map((h) => h.wait), 3), '#d9473f', 'Wartende Schiffe', (v) => String(v))}
+          ${this.spark(H.map((h) => h.idle), 1, '#7d8da0', 'Trucks ohne Auftrag', pct)}
+          ${this.spark(H.map((h) => h.jam), 1, '#e8602c', 'Trucks im Stau', pct)}`;
+    } else if (this.ctlTab === 'devices') {
+      const avg = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
+      html = `<h3>Kräne</h3><table class="ctltab"><tr><th>Kran</th><th>letzte Std.</th><th>Ø 24 Std.</th><th>Zustand</th></tr>${sim.cranes
+        .map((c, i) => {
+          const h = sim.craneHist.get(c.id) ?? [];
+          return `<tr><td>${i + 1}. ${CRANE_MODELS[c.model].name}</td><td>${h.at(-1) ?? 0}</td><td>${avg(h).toFixed(1)}</td><td class="${c.wear > 0.75 ? 'neg' : ''}">${Math.round((1 - c.wear) * 100)} %</td></tr>`;
+        })
+        .join('')}</table>
+        <h3>Gates</h3><table class="ctltab"><tr><th>Gate</th><th>letzte Std.</th><th>Ø 24 Std.</th><th>Warten</th></tr>${sim.gates
+          .map((g, i) => {
+            const h = sim.gateHist.get(g.id) ?? [];
+            return `<tr><td>${i + 1}. Gate</td><td>${h.at(-1) ?? 0}</td><td>${avg(h).toFixed(1)}</td><td>${g.apron.length}</td></tr>`;
+          })
+          .join('')}</table>
+        <h3>Hallen</h3><table class="ctltab"><tr><th>Halle</th><th>Eingang</th><th>Ausgang</th><th>Gesamt</th></tr>${sim.plants
+          .map((p) => `<tr><td>${PLANTS[p.kind].name}</td><td>${p.inBuf}</td><td>${p.outBuf}</td><td>${num(p.made)}</td></tr>`)
+          .join('') || '<tr><td colspan="4">Keine</td></tr>'}</table>`;
+    } else if (this.ctlTab === 'rules') {
+      const opt = <K extends string>(rec: Record<K, string>, sel: K) =>
+        (Object.keys(rec) as K[]).map((k) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${rec[k]}</option>`).join('');
+      html = `<p class="sub">Regeln werden jede Spielstunde geprüft. Ist die Bedingung erfüllt, führt der Leitstand die Aktion aus. Spätere Regeln gewinnen bei Widerspruch.</p>
+        ${sim.rules
+          .map(
+            (r, i) => `<div class="rule ${r.on ? '' : 'off'}"><span><b>Wenn</b> ${RULE_CONDS[r.cond]} <b>dann</b> ${RULE_ACTS[r.act]}</span><div class="ruleb"><button class="secondary" data-rule="toggle:${i}">${r.on ? 'Aus' : 'An'}</button><button class="secondary" data-rule="del:${i}">Löschen</button></div></div>`,
+          )
+          .join('') || '<p class="sub">Noch keine Regel.</p>'}
+        <div class="rule new"><label>Wenn <select name="cond">${opt(RULE_CONDS, this.newRule.cond)}</select></label><label>dann <select name="act">${opt(RULE_ACTS, this.newRule.act)}</select></label><button class="primary" data-rule="add:0">Regel hinzufügen</button></div>`;
+    } else {
+      const kw = sim.powerDemand();
+      const sol = sim.solarNow();
+      const cap = sim.batteryCap;
+      html = `<div class="statecard">
+          <div><span>Verbrauch</span><b>${Math.round(kw)} kW</b></div>
+          <div><span>Solar gerade</span><b>${Math.round(sol)} kW</b></div>
+          <div><span>Batterie</span><b>${cap ? `${Math.round(sim.batteryCharge)} von ${cap} kWh` : 'keine'}</b></div>
+          <div><span>Netzpreis</span><b>0,30 € pro kWh</b></div>
+          <div class="wide"><span>Status</span><b class="${sim.powerOutLeft > 0 ? 'neg' : ''}">${sim.powerOutLeft > 0 ? (sim.powerDown ? 'Stromausfall: Kräne und Hallen stehen' : 'Stromausfall: Batterien überbrücken') : 'Netz stabil'}</b></div>
+        </div>
+        ${H.length > 1 ? this.spark(H.map((h) => h.kw), Math.max(...H.map((h) => h.kw), 1), '#d9473f', 'Verbrauch (kW)', (v) => String(Math.round(v))) + this.spark(H.map((h) => h.solar), Math.max(...H.map((h) => h.kw), 1), '#f2c230', 'Solar (kW)', (v) => String(Math.round(v))) : ''}
+        <p class="sub">Solarflächen (Gebäude-Reiter) liefern bei Sonne je 30 kW und senken die Stromrechnung. Batterien speichern 400 kWh und überbrücken Stromausfälle, ohne sie stehen Kräne und Hallen, und Kühlcontainer verderben schneller.</p>`;
+    }
+    this.ctlBody.innerHTML = html;
+  }
+
   private renderTech(force: boolean) {
     const sim = this.game.sim;
     const key = `${sim.level}|${Math.floor(sim.money / 5000)}|${TECH_IDS.map((id) => sim.tech[id]).join(',')}`;
@@ -1444,6 +1579,8 @@ export class UI {
             ? 'Blockiert: Container am Kran warten auf einen Truck'
             : c.state === 'storm'
               ? 'Steht wegen Sturm still'
+              : c.state === 'power'
+                ? 'Stromausfall: steht still'
               : 'Wartet auf ein Schiff';
       html = `<h3>${CRANE_MODELS[c.model].name} <span class="tag">${Math.round(movesPerHour(c.model) * (1 + 0.1 * sim.tech.spreader) * (sim.tech.akkord ? 1.2 : 1) * (sim.spec === 'hub' ? 1.15 : sim.spec === 'logi' ? 0.95 : 1))} Moves pro Stunde</span></h3>
         ${c.build ? buildRow(c.build, 'Im Bau oder Umbau') : `<div class="meta">${c.state === 'broken' ? 'Ausgefallen: wartet auf die Werkstatt' : st}</div>`}
