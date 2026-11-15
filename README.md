@@ -20,7 +20,9 @@ Das Spielkonzept steht im Doc „Hafen-Imperium: Spielkonzept“.
 Der Aufstiegsbonus ist klein (40.000 € bis 600.000 €). Löhne steigen je Stufe um 8 % (Tariflohn).
 
 - **Export:** Schiffe wollen auch beladen werden. Export-Container kommen über das Gate, Trucks bringen sie zum Kran (250 € pro Stück).
-- **Verträge:** Feste Anläufe einer Reederei. Pünktlich abgefertigt gibt es Bonus, sonst Strafe.
+- **Schiffe und Verträge:** Ohne Vertrag kommen nur Küstenfrachter mit 60 Containern. Feeder, Panamax und Mega-Frachter kommen nur als Dauerauftrag nach Fahrplan (ab Stufe 1 ein Vertrag, je Stufe einer mehr). Pünktlich gibt es Bonus, sonst Strafe. Zweimal in Folge zu spät: Die Reederei kündigt, Ruf −5.
+- **Kranmodelle:** Leichtkran (40k, 13 Moves/h), Mobilkran (80k, 20), Containerbrücke (Aufrüstung ab Stufe 2, 40, zwei Felder), Super-Brücke (Aufrüstung ab Stufe 4, 60). Jedes Modell hat eigene Betriebskosten und Pufferplätze.
+- **Verbesserungen:** Kleine Upgrades in Stufen (Knopf mit dem Zahnrad): Twin-Spreader, Gate-Scanner, Stapeltechnik, Vertrieb, Leitstelle, Motoren, Kühltechnik, Wartungsplan. Jede Stufe kostet mehr und braucht eine Mindest-Hafenstufe.
 - **Wetter:** Bei Sturm stehen die Kräne (die Liegezeit läuft dann nicht), bei Nebel läuft kein Schiff ein. Es gibt zwei Stunden Vorwarnung.
 - **Kühlfracht:** Kühlcontainer brauchen Kühlplätze und verderben dort nach 10 Stunden. Sie bringen 400 €.
 - **Bahn:** Gleisanschluss am rechten Kartenrand. Alle 6 Stunden holt ein Zug bis zu 40 Container.

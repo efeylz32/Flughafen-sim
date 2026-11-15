@@ -89,7 +89,7 @@ class Bot {
     }
     // Verträge, solange die Pünktlichkeit stimmt
     const rate = s.myRate ?? 1;
-    if (s.level >= 2 && rate >= 0.75 && s.contracts.length < s.maxContracts) {
+    if (rate >= 0.4 && s.contracts.length < s.maxContracts) {
       const o = s.offers.find((o) => o.ship === 'feeder' && !o.reefer);
       if (o) s.acceptContract(o.id);
     }
@@ -108,9 +108,14 @@ class Bot {
     if (st.gate > 0.8 && s.money > 20_000 + reserve && this.gateSlots.length) this.try('gate', this.gateSlots.shift()!, k + 8);
     if (st.yard > 0.75 && s.money > 12_000 + reserve) this.addYardRow();
     if (st.trucks > 0.85 && s.jamShare < 0.2 && s.money > 25_000 + reserve && s.trucks.length < 40) this.try('truck', 2 + (s.trucks.length % 17), k + 1);
+    // Kleine Verbesserungen, wenn Geld übrig ist
+    for (const id of ['spreader', 'scanner', 'engine', 'radio', 'stack', 'sales', 'maint'] as const) {
+      const c = s.canBuyTech(id);
+      if (c.ok && s.money > c.cost * 3 + reserve) s.buyTech(id);
+    }
     if (st.crane > 0.9 && s.money > 150_000 + reserve) {
-      const c = s.cranes.find((c) => !c.big);
-      if (s.level >= 2 && c) s.upgrade('crane', c.id);
+      const c = s.cranes.find((c) => s.canUpgrade('crane', c.id).ok);
+      if (c) s.upgrade('crane', c.id);
       else {
         const x = this.craneSlots.find((x) => x < this.kaiEnd && !s.craneAt(x, k));
         if (x !== undefined) this.try('crane', x, k);

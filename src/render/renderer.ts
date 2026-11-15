@@ -1,5 +1,5 @@
 import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture, TilingSprite } from 'pixi.js';
-import { DIFFS, SHIP_PATIENCE_GM, TRUCK_PATIENCE_GM, ZONES, COAST_ROW, CRANE_BUFFER, CRANE_BUFFER_BIG, CRANE_EXP_BUFFER, GRID_H, GRID_W, MapId, MIN_PER_DAY, PLOT_W, RAIL_CAP, RAIL_TRAVEL_GM, dimsOf, T, TICK_GM, TILE, YARD_CAP_PER_TILE, RTG_CAP } from '../sim/data';
+import { CRANE_MODELS, DIFFS, SHIP_PATIENCE_GM, TRUCK_PATIENCE_GM, ZONES, COAST_ROW, CRANE_EXP_BUFFER, GRID_H, GRID_W, MapId, MIN_PER_DAY, PLOT_W, RAIL_CAP, RAIL_TRAVEL_GM, dimsOf, T, TICK_GM, TILE, YARD_CAP_PER_TILE, RTG_CAP } from '../sim/data';
 import type { Crane, Rail, Ship, Sim, Truck } from '../sim/sim';
 import { N as QN, S as QS_, W as QW, qOf, qOfWater, qTile, sideOf, OUT, Q_MAX } from '../sim/quay';
 /** Drehung der Kai-Grafik: Wasser liegt im Norden, Süden, Westen oder Osten */
@@ -131,6 +131,7 @@ interface CraneView {
   exp: Sprite[];
   key: string;
   big: boolean;
+  model: string;
   pos: number;
 }
 interface TrainView {
@@ -1275,11 +1276,12 @@ export class Renderer {
     root.rotation = SIDE_ANGLE[side] ?? 0;
     if (side === QS_ || side === QW) root.scale.x = -1;
     // Mobilkran: orange. Containerbrücke: blau, mit längerem und breiterem Ausleger
-    const main = c.big ? 0x2f6db0 : 0xe2582c;
+    // Farbe und Größe je Modell: Leichtkran gelb und kurz, Super-Brücke grün und lang
+    const main = CRANE_MODELS[c.model].color;
     const dark = shade(main, 0.7);
     const light = tint(main, 0.35);
-    const top = c.big ? -70 : -60;
-    const bw = c.big ? 11 : 9;
+    const top = { light: -50, mobile: -60, bridge: -70, super: -82 }[c.model];
+    const bw = { light: 7.5, mobile: 9, bridge: 11, super: 13 }[c.model];
     // Breite: Mobilkran ein Feld, Containerbrücke zwei Felder
     const cw = c.big ? 2 * TILE : TILE;
     const mid = cw / 2;
@@ -1338,19 +1340,19 @@ export class Renderer {
 
     // Am Fuß des Krans: unten entladene Container, darüber Export fürs Schiff
     const buffer: Sprite[] = [];
-    for (let k = 0; k < (c.big ? CRANE_BUFFER_BIG : CRANE_BUFFER); k++) {
+    for (let k = 0; k < CRANE_MODELS[c.model].buffer; k++) {
       const s = this.box(this.boxV, 0xffffff, 1.6 + k * 7.4 + (c.big ? 1.2 : 0), 22.2, 0.8);
       s.visible = false;
       buffer.push(s);
     }
     const exp: Sprite[] = [];
-    for (let k = 0; k < (c.big ? CRANE_BUFFER_BIG : CRANE_EXP_BUFFER); k++) {
+    for (let k = 0; k < (c.big ? CRANE_MODELS[c.model].buffer : CRANE_EXP_BUFFER); k++) {
       const s = this.box(this.boxV, EXPORT_BOX, 2.4 + k * 7.2 + (c.big ? 1.2 : 0), 12.6, 0.7);
       s.visible = false;
       exp.push(s);
     }
     root.addChild(shadow, ...buffer, g, ...exp, trolley, lamp);
-    return { root, trolley, hook, lamp, buffer, exp, key: '', big: c.big, pos: 0 };
+    return { root, trolley, hook, lamp, buffer, exp, key: '', big: c.big, model: c.model, pos: 0 };
   }
 
   private syncCranes(sim: Sim, a: number, view: View) {
@@ -1358,7 +1360,7 @@ export class Renderer {
     for (const c of sim.cranes) {
       seen.add(c.id);
       let v = this.cranes.get(c.id);
-      if (v && v.big !== c.big) {
+      if (v && v.model !== c.model) {
         v.root.destroy({ children: true });
         v = undefined;
       }

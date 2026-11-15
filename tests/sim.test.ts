@@ -99,7 +99,8 @@ describe('Container-Fluss', () => {
     const onCranes = sim.cranes.reduce((n, c) => n + c.buffer, 0);
     const onTrucks = sim.trucks.reduce((n, t) => n + t.load, 0);
     const onGates = sim.gates.reduce((n, g) => n + g.apron.length + (g.proc > 0 ? 1 : 0), 0);
-    const total = 120 * (sim.shipsDone + sim.ships.filter((s) => s.state !== 'leaving').length);
+    // Ohne Vertrag kommen nur Küstenfrachter mit 60 Containern
+    const total = 60 * (sim.shipsDone + sim.ships.filter((s) => s.state !== 'leaving').length);
     expect(onShips + onCranes + onTrucks + sim.yardStock + onGates + sim.containersDone).toBe(total);
   });
 });
@@ -943,7 +944,7 @@ describe('Kai an mehreren Küsten', () => {
     const sim = basicPort(0, 1);
     const c = sim.cranes[0];
     expect(sim.bufCap(c)).toBe(4);
-    c.big = true;
+    sim.setModel(c, 'bridge');
     expect(sim.bufCap(c)).toBe(8);
   });
 });
@@ -983,5 +984,79 @@ describe('Einbahnstraße', () => {
     sim.oneway[tile] = 0;
     expect(sim.laneCap(tile, 0)).toBe(2);
     expect(sim.laneCap(tile, 2)).toBe(1);
+  });
+});
+
+describe('Kranmodelle', () => {
+  it('Leichtkran ist billiger und langsamer, Aufrüsten führt durch alle Modelle', () => {
+    const sim = new Sim();
+    sim.money = 5_000_000;
+    for (let x = 4; x < 10; x++) sim.build('kai', x, k);
+    const before = sim.money;
+    expect(sim.build('lcrane', 5, k).ok).toBe(true);
+    expect(before - sim.money).toBe(40_000);
+    const c = sim.cranes[0];
+    expect(c.model).toBe('light');
+    const slow = sim.moveTime(c);
+    sim.upgrade('crane', c.id);
+    expect(c.model).toBe('mobile');
+    expect(sim.moveTime(c)).toBeLessThan(slow);
+    expect(sim.canUpgrade('crane', c.id).ok).toBe(false); // Containerbrücke erst ab Stufe 2
+    sim.level = 4;
+    sim.upgrade('crane', c.id);
+    expect(c.model).toBe('bridge');
+    expect(c.big).toBe(true);
+    sim.upgrade('crane', c.id);
+    expect(c.model).toBe('super');
+    expect(sim.canUpgrade('crane', c.id).ok).toBe(false);
+    // Abriss und Rückgängig behalten das Modell
+    const d = sim.demolish(5, k);
+    sim.undoDemolish(d.removed);
+    expect(sim.cranes[0].model).toBe('super');
+    const copy = Sim.deserialize(JSON.parse(JSON.stringify(sim.serialize())));
+    expect(copy.cranes[0].model).toBe('super');
+  });
+});
+
+describe('Verbesserungen', () => {
+  it('kosten Geld, brauchen die Hafenstufe und wirken', () => {
+    const sim = basicPort(0, 1);
+    sim.money = 1_000_000;
+    const c = sim.cranes[0];
+    const mt = sim.moveTime(c);
+    expect(sim.buyTech('spreader').ok).toBe(true);
+    expect(sim.moveTime(c)).toBeLessThan(mt);
+    expect(sim.buyTech('stack').ok).toBe(false); // ab Stufe 2
+    sim.level = 3;
+    expect(sim.buyTech('stack').ok).toBe(true);
+    const tile = sim.yardTileList[0];
+    expect(sim.capAt(tile)).toBe(7);
+    const copy = Sim.deserialize(JSON.parse(JSON.stringify(sim.serialize())));
+    expect(copy.tech.stack).toBe(1);
+  });
+});
+
+describe('Schiffe und Verträge', () => {
+  it('ohne Vertrag kommen nur Küstenfrachter, Angebote gibt es schon auf Stufe 1', () => {
+    const sim = basicPort(4, 1);
+    run(sim, 30);
+    expect(sim.shipsDone + sim.ships.length).toBeGreaterThan(0);
+    expect([...sim.ships].every((s) => s.type === 'coaster')).toBe(true);
+    expect(sim.offers.length + sim.contracts.length).toBeGreaterThan(0);
+    expect(sim.maxContracts).toBe(1);
+  });
+
+  it('zweimal unpünktlich: Die Reederei kündigt', () => {
+    const sim = basicPort(0, 1);
+    run(sim, 1);
+    const o = sim.offers[0];
+    sim.acceptContract(o.id);
+    const rep = sim.rep;
+    const priv = sim as unknown as { settleContract(s: { contractId: number }, on: boolean): void };
+    priv.settleContract({ contractId: o.id }, false);
+    expect(sim.contracts.length).toBe(1);
+    priv.settleContract({ contractId: o.id }, false);
+    expect(sim.contracts.length).toBe(0);
+    expect(sim.rep).toBeLessThan(rep);
   });
 });

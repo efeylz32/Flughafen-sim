@@ -28,12 +28,13 @@ export enum T {
   Rock = 10,
 }
 
-export type Tool = 'view' | 'kai' | 'crane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'rtg' | 'assign' | 'zone' | 'oneway' | 'buyland' | 'demolish';
+export type Tool = 'view' | 'kai' | 'crane' | 'lcrane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'rtg' | 'assign' | 'zone' | 'oneway' | 'buyland' | 'demolish';
 export type BuildTool = Exclude<Tool, 'view' | 'demolish' | 'assign' | 'zone' | 'oneway' | 'buyland'>;
 
 export const COST: Record<BuildTool, number> = {
   kai: 5_000,
   crane: 80_000,
+  lcrane: 40_000,
   road: 500,
   yard: 1_000,
   reefer: 4_000,
@@ -51,6 +52,7 @@ export const COST: Record<BuildTool, number> = {
 export const UNLOCK: Record<BuildTool, number> = {
   kai: 1,
   crane: 1,
+  lcrane: 1,
   road: 1,
   yard: 1,
   gate: 1,
@@ -64,8 +66,36 @@ export const UNLOCK: Record<BuildTool, number> = {
   workshop: 2,
   rtg: 3,
 };
+/** Kranmodelle. Aufrüsten führt jeweils zum nächsten Modell. */
+export type CraneModel = 'light' | 'mobile' | 'bridge' | 'super';
+export const CRANE_MODELS: Record<
+  CraneModel,
+  { name: string; move: number; run: number; buffer: number; big: boolean; next: CraneModel | null; upCost: number; upLevel: number; color: number; text: string }
+> = {
+  light: { name: 'Leichtkran', move: 4.5, run: 600, buffer: 3, big: false, next: 'mobile', upCost: 50_000, upLevel: 1, color: 0xe0a526, text: 'Billig und genügsam, aber langsam' },
+  mobile: { name: 'Mobilkran', move: 3, run: 1_200, buffer: 4, big: false, next: 'bridge', upCost: 120_000, upLevel: 2, color: 0xe2582c, text: 'Der Standard für kleine Liegeplätze' },
+  bridge: { name: 'Containerbrücke', move: 1.5, run: 2_500, buffer: 8, big: true, next: 'super', upCost: 200_000, upLevel: 4, color: 0x2f6db0, text: 'Steht auf zwei Kai-Feldern, doppelt so schnell' },
+  super: { name: 'Super-Brücke', move: 1, run: 3_800, buffer: 10, big: true, next: null, upCost: 0, upLevel: 0, color: 0x1f7a6d, text: 'Für Mega-Frachter: 60 Moves pro Stunde' },
+};
+/** Moves pro Stunde eines Modells (ohne Verschleiß und Verbesserungen) */
+export const movesPerHour = (m: CraneModel) => Math.round(60 / CRANE_MODELS[m].move);
+
+/** Kleine Verbesserungen in Stufen. Jede Stufe kostet mehr und braucht eine Mindest-Hafenstufe. */
+export type TechId = 'spreader' | 'scanner' | 'stack' | 'sales' | 'radio' | 'engine' | 'cool' | 'maint';
+export const TECH: Record<TechId, { name: string; text: string; per: string; cost: number[]; level: number[] }> = {
+  spreader: { name: 'Twin-Spreader', text: 'Kräne laden und löschen schneller.', per: '+10 % Kranmoves', cost: [30_000, 60_000, 120_000], level: [1, 2, 3] },
+  scanner: { name: 'Gate-Scanner', text: 'Gates fertigen Container schneller ab.', per: '+20 % Gate-Tempo', cost: [25_000, 50_000, 100_000], level: [1, 2, 3] },
+  stack: { name: 'Stapeltechnik', text: 'Höher stapeln: mehr Container pro Lagerfeld.', per: '+1 Container pro Feld', cost: [40_000, 90_000], level: [2, 3] },
+  sales: { name: 'Vertrieb', text: 'Bessere Konditionen bei Spediteuren.', per: '+5 % auf Containergebühren', cost: [50_000, 100_000, 200_000], level: [2, 3, 4] },
+  radio: { name: 'Leitstelle', text: 'Digitaler Funk: Automatik-Trucks bekommen schneller ihren nächsten Auftrag.', per: '−30 % Funkzeit', cost: [20_000, 50_000], level: [1, 2] },
+  engine: { name: 'Motoren', text: 'Stärkere Zugmaschinen.', per: '+8 % Truck-Tempo', cost: [30_000, 70_000, 140_000], level: [1, 2, 3] },
+  cool: { name: 'Kühltechnik', text: 'Bessere Aggregate an den Kühlplätzen.', per: '+30 % Haltbarkeit', cost: [30_000, 60_000], level: [3, 3] },
+  maint: { name: 'Wartungsplan', text: 'Vorbeugende Wartung.', per: '−20 % Verschleiß', cost: [30_000, 60_000, 120_000], level: [2, 3, 4] },
+};
+export const TECH_IDS = Object.keys(TECH) as TechId[];
+
 export const UPGRADE = {
-  /** Mobilkran zur Containerbrücke: doppelt so schnell */
+  /** Kran zum nächsten Modell (Kosten und Stufe stehen in CRANE_MODELS) */
   crane: { cost: 120_000, level: 2 },
   /** Truck zum fahrerlosen Fahrzeug: schneller und billiger im Betrieb */
   truck: { cost: 30_000, level: 4 },
@@ -212,8 +242,10 @@ export const SHIP_PATIENCE_GM = 720;
 export const SHIP_DWELL_TARGET_GM = 480;
 export const SHIP_MAX_STAY_GM = 1440;
 
-export type ShipTypeId = 'feeder' | 'panamax' | 'mega';
+export type ShipTypeId = 'coaster' | 'feeder' | 'panamax' | 'mega';
 export const SHIP_TYPES: Record<ShipTypeId, { name: string; len: number; containers: number; deep: boolean; berthFee: number; dwell: number }> = {
+  /** Freie Schiffe ohne Vertrag: klein, selten, bringen wenig */
+  coaster: { name: 'Küstenfrachter', len: 4, containers: 60, deep: false, berthFee: 800, dwell: 300 },
   feeder: { name: 'Feeder', len: 4, containers: 120, deep: false, berthFee: 2_500, dwell: 480 },
   panamax: { name: 'Panamax', len: 6, containers: 300, deep: true, berthFee: 8_000, dwell: 720 },
   /** Ab Stufe 5: braucht 8 Kai-Felder, ausgebaggert */
@@ -270,7 +302,7 @@ export const EXPORT_FEE = 250;
 
 // Hafenstufen: `need` ist die Zahl der insgesamt umgeschlagenen Container
 export const LEVELS = [
-  { name: 'Anleger', need: 0, bonus: 0, contracts: 0 },
+  { name: 'Anleger', need: 0, bonus: 0, contracts: 1 },
   { name: 'Regionalhafen', need: 1_500, bonus: 40_000, contracts: 2 },
   { name: 'Handelshafen', need: 7_000, bonus: 100_000, contracts: 3 },
   { name: 'Seehafen', need: 17_000, bonus: 180_000, contracts: 4 },
@@ -286,7 +318,7 @@ export const LEVEL_NEWS: { title: string; text: string }[][] = [
   [],
   [
     { title: 'Export', text: 'Schiffe wollen jetzt auch beladen werden. Export-Container kommen über das Gate und bringen 250 € pro Stück.' },
-    { title: 'Verträge', text: 'Reedereien bieten feste Anläufe mit Bonus an. Bis zu 2 Verträge gleichzeitig.' },
+    { title: 'Mehr Verträge', text: 'Bis zu 2 Daueraufträge gleichzeitig. Nur über Verträge kommen größere Schiffe.' },
     { title: 'Containerbrücke', text: 'Tippe einen Kran an und rüste ihn auf. Er arbeitet dann doppelt so schnell.' },
     { title: 'Verarbeitung', text: 'Die Packhalle packt Container aus, die Veredelung macht aus zwei davon Fertigware für 900 €. Trucks fahren die Ware dazwischen.' },
     { title: 'Verschleiß und Werkstatt', text: 'Kräne und Trucks nutzen sich ab, werden langsamer und fallen bei 100 % aus. Eine Werkstatt mit Mechaniker repariert sie.' },
@@ -302,6 +334,7 @@ export const LEVEL_NEWS: { title: string; text: string }[][] = [
   ],
   [
     { title: 'Fahrerlose Fahrzeuge', text: 'Tippe einen Truck an und rüste ihn auf. Er fährt dann schneller und kostet weniger im Betrieb.' },
+    { title: 'Super-Brücke', text: 'Containerbrücken lassen sich ein letztes Mal aufrüsten: 60 Moves pro Stunde.' },
     { title: 'Mega-Frachter', text: 'Bringen 500 Container und 16.000 € Liegegebühr. Sie brauchen 8 Kai-Felder in einer Reihe, davor ausgebaggert.' },
     { title: 'Bis zu 4 Verträge', text: 'Mehr Reedereien können gleichzeitig zu dir fahren.' },
   ],

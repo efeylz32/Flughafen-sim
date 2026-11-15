@@ -359,3 +359,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
   .zonerep { max-height: 26vh; font-size: 12px; }
   .zonerep .sub, .zonerep .zprob { font-size: 11.5px; }
 }
+.deal.tech .dl { display: flex; align-items: center; justify-content: space-between; }
+.deal.tech .dots { display: inline-flex; gap: 4px; }
+.deal.tech .dots i { width: 14px; height: 6px; border-radius: 3px; background: #dfe5ec; }
+.deal.tech .dots i.on { background: var(--good); }
+.deal.tech .sub { margin: 4px 0 8px; }

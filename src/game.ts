@@ -2,7 +2,7 @@ import { Sound } from './audio/sound';
 import { Renderer, View } from './render/renderer';
 import { BuildTool, DiffId, GRID_H, GRID_W, MapId, ProductId, Role, ROLE_NAMES, T, TICKS_PER_SEC, TILE, Tool, TruckRole } from './sim/data';
 import { Progress } from './achievements';
-import { DIFFS, MAPS, sizeOf } from './sim/data';
+import { CRANE_MODELS, DIFFS, MAPS, movesPerHour, sizeOf, TechId } from './sim/data';
 import { buildDemo } from './sim/demo';
 import { setupScenario } from './sim/scenario-setup';
 import { SCENARIOS } from './sim/scenarios';
@@ -221,6 +221,11 @@ export class Game {
     this.hover = null;
     this.ui.refreshTools();
   }
+  buyTech(id: TechId) {
+    const r = this.sim.buyTech(id);
+    if (!r.ok) return this.fail(r.reason ?? 'Nicht möglich');
+    this.sound.play('upgrade');
+  }
   /** Dreht das nächste Gebäude (Breite und Höhe tauschen) */
   rotate() {
     const [w, h] = sizeOf(this.tool);
@@ -393,7 +398,7 @@ export class Game {
     this.record({ kind: 'upgrade', what: sel.kind, id: sel.id, x, y });
     this.sound.play('upgrade');
     this.renderer.addPop(x, y, 'build');
-    this.ui.toast(sel.kind === 'crane' ? 'Containerbrücke in Betrieb: 40 Moves pro Stunde' : 'Der Truck fährt jetzt fahrerlos', 'good');
+    this.ui.toast(c ? `${CRANE_MODELS[c.model].name} in Betrieb: ${movesPerHour(c.model)} Moves pro Stunde` : 'Der Truck fährt jetzt fahrerlos', 'good');
   }
 
   setAllRoles(role: TruckRole) {

@@ -29,6 +29,10 @@ import {
   sizeOf,
   SHIP_PATIENCE_GM,
   GOAL_LEVEL,
+  CRANE_MODELS,
+  TECH,
+  TECH_IDS,
+  TechId,
 } from '../sim/data';
 import { ACHIEVEMENTS } from '../achievements';
 import { MISSIONS } from '../sim/missions';
@@ -46,6 +50,8 @@ const ICONS: Record<string, string> = {
   view: svg('<path d="M7 3.5l11 7-4.6 1.4 2.8 5.6-2.6 1.3-2.8-5.6L5.8 16z"/>'),
   kai: svg('<rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M3 9h18M7 9v4M12 9v4M17 9v4"/>'),
   crane: svg('<path d="M6 21V6M3 21h6M6 6h14M17 6v6"/><rect x="15" y="12" width="4" height="3" rx=".6"/><path d="M6 6l6-3"/>'),
+  lcrane: svg('<path d="M7 21V9M4 21h6M7 9h10M15 9v5"/><rect x="13.5" y="14" width="3.5" height="2.6" rx=".6"/>'),
+  tech: svg('<path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/><circle cx="12" cy="12" r="3.5"/>'),
   road: svg('<path d="M8.5 3L5 21M15.5 3L19 21"/><path d="M12 4.5v3M12 10.5v3M12 16.5v3"/>'),
   yard: svg('<rect x="3" y="4" width="8" height="7" rx="1"/><rect x="13" y="4" width="8" height="7" rx="1"/><rect x="3" y="13" width="8" height="7" rx="1"/><rect x="13" y="13" width="8" height="7" rx="1"/>'),
   reefer: svg('<path d="M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9"/><path d="M9.5 4.5L12 7l2.5-2.5M9.5 19.5L12 17l2.5 2.5"/>'),
@@ -98,7 +104,8 @@ interface ToolDef {
 const TOOLS: ToolDef[] = [
   { cat: 'always', tool: 'view', label: 'Ansehen', sub: 'Info', color: '#5b6b82' },
   { cat: 'land', tool: 'kai', label: 'Kai', sub: '5k', color: '#b8b2a3' },
-  { cat: 'gear', tool: 'crane', label: 'Kran', sub: '80k', color: '#e2582c' },
+  { cat: 'gear', tool: 'lcrane', label: 'Leichtkran', sub: '40k', color: '#e0a526' },
+  { cat: 'gear', tool: 'crane', label: 'Mobilkran', sub: '80k', color: '#e2582c' },
   { cat: 'land', tool: 'road', label: 'Straße', sub: '500 €', color: '#59606a' },
   { cat: 'store', tool: 'yard', label: 'Stapel', sub: '1k', color: '#c9b88a' },
   { cat: 'build', tool: 'gate', label: 'Gate', sub: '20k · 2×1', color: '#d9534f' },
@@ -195,6 +202,10 @@ export class UI {
   private achModal!: HTMLElement;
   private zonePick!: HTMLElement;
   private rotPick!: HTMLElement;
+  private techModal!: HTMLElement;
+  private techBody!: HTMLElement;
+  private techBadge!: HTMLElement;
+  private lastTech = '';
   private zoneCard!: HTMLElement;
   private zoneKey = '';
   private alertEl!: HTMLElement;
@@ -350,13 +361,20 @@ export class UI {
       this.game.toggleOverlay();
       click();
     });
+    const techBtn = mk(ICONS.tech, 'Verbesserungen', () => {
+      this.techModal.classList.remove('hidden');
+      this.renderTech(true);
+      click();
+    });
+    this.techBadge = el('span', 'badge hidden', '!');
+    techBtn.appendChild(this.techBadge);
     const finBtn = mk(ICONS.chart, 'Bilanz und Statistik', () => {
       this.toggleCard(this.finCard);
       click();
     });
     this.soundBtn = mk(ICONS.sound, 'Ton an oder aus', () => this.game.toggleSound());
     const menuBtn = mk(ICONS.menu, 'Menü', () => this.showMenu());
-    side.append(this.undoBtn, this.dealBtn, this.staffBtn, this.overlayBtn, finBtn, this.soundBtn, menuBtn);
+    side.append(this.undoBtn, this.dealBtn, this.staffBtn, techBtn, this.overlayBtn, finBtn, this.soundBtn, menuBtn);
 
     // Info-Blatt
     this.sheet = el('div', 'sheet hidden');
@@ -548,6 +566,21 @@ export class UI {
       this.renderDeals(true);
     });
 
+    // Verbesserungen
+    this.techModal = el('div', 'modal hidden');
+    this.techModal.innerHTML = `<div class="dialog deals"><div class="dhead"><h2>Verbesserungen</h2><button class="x" aria-label="Schließen">${ICONS.close}</button></div><div class="body"></div></div>`;
+    this.techBody = this.techModal.querySelector('.body')!;
+    this.techModal.querySelector('.x')!.addEventListener('click', () => this.techModal.classList.add('hidden'));
+    this.techModal.addEventListener('click', (e) => {
+      const t = e.target as HTMLElement;
+      if (t === this.techModal) return this.techModal.classList.add('hidden');
+      const b = t.closest<HTMLElement>('[data-tech]');
+      if (b) {
+        this.game.buyTech(b.dataset.tech as TechId);
+        this.renderTech(true);
+      }
+    });
+
     // Personal
     this.staffModal = el('div', 'modal hidden');
     this.staffModal.innerHTML = `<div class="dialog deals"><div class="dhead"><h2>Fuhrpark und Personal</h2><button class="x" aria-label="Schließen">${ICONS.close}</button></div><div class="body"></div></div>`;
@@ -600,7 +633,7 @@ export class UI {
       this.game.setSpeed(this.speedBeforeModal);
     });
 
-    root.append(top, left, side, this.sheet, bar, this.toasts, this.menu, this.deals, this.staffModal, this.finCard, this.endModal, this.decision, this.levelUp, this.buildAchModal());
+    root.append(top, left, side, this.sheet, bar, this.toasts, this.menu, this.deals, this.techModal, this.staffModal, this.finCard, this.endModal, this.decision, this.levelUp, this.buildAchModal());
     this.refreshSpeed();
     this.refreshTools();
     this.refreshOverlay();
@@ -846,6 +879,8 @@ export class UI {
     const short = (Object.keys(ROLES) as Role[]).some((r) => sim.staffAvail(r) < sim.staffNeed(r));
     this.staffBadge.classList.toggle('hidden', !short);
     if (!this.staffModal.classList.contains('hidden')) this.renderStaff(false);
+    if (!this.techModal.classList.contains('hidden')) this.renderTech(false);
+    this.techBadge.classList.toggle('hidden', !TECH_IDS.some((id) => sim.canBuyTech(id).ok && sim.money > 2 * sim.canBuyTech(id).cost));
 
     // Mission
     const m = MISSIONS[sim.mission];
@@ -1026,21 +1061,40 @@ export class UI {
         <span class="pos">Bonus ${eur(c.bonus)}</span>
         <span class="neg">Strafe ${eur(c.penalty)}</span>
         ${active ? `<span>Nächstes Schiff in ${hours(Math.max(0, c.next))}</span>` : ''}
-      </div>${need}${btn}</div>`;
+      </div>${active && c.missed ? '<div class="warn">Verwarnt: Der nächste verpasste Anlauf beendet den Vertrag.</div>' : ''}${need}${btn}</div>`;
+  }
+
+  private renderTech(force: boolean) {
+    const sim = this.game.sim;
+    const key = `${sim.level}|${Math.floor(sim.money / 5000)}|${TECH_IDS.map((id) => sim.tech[id]).join(',')}`;
+    if (!force && key === this.lastTech) return;
+    this.lastTech = key;
+    this.techBody.innerHTML =
+      `<p class="sub">Kleine Verbesserungen für den ganzen Hafen. Jede Stufe kostet mehr und wird mit der Hafenstufe freigeschaltet.</p>` +
+      TECH_IDS.map((id) => {
+        const t = TECH[id];
+        const n = sim.tech[id];
+        const max = t.cost.length;
+        const dots = Array.from({ length: max }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('');
+        const chk = sim.canBuyTech(id);
+        const btn =
+          n >= max
+            ? '<span class="tag">voll ausgebaut</span>'
+            : sim.level < t.level[n]
+              ? `<div class="locknote">${ICONS.lock}<span>Stufe ${n + 1} ab Hafenstufe ${t.level[n]}</span></div>`
+              : `<button class="primary" data-tech="${id}" ${chk.ok ? '' : 'disabled'}>Stufe ${n + 1} · ${eur(t.cost[n])}</button>`;
+        return `<div class="deal tech"><div class="dl"><b>${t.name}</b><span class="dots">${dots}</span></div><div class="sub">${t.text} Pro Stufe ${t.per}.</div>${btn}</div>`;
+      }).join('');
   }
 
   private renderDeals(force: boolean) {
     const sim = this.game.sim;
-    const key = `${sim.level}|${sim.contracts.map((c) => `${c.id}:${c.calls}:${Math.round(c.next / 6)}`)}|${sim.offers.map((o) => o.id)}|${this.confirmCancel}`;
+    const key = `${sim.level}|${sim.contracts.map((c) => `${c.id}:${c.calls}:${c.missed ?? 0}:${Math.round(c.next / 6)}`)}|${sim.offers.map((o) => o.id)}|${this.confirmCancel}`;
     if (!force && key === this.lastDeals) return;
     this.lastDeals = key;
-    if (sim.level < 2) {
-      this.dealsBody.innerHTML = `<p class="sub">Verträge gibt es ab Stufe 2 (${LEVELS[1].name}). Schlage dafür ${num(LEVELS[1].need)} Container um, bisher sind es ${num(sim.handled)}.</p>`;
-      return;
-    }
     const free = sim.contracts.length < sim.maxContracts;
     this.dealsBody.innerHTML = `
-      <p class="sub">Vertragsschiffe kommen nach Fahrplan. Pünktlich abgefertigt gibt es den Bonus, sonst die Strafe. Bei Sturm läuft die Liegezeit nicht.</p>
+      <p class="sub">Ohne Vertrag kommen nur kleine Küstenfrachter mit 60 Containern. Größere Schiffe kommen nur als Dauerauftrag nach Fahrplan. Pünktlich gibt es den Bonus, sonst die Strafe. Wer zweimal in Folge zu spät ist, verliert den Vertrag. Bei Sturm läuft die Liegezeit nicht.</p>
       <h3>Laufende Verträge (${sim.contracts.length} von ${sim.maxContracts})</h3>
       ${sim.contracts.length ? sim.contracts.map((c) => this.contractCard(c, true, false)).join('') : '<p class="sub">Noch kein Vertrag.</p>'}
       <h3>Angebote</h3>
@@ -1066,8 +1120,8 @@ export class UI {
       sim.level >= 2
         ? `<div class="meta ${w > 0.75 ? 'neg' : ''}">Zustand ${Math.round((1 - w) * 100)} %${w > 0.3 && !sim.shops.length ? ' · Ohne Werkstatt fällt es irgendwann aus' : ''}</div>`
         : '';
-    const upgradeBtn = (kind: 'crane' | 'truck', label: string) => {
-      const u = UPGRADE[kind];
+    const upgradeBtn = (kind: 'crane' | 'truck', label: string, info?: { cost: number; level: number }) => {
+      const u = info ?? UPGRADE[kind];
       return sim.level < u.level
         ? `<div class="locknote">${ICONS.lock}<span>${label} ab Stufe ${u.level} (${LEVELS[u.level - 1].name})</span></div>`
         : `<button class="primary" data-upgrade="1">${label} · ${eur(u.cost)}</button>`;
@@ -1097,11 +1151,12 @@ export class UI {
             : c.state === 'storm'
               ? 'Steht wegen Sturm still'
               : 'Wartet auf ein Schiff';
-      html = `<h3>${c.big ? 'Containerbrücke' : 'Mobilkran'} <span class="tag">${c.big ? 40 : 20} Moves pro Stunde</span></h3>
+      html = `<h3>${CRANE_MODELS[c.model].name} <span class="tag">${Math.round(60 / sim.moveTime({ ...c, wear: 0 }))} Moves pro Stunde</span></h3>
         <div class="meta">${c.state === 'broken' ? 'Ausgefallen: wartet auf die Werkstatt' : st}</div>
         ${wearRow(c.wear)}
         <div class="meta">Entladen am Kran: ${c.buffer + c.bufReef} von ${sim.bufCap(c)}${sim.level >= 2 ? ` · Export am Kran: ${c.expBuf} von ${sim.bufCap(c, true)}` : ''}</div>`;
-      if (!c.big) actions = upgradeBtn('crane', 'Zur Containerbrücke aufrüsten');
+      const ui = sim.upgradeInfo('crane', c.id);
+      if (ui) actions = upgradeBtn('crane', ui.label, ui);
     } else if (sel.kind === 'gate') {
       const g = sim.gates.find((g) => g.id === sel.id);
       if (!g) return gone();
