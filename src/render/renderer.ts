@@ -1369,6 +1369,8 @@ export class Renderer {
         this.cranes.set(c.id, v);
         this.craneLayer.addChild(v.root);
       }
+      // Im Bau: halb durchsichtig, der Kran entsteht noch
+      v.root.alpha = c.build ? 0.45 + 0.35 * (1 - c.build / Math.max(1, c.buildMax ?? c.build)) : 1;
       // Laufkatze: 0 = über dem Kai, 1 = über dem Schiff
       let carrying = false;
       if (c.state === 'working') {
@@ -1805,6 +1807,7 @@ export class Renderer {
         g.circle((t.fx + 0.5) * TILE, (t.fy + 0.5) * TILE, 13).stroke({ width: 2, color: 0xffffff });
       }
     }
+    this.drawSites(g, sim, view.time);
     this.drawWaitBars(g, sim, a);
     if (view.selected) this.drawSelection(g, sim, view.selected, a, view.time);
 
@@ -1882,6 +1885,77 @@ export class Renderer {
       f.text.destroy();
       return false;
     });
+  }
+
+  /** Baustellen: gelb-schwarzer Bauzaun, blinkende Warnlampen, Fortschrittsbalken */
+  private drawSites(g: Graphics, sim: Sim, time: number) {
+    const site = (x: number, y: number, w: number, h: number, e: { build?: number; buildMax?: number }, fill: boolean) => {
+      if (!e.build) return;
+      const px = x * TILE;
+      const py = y * TILE;
+      const W = w * TILE;
+      const H = h * TILE;
+      if (fill) {
+        g.rect(px + 2, py + 2, W - 4, H - 4).fill({ color: 0xd8cfb8, alpha: 0.85 });
+        // Fundament und Gerüst wachsen mit dem Fortschritt
+        const u = 1 - e.build / Math.max(1, e.buildMax ?? e.build);
+        const rows = Math.max(1, Math.floor(u * (H - 8) / 6));
+        for (let r = 0; r < rows; r++) g.rect(px + 5, py + H - 6 - r * 6, W - 10, 2).fill({ color: 0x8d7a5b, alpha: 0.8 });
+        for (let cx = px + 6; cx < px + W - 4; cx += 12) g.rect(cx, py + H - 6 - rows * 6, 1.6, rows * 6).fill({ color: 0x6b5a40, alpha: 0.8 });
+      }
+      // Bauzaun mit wanderndem Streifenmuster
+      const off = (time * 12) % 8;
+      for (let k = -off; k < W; k += 8) {
+        const a0 = Math.max(0, k);
+        const a1 = Math.min(W, k + 4);
+        if (a1 > a0) {
+          g.rect(px + a0, py, a1 - a0, 2.5).fill(0xf2c230);
+          g.rect(px + a0, py + H - 2.5, a1 - a0, 2.5).fill(0xf2c230);
+        }
+      }
+      for (let k = -off; k < H; k += 8) {
+        const a0 = Math.max(0, k);
+        const a1 = Math.min(H, k + 4);
+        if (a1 > a0) {
+          g.rect(px, py + a0, 2.5, a1 - a0).fill(0xf2c230);
+          g.rect(px + W - 2.5, py + a0, 2.5, a1 - a0).fill(0xf2c230);
+        }
+      }
+      const blink = Math.sin(time * 6) > 0;
+      for (const [lx, ly] of [
+        [px + 2, py + 2],
+        [px + W - 2, py + H - 2],
+      ]) {
+        g.circle(lx, ly, 2.6).fill(blink ? 0xffb020 : 0x7a5a10);
+      }
+      // Fortschritt
+      const u = 1 - e.build / Math.max(1, e.buildMax ?? e.build);
+      const bw = Math.min(W - 8, 48);
+      const bx = px + W / 2 - bw / 2;
+      const by = py + H / 2 - 3;
+      g.roundRect(bx - 1.5, by - 1.5, bw + 3, 8, 3).fill({ color: 0xffffff, alpha: 0.92 });
+      g.roundRect(bx, by, bw, 5, 2).fill(0x2a3442);
+      g.roundRect(bx, by, Math.max(5, bw * u), 5, 2).fill(0xf2c230);
+    };
+    for (const e of sim.gates) site(e.x, e.y, e.w, e.h, e, true);
+    for (const e of sim.plants) site(e.x, e.y, e.w, e.h, e, true);
+    for (const e of sim.shops) site(e.x, e.y, e.w, e.h, e, true);
+    for (const e of sim.rails) site(e.x, e.y, 1, 1, e, true);
+    for (const e of sim.rtgs) site(e.x, e.y, 1, 1, e, false);
+    for (const c of sim.cranes) {
+      const t2 = c.big ? qTile(c.q + 1) : null;
+      const x0 = Math.min(c.x, t2 ? t2[0] : c.x);
+      const y0 = Math.min(c.y, t2 ? t2[1] : c.y);
+      site(x0, y0, t2 && t2[0] !== c.x ? 2 : 1, t2 && t2[1] !== c.y ? 2 : 1, c, false);
+    }
+    for (const t of sim.trucks) {
+      if (!t.build) continue;
+      const cx = (t.fx + 0.5) * TILE;
+      const cy = (t.fy + 0.5) * TILE;
+      g.circle(cx, cy - 16, 7).fill(0xffffff);
+      g.circle(cx, cy - 16, 5.5).fill(0x5b6b82);
+      g.rect(cx - 3, cy - 17, 6, 2).fill(0xffffff);
+    }
   }
 
   /** Wartebalken: Schiffe auf Reede (Geduld), am Kai (zugesagte Liegezeit), Trucks im Stau */

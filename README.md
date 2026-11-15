@@ -20,7 +20,10 @@ Das Spielkonzept steht im Doc „Hafen-Imperium: Spielkonzept“.
 Der Aufstiegsbonus ist klein (40.000 € bis 600.000 €). Löhne steigen je Stufe um 8 % (Tariflohn).
 
 - **Export:** Schiffe wollen auch beladen werden. Export-Container kommen über das Gate, Trucks bringen sie zum Kran (250 € pro Stück).
-- **Schiffe und Verträge:** Ohne Vertrag kommen nur Küstenfrachter mit 60 Containern. Feeder, Panamax und Mega-Frachter kommen nur als Dauerauftrag nach Fahrplan (ab Stufe 1 ein Vertrag, je Stufe einer mehr). Pünktlich gibt es Bonus, sonst Strafe. Zweimal in Folge zu spät: Die Reederei kündigt, Ruf −5.
+- **Schiffe und Verträge:** Ohne Vertrag kommen nur Küstenfrachter mit 60 Containern. Stufe 1 ist bewusst zäh: Verträge gibt es erst ab Stufe 2. Feeder, Panamax und Mega-Frachter kommen nur als Dauerauftrag nach Fahrplan. Pünktlich gibt es Bonus, sonst Strafe. Zweimal in Folge zu spät: Die Reederei kündigt, Ruf −5.
+- **Bauzeit:** Kräne, Gates, Hallen, Werkstatt, Portalkran und Gleis brauchen nach dem Kauf eine Weile (1 bis 6 Spielstunden), bis sie arbeiten. Auch Kran-Umbauten dauern. Straße, Lager und Kai sind sofort fertig.
+- **Preissteigerung:** Mit jeder Hafenstufe wird alles 15 % teurer (Bauen, Aufrüsten, Verbesserungen).
+- **Gebraucht kaufen und Höchstzustand:** Kräne und Trucks gibt es gebraucht zum halben Preis, mit einem Höchstzustand von 50 bis 75 %. Jedes Gerät hat einen Höchstzustand wie ein Akku: Er sinkt mit der Nutzung, und die Werkstatt repariert nur bis dorthin. Alte Geräte sind langsamer und fallen ab Stufe 2 öfter zufällig aus. Eine Generalüberholung (35 % vom Neupreis) hebt den Höchstwert wieder auf 90 %.
 - **Kranmodelle:** Leichtkran (40k, 13 Moves/h), Mobilkran (80k, 20), Containerbrücke (Aufrüstung ab Stufe 2, 40, zwei Felder), Super-Brücke (Aufrüstung ab Stufe 4, 60). Jedes Modell hat eigene Betriebskosten und Pufferplätze.
 - **Verbesserungen:** Kleine Upgrades in Stufen (Knopf mit dem Zahnrad): Twin-Spreader, Gate-Scanner, Stapeltechnik, Vertrieb, Leitstelle, Motoren, Kühltechnik, Wartungsplan. Jede Stufe kostet mehr und braucht eine Mindest-Hafenstufe.
 - **Wetter:** Bei Sturm stehen die Kräne (die Liegezeit läuft dann nicht), bei Nebel läuft kein Schiff ein. Es gibt zwei Stunden Vorwarnung.
@@ -30,7 +33,7 @@ Der Aufstiegsbonus ist klein (40.000 € bis 600.000 €). Löhne steigen je Stu
 - **Verarbeitung (ab Stufe 2):** Die Packhalle packt Container aus, die Veredelung macht aus zwei davon Fertigware für 900 €. Trucks fahren die Ware dazwischen.
 - **Aufgaben für Trucks:** Jeder Truck fährt auf Automatik oder bekommt eine feste Aufgabe (Kran räumen, Ausgang, Export, Verarbeitung). Feste Aufgaben sind 25 % schneller und sparen die Funkzeit der Leitstelle.
 - **Personal und Schwierigkeit:** Fahrer, Kranführer und Gate-Kräfte kosten Stundenlohn und können krank werden. Drei Schwierigkeitsgrade im Menü.
-- **Ziel und Pleite:** Weltklasse-Hafen (Stufe 5) bis Tag 65/55/45 (je Schwierigkeit), danach ohne Frist weiter bis Stufe 7. Ist das Konto 5/3/2 Tagesabschlüsse in Folge im Minus, ist es die Pleite.
+- **Ziel und Pleite:** Weltklasse-Hafen (Stufe 5) bis Tag 80/65/50 (je Schwierigkeit), danach ohne Frist weiter bis Stufe 7. Ist das Konto 5/3/2 Tagesabschlüsse in Folge im Minus, ist es die Pleite.
 - **Kredit und Bilanz:** Kredit in Schritten von 100.000 €, Grenze wächst mit der Stufe, Zinsen täglich. Die Bilanz zeigt Tagesfinanzen und den Verlauf der letzten Tage.
 - **Sammelzuweisung:** Werkzeug „Aufgaben“, Rahmen über Trucks ziehen.
 - **Einbahnstraßen und Land:** Straßen auf eine Richtung schalten. Eine Einbahnstraße hat zwei Spuren und lässt doppelt so viele Trucks durch. Land ist in Streifen geteilt und muss gekauft werden.

@@ -46,5 +46,6 @@ export function setupScenario(id: string, seed: number): Sim {
   sim.today.building = 0;
   sim.updateMissions(true);
   sim.mission = Math.max(sim.mission, 6);
+  sim.finishAll();
   return sim;
 }

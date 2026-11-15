@@ -19,6 +19,7 @@ export function buildDemo(sim: Sim): void {
   // Der Demo-Hafen kostet die Hälfte des Startgelds
   sim.money = DIFFS[sim.diff].money * 0.5;
   sim.today.building = 0;
+  sim.finishAll();
   sim.updateMissions(true);
   sim.nextShipIn = 5;
 }

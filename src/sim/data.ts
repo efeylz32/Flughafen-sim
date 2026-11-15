@@ -102,6 +102,37 @@ export const UPGRADE = {
 };
 export const REFUND = 0.5;
 
+/** Preissteigerung: Alles wird mit jeder Hafenstufe teurer (+15 % je Stufe) */
+export const INFLATION_PER_LEVEL = 0.15;
+
+/** Bauzeit in Spielminuten. Solange gebaut wird, arbeitet das Gerät oder Gebäude nicht. Straße, Lager und Kai sind sofort fertig. */
+export const BUILD_GM: Partial<Record<BuildTool, number>> = {
+  crane: 90,
+  lcrane: 60,
+  gate: 120,
+  rtg: 120,
+  workshop: 180,
+  unpack: 240,
+  pack: 300,
+  cold: 240,
+  rail: 360,
+};
+/** Umbau eines Krans auf das nächste Modell dauert so lange */
+export const UPGRADE_GM = 150;
+
+// Gebraucht kaufen und Höchstzustand (wie bei einem Akku)
+/** Gebrauchte Geräte kosten diesen Anteil vom Neupreis */
+export const USED_PRICE = 0.5;
+/** Höchstzustand gebrauchter Geräte: zwischen min und max */
+export const USED_CAP: [number, number] = [0.5, 0.75];
+/** So viel Höchstzustand geht je Verschleiß verloren: 1,0 Verschleiß kostet 4 % */
+export const CAP_LOSS = 0.04;
+export const CAP_MIN = 0.3;
+/** Zufälliger Ausfall pro Stunde: CRASH_RATE × (1 − Höchstzustand)² */
+export const CRASH_RATE = 0.03;
+/** Generalüberholung: Anteil vom Neupreis, Höchstzustand danach, Dauer */
+export const OVERHAUL = { price: 0.35, cap: 0.9, gm: 180 };
+
 /** Größe von Gebäuden in Feldern (Breite × Höhe). Alles andere ist 1 × 1. */
 export const SIZE: Partial<Record<BuildTool, [number, number]>> = {
   gate: [2, 1],
@@ -141,9 +172,9 @@ export const DIFFS: Record<
   DiffId,
   { name: string; text: string; money: number; patience: number; dwell: number; penalty: number; wage: number; sick: number; debtDays: number; goalDays: number; rate: number }
 > = {
-  easy: { name: 'Leicht', text: 'Viel Startgeld, geduldige Schiffe, milde Strafen', money: 650_000, patience: 1.5, dwell: 1.25, penalty: 0.5, wage: 0.8, sick: 0.02, debtDays: 5, goalDays: 65, rate: 0.7 },
-  normal: { name: 'Normal', text: 'Knappes Startgeld, Löhne und Fristen wie geplant', money: 400_000, patience: 1, dwell: 1, penalty: 1, wage: 1, sick: 0.04, debtDays: 3, goalDays: 55, rate: 1 },
-  hard: { name: 'Schwer', text: 'Wenig Startgeld, ungeduldige Schiffe, enge Fristen, hohe Löhne und Strafen', money: 250_000, patience: 0.6, dwell: 0.8, penalty: 1.6, wage: 1.3, sick: 0.07, debtDays: 2, goalDays: 45, rate: 1.4 },
+  easy: { name: 'Leicht', text: 'Viel Startgeld, geduldige Schiffe, milde Strafen', money: 650_000, patience: 1.5, dwell: 1.25, penalty: 0.5, wage: 0.8, sick: 0.02, debtDays: 5, goalDays: 80, rate: 0.7 },
+  normal: { name: 'Normal', text: 'Knappes Startgeld, Löhne und Fristen wie geplant', money: 400_000, patience: 1, dwell: 1, penalty: 1, wage: 1, sick: 0.04, debtDays: 3, goalDays: 65, rate: 1 },
+  hard: { name: 'Schwer', text: 'Wenig Startgeld, ungeduldige Schiffe, enge Fristen, hohe Löhne und Strafen', money: 250_000, patience: 0.6, dwell: 0.8, penalty: 1.6, wage: 1.3, sick: 0.07, debtDays: 2, goalDays: 50, rate: 1.4 },
 };
 
 // Kredit
@@ -302,7 +333,7 @@ export const EXPORT_FEE = 250;
 
 // Hafenstufen: `need` ist die Zahl der insgesamt umgeschlagenen Container
 export const LEVELS = [
-  { name: 'Anleger', need: 0, bonus: 0, contracts: 1 },
+  { name: 'Anleger', need: 0, bonus: 0, contracts: 0 },
   { name: 'Regionalhafen', need: 1_500, bonus: 40_000, contracts: 2 },
   { name: 'Handelshafen', need: 7_000, bonus: 100_000, contracts: 3 },
   { name: 'Seehafen', need: 17_000, bonus: 180_000, contracts: 4 },

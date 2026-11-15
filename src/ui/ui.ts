@@ -29,6 +29,8 @@ import {
   sizeOf,
   SHIP_PATIENCE_GM,
   GOAL_LEVEL,
+  COST,
+  USED_PRICE,
   CRANE_MODELS,
   TECH,
   TECH_IDS,
@@ -202,6 +204,7 @@ export class UI {
   private achModal!: HTMLElement;
   private zonePick!: HTMLElement;
   private rotPick!: HTMLElement;
+  private usedPick!: HTMLElement;
   private techModal!: HTMLElement;
   private techBody!: HTMLElement;
   private techBadge!: HTMLElement;
@@ -387,6 +390,7 @@ export class UI {
       const role = t.closest<HTMLElement>('[data-role]');
       if (role) this.game.setTruckRole(role.dataset.role as TruckRole);
       else if (t.closest('[data-upgrade]')) this.game.upgradeSelected();
+      else if (t.closest('[data-overhaul]')) this.game.overhaulSelected();
       const prod = t.closest<HTMLElement>('[data-product]');
       if (prod && this.game.selected?.kind === 'plant') this.game.setProduct(this.game.selected.id, prod.dataset.product as ProductId);
     });
@@ -438,7 +442,19 @@ export class UI {
       click();
     });
     this.rotPick.appendChild(rb);
-    bar.append(this.rolePick, this.zonePick, this.rotPick, tabs, row);
+    // Neu oder gebraucht: für Kräne und Trucks
+    this.usedPick = el('div', 'rolepick usedpick hidden');
+    for (const u of [false, true]) {
+      const b = el('button', '', '');
+      b.dataset.used = u ? '1' : '0';
+      b.addEventListener('click', () => {
+        this.game.sim.used = u;
+        this.refreshTools();
+        click();
+      });
+      this.usedPick.appendChild(b);
+    }
+    bar.append(this.rolePick, this.zonePick, this.rotPick, this.usedPick, tabs, row);
     for (const t of TOOLS) {
       const b = el('button', 'tool');
       b.innerHTML = `<span class="ico" style="--c:${t.color}">${ICONS[t.tool]}<span class="lk">${ICONS.lock}</span></span><b>${t.label}</b><small>${t.sub}</small>`;
@@ -760,6 +776,16 @@ export class UI {
   refreshSpeed() {
     for (const b of this.speedBtns) b.classList.toggle('on', Number(b.dataset.v) === this.game.speed);
   }
+  /** Preis unter dem Werkzeug: steigt mit der Hafenstufe */
+  private toolSub(d: ToolDef): string {
+    const tool = d.tool as BuildTool;
+    if (!(tool in COST) || tool === 'road') return d.sub;
+    const c = this.game.sim.costOf(tool);
+    const p = c >= 1000 ? `${Math.round(c / 1000)}k` : `${c} €`;
+    const [w, h] = sizeOf(tool);
+    return w * h > 1 ? `${p} · ${w}×${h}` : p;
+  }
+
   refreshTools() {
     // Die Abteilung folgt dem gewählten Werkzeug (auch bei Tastenkürzeln)
     const cur = this.toolBtns.get(this.game.tool)?.def.cat;
@@ -769,6 +795,16 @@ export class UI {
     this.zonePick.classList.toggle('hidden', this.game.tool !== 'zone');
     const [sw, sh] = sizeOf(this.game.tool);
     this.rotPick.classList.toggle('hidden', sw === sh);
+    const usable = this.game.tool === 'crane' || this.game.tool === 'lcrane' || this.game.tool === 'truck';
+    this.usedPick.classList.toggle('hidden', !usable);
+    if (usable) {
+      const price = this.game.sim.costOf(this.game.tool as BuildTool);
+      for (const b of this.usedPick.querySelectorAll<HTMLElement>('button')) {
+        const u = b.dataset.used === '1';
+        b.classList.toggle('on', u === this.game.sim.used);
+        b.textContent = u ? `Gebraucht · ${eur(Math.round((price * USED_PRICE) / 100) * 100)} · 50–75 %` : `Neu · ${eur(price)}`;
+      }
+    }
     this.rotPick.firstElementChild!.innerHTML = `${ICONS.rotate} Drehen (R) · ${dimsOf(this.game.tool, this.game.sim.rot).join(' × ')} Felder`;
     for (const b of this.zonePick.querySelectorAll<HTMLElement>('button')) b.classList.toggle('on', Number(b.dataset.zone) === this.game.zonePick);
     for (const b of this.rolePick.querySelectorAll<HTMLElement>('button')) b.classList.toggle('on', b.dataset.role === this.game.assignRole);
@@ -852,8 +888,9 @@ export class UI {
         const need = UNLOCK[v.def.tool as BuildTool] ?? 1;
         const locked = sim.level < need;
         v.btn.classList.toggle('locked', locked);
-        v.sub.textContent = locked ? `Stufe ${need}` : v.def.sub;
+        v.sub.textContent = locked ? `Stufe ${need}` : this.toolSub(v.def);
       }
+      this.refreshTools();
     }
 
     const land = this.toolBtns.get('buyland');
@@ -1082,7 +1119,7 @@ export class UI {
             ? '<span class="tag">voll ausgebaut</span>'
             : sim.level < t.level[n]
               ? `<div class="locknote">${ICONS.lock}<span>Stufe ${n + 1} ab Hafenstufe ${t.level[n]}</span></div>`
-              : `<button class="primary" data-tech="${id}" ${chk.ok ? '' : 'disabled'}>Stufe ${n + 1} · ${eur(t.cost[n])}</button>`;
+              : `<button class="primary" data-tech="${id}" ${chk.ok ? '' : 'disabled'}>Stufe ${n + 1} · ${eur(sim.techCost(id))}</button>`;
         return `<div class="deal tech"><div class="dl"><b>${t.name}</b><span class="dots">${dots}</span></div><div class="sub">${t.text} Pro Stufe ${t.per}.</div>${btn}</div>`;
       }).join('');
   }
@@ -1116,10 +1153,18 @@ export class UI {
     const gone = () => {
       this.game.selected = null;
     };
-    const wearRow = (w: number) =>
-      sim.level >= 2
-        ? `<div class="meta ${w > 0.75 ? 'neg' : ''}">Zustand ${Math.round((1 - w) * 100)} %${w > 0.3 && !sim.shops.length ? ' · Ohne Werkstatt fällt es irgendwann aus' : ''}</div>`
+    // Zustand wie ein Akku: aktueller Zustand und Höchstwert, bis zu dem die Werkstatt repariert
+    const wearRow = (w: number, cap = 1) =>
+      sim.level >= 2 || cap < 1
+        ? `<div class="meta ${w > 0.75 ? 'neg' : ''}">Zustand ${Math.round((1 - w) * 100)} % · Höchstwert ${Math.round(cap * 100)} %${cap < 0.6 ? ' · alt: fällt öfter aus' : ''}${w > 0.3 && !sim.shops.length && sim.level >= 2 ? ' · Ohne Werkstatt fällt es irgendwann aus' : ''}</div>
+          <div class="progress cap"><span style="width:${Math.round((1 - w) * 100)}%"></span><i style="left:${Math.round(cap * 100)}%"></i></div>`
         : '';
+    const buildRow = (b?: number, what = 'Im Bau') => (b ? `<div class="meta warnline">${what}: noch ${hours(b)}, bis dahin arbeitet es nicht</div>` : '');
+    const overhaulBtn = (kind: 'crane' | 'truck', id: number, cap: number) => {
+      if (cap >= 0.9) return '';
+      const chk = sim.canOverhaul(kind, id);
+      return `<button class="secondary" data-overhaul="1" ${chk.ok ? '' : 'disabled'} title="${chk.reason ?? ''}">Generalüberholung · ${eur(chk.cost)} (Höchstwert auf 90 %)</button>`;
+    };
     const upgradeBtn = (kind: 'crane' | 'truck', label: string, info?: { cost: number; level: number }) => {
       const u = info ?? UPGRADE[kind];
       return sim.level < u.level
@@ -1152,15 +1197,17 @@ export class UI {
               ? 'Steht wegen Sturm still'
               : 'Wartet auf ein Schiff';
       html = `<h3>${CRANE_MODELS[c.model].name} <span class="tag">${Math.round(60 / sim.moveTime({ ...c, wear: 0 }))} Moves pro Stunde</span></h3>
-        <div class="meta">${c.state === 'broken' ? 'Ausgefallen: wartet auf die Werkstatt' : st}</div>
-        ${wearRow(c.wear)}
+        ${c.build ? buildRow(c.build, 'Im Bau oder Umbau') : `<div class="meta">${c.state === 'broken' ? 'Ausgefallen: wartet auf die Werkstatt' : st}</div>`}
+        ${wearRow(c.wear, c.cap)}
         <div class="meta">Entladen am Kran: ${c.buffer + c.bufReef} von ${sim.bufCap(c)}${sim.level >= 2 ? ` · Export am Kran: ${c.expBuf} von ${sim.bufCap(c, true)}` : ''}</div>`;
       const ui = sim.upgradeInfo('crane', c.id);
-      if (ui) actions = upgradeBtn('crane', ui.label, ui);
+      if (ui && !c.build) actions = upgradeBtn('crane', ui.label, ui);
+      if (!c.build) actions += overhaulBtn('crane', c.id, c.cap);
     } else if (sel.kind === 'gate') {
       const g = sim.gates.find((g) => g.id === sel.id);
       if (!g) return gone();
-      html = `<h3>Gate <span class="tag">30 Container pro Stunde</span></h3>
+      html = `<h3>Gate <span class="tag">${Math.round(30 * (1 + 0.2 * sim.tech.scanner))} Container pro Stunde</span></h3>
+        ${buildRow(g.build)}
         <div class="meta">${g.proc > 0 ? (g.procIn ? 'Nimmt einen Export-Container an' : 'Fertigt einen Container ab') : 'Wartet auf Container'}</div>
         <div class="meta">Wartend nach draußen: ${g.apron.length} von ${GATE_APRON_CAP}${sim.level >= 2 ? ` · Export wartet auf Truck: ${g.inApron}` : ''}</div>
         <div class="meta">Abgefertigt: ${num(g.served)}</div>`;
@@ -1179,6 +1226,7 @@ export class UI {
       const cfg = PLANTS[p.kind];
       const pack = p.kind === 'pack';
       html = `<h3>${cfg.name} <span class="tag">${Math.round(60 / cfg.time)} pro Stunde</span></h3>
+        ${buildRow(p.build)}
         <div class="meta">${pack ? `Macht aus 2 Einheiten ausgepackter Ware 1 Container ${PRODUCTS[p.product].name} (zurzeit ${eur(sim.price(p.product))}).` : p.kind === 'cold' ? `Verarbeitet Kühlcontainer zu Lebensmitteln (zurzeit ${eur(sim.price('food'))} statt 400 €).` : 'Packt Import-Container vom Stapelplatz aus. Die Ware geht weiter zur Veredelung.'}</div>
         <div class="meta">Eingang: ${p.inBuf} von ${PLANT_BUF} · Ausgang: ${p.outBuf} von ${PLANT_BUF} · Hergestellt: ${num(p.made)}</div>
         <div class="meta ${p.outBuf >= PLANT_BUF ? 'neg' : ''}">${p.proc > 0 ? 'Arbeitet' : p.outBuf >= PLANT_BUF ? 'Ausgang voll: Es fehlt ein Truck, der abholt' : p.inBuf < cfg.needs ? 'Wartet auf Nachschub' : 'Bereit'}</div>`;
@@ -1192,6 +1240,8 @@ export class UI {
       if (!sh) return gone();
       const tgt = sh.target;
       html = `<h3>Werkstatt <span class="tag">braucht einen Mechaniker</span></h3>
+        ${buildRow(sh.build)}
+        <div class="meta">Repariert nur bis zum Höchstwert eines Geräts. Der Höchstwert sinkt mit der Nutzung, eine Generalüberholung hebt ihn wieder.</div>
         <div class="meta">${!sh.staffed ? 'Kein Mechaniker im Dienst. Stelle im Personal jemanden ein.' : tgt ? `Repariert gerade ${tgt.kind === 'crane' ? 'einen Kran' : 'einen Truck'}` : 'Wartet auf Arbeit. Repariert Geräte ab 30 % Verschleiß, das am stärksten abgenutzte zuerst.'}</div>
         <div class="meta">Ausgefallen: ${sim.trucks.filter((t) => t.wear >= 1).length + sim.cranes.filter((c) => c.wear >= 1).length} Geräte</div>`;
     } else if (sel.kind === 'rail') {
@@ -1206,6 +1256,7 @@ export class UI {
               ? `Der Zug wird beladen, Abfahrt in ${Math.ceil(r.timer)} Minuten`
               : 'Der Zug fährt ab';
       html = `<h3>Gleisanschluss <span class="tag">bis zu ${RAIL_CAP} Container pro Zug</span></h3>
+        ${buildRow(r.build)}
         <div class="progress"><span style="width:${Math.round((r.platform / RAIL_CAP) * 100)}%"></span></div>
         <div class="meta">Am Bahnsteig: ${r.platform} von ${RAIL_CAP} · Wert ${eur(r.value)}</div>
         <div class="meta">${st}</div>`;
@@ -1213,14 +1264,15 @@ export class UI {
       const t = sim.trucks.find((t) => t.id === sel.id);
       if (!t) return gone();
       html = `<h3>${t.agv ? 'Fahrerloses Fahrzeug' : 'Truck'} <span class="tag">2 Container pro Fahrt</span></h3>
-        <div class="meta">${t.wear >= 1 ? 'Ausgefallen: wartet auf die Werkstatt' : jobText(t.job)}</div>
+        ${t.build ? buildRow(t.build, 'In der Generalüberholung') : `<div class="meta">${t.wear >= 1 ? 'Ausgefallen: wartet auf die Werkstatt' : jobText(t.job)}</div>`}
         <div class="meta">Geladen: ${t.load}</div>
-        ${wearRow(t.wear)}`;
+        ${wearRow(t.wear, t.cap)}`;
       const roles = (Object.keys(ROLE_NAMES) as TruckRole[]).filter((r) => r !== 'plant' || sim.level >= 2).filter((r) => r !== 'export' || sim.level >= 2);
       actions = `<div class="rolelabel">Aufgabe</div><div class="roles">${roles
         .map((r) => `<button data-role="${r}" class="${t.role === r ? 'on' : ''}">${ROLE_NAMES[r].name}</button>`)
         .join('')}</div><div class="meta">${ROLE_NAMES[t.role].text}${t.role === 'auto' ? '' : ' Feste Aufgabe: 25 % schneller, lädt doppelt so schnell.'}</div>`;
-      if (!t.agv) actions += upgradeBtn('truck', 'Fahrerlos machen');
+      if (!t.agv) actions += upgradeBtn('truck', 'Fahrerlos machen', sim.upgradeInfo('truck', t.id)!);
+      if (!t.build) actions += overhaulBtn('truck', t.id, t.cap);
     }
     // Zone anzeigen, wo es eine gibt
     {

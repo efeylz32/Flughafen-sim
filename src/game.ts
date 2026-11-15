@@ -221,6 +221,14 @@ export class Game {
     this.hover = null;
     this.ui.refreshTools();
   }
+  overhaulSelected() {
+    const sel = this.selected;
+    if (!sel || (sel.kind !== 'crane' && sel.kind !== 'truck')) return;
+    const r = this.sim.overhaul(sel.kind, sel.id);
+    if (!r.ok) return this.fail(r.reason ?? 'Nicht möglich');
+    this.sound.play('upgrade');
+    this.ui.toast('Generalüberholung läuft. Das Gerät ist eine Weile außer Betrieb.', 'good');
+  }
   buyTech(id: TechId) {
     const r = this.sim.buyTech(id);
     if (!r.ok) return this.fail(r.reason ?? 'Nicht möglich');
