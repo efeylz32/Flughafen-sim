@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { COAST_ROW, GRID_W, TICKS_PER_SEC } from '../src/sim/data';
+import { COAST_ROW, GRID_W, T, TICKS_PER_SEC } from '../src/sim/data';
 import { buildDemo } from '../src/sim/demo';
 import { Sim } from '../src/sim/sim';
 
@@ -1226,5 +1226,82 @@ describe('Vertiefung: Richtung, Personal, Konjunktur', () => {
     expect(sim.buyTech('diesel').ok).toBe(true);
     sim.gm = 20 * 1440;
     expect(sim.season.name).not.toBe(new Sim().season.name);
+  });
+});
+
+describe('Gefahrgut, Leerlager und Befüllkette', () => {
+  function chainPort(): Sim {
+    const sim = new Sim(11);
+    sim.money = 20_000_000;
+    sim.level = 3;
+    for (let x = 6; x < 10; x++) sim.build('kai', x, k);
+    sim.build('crane', 7, k);
+    sim.build('crane', 9, k);
+    for (let x = 2; x <= GRID_W - 1; x++) sim.build('road', x, k + 1);
+    for (let x = 12; x <= 16; x++) sim.build('yard', x, k + 2);
+    sim.build('gate', 18, k + 2);
+    sim.build('unpack', 20, k + 2);
+    sim.build('emptyyard', 24, k + 2);
+    sim.build('emptyyard', 25, k + 2);
+    sim.build('fill', 27, k + 2);
+    sim.build('rail', GRID_W - 1, k + 2);
+    sim.build('hazard', 2, k + 2);
+    sim.build('hazard', 3, k + 2);
+    for (let i = 0; i < 8; i++) sim.build('truck', 6 + i, k + 1);
+    sim.finishAll();
+    sim.updateMissions(true);
+    sim.mission = Math.max(sim.mission, 6);
+    sim.nextShipIn = 1;
+    return sim;
+  }
+
+  it('Gefahrgut braucht Abstand zu Gates, Hallen und Werkstatt', () => {
+    const sim = new Sim();
+    sim.level = 3;
+    sim.build('road', 10, k + 1);
+    sim.build('gate', 12, k + 2);
+    expect(sim.canBuild('hazard', 11, k + 2).ok).toBe(false);
+    expect(sim.canBuild('hazard', 15, k + 2).ok).toBe(false); // nur ein Feld Abstand
+    expect(sim.canBuild('hazard', 16, k + 2).ok).toBe(true);
+    sim.build('hazard', 16, k + 2);
+    expect(sim.canBuild('workshop', 17, k + 3).ok).toBe(false);
+    expect(sim.canBuild('workshop', 21, k + 3).ok).toBe(true);
+  });
+
+  it('die Kette läuft: Auspacken liefert Leergut, die Befüllhalle macht Export daraus', () => {
+    const sim = chainPort();
+    run(sim, 60);
+    const unpack = sim.plants.find((p) => p.kind === 'unpack')!;
+    const fill = sim.plants.find((p) => p.kind === 'fill')!;
+    expect(unpack.made).toBeGreaterThan(0);
+    expect(fill.made).toBeGreaterThan(0);
+    expect(sim.shipsDone).toBeGreaterThan(0);
+  });
+
+  it('Gefahrgut kommt an Bord, wird gelagert und über das Gate abgefertigt', () => {
+    const sim = chainPort();
+    let seen = 0;
+    for (let h = 0; h < 80; h++) {
+      run(sim, 1);
+      for (const s of sim.ships) seen = Math.max(seen, s.haz);
+    }
+    expect(seen).toBeGreaterThan(0);
+    expect(sim.hazStock + sim.gates.reduce((n, g) => n + g.served, 0)).toBeGreaterThan(0);
+    // Reservierungen leaken nicht
+    for (const c of sim.cranes) expect(c.resOutHaz).toBeGreaterThanOrEqual(0);
+  });
+
+  it('Abriss und Rückgängig erhalten Lagerart und Bestand', () => {
+    const sim = chainPort();
+    const i = sim.idx(24, k + 2);
+    sim.stock[i] = 5;
+    const d = sim.demolish(24, k + 2);
+    expect(sim.kind[i]).toBe(T.Land);
+    expect(sim.undoDemolish(d.removed).ok).toBe(true);
+    expect(sim.kind[i]).toBe(T.Empty);
+    expect(sim.stock[i]).toBe(5);
+    const copy = Sim.deserialize(JSON.parse(JSON.stringify(sim.serialize())));
+    expect(copy.kind[i]).toBe(T.Empty);
+    expect(copy.plants.some((p) => p.kind === 'fill')).toBe(true);
   });
 });

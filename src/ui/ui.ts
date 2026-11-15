@@ -55,6 +55,9 @@ const ICONS: Record<string, string> = {
   view: svg('<path d="M7 3.5l11 7-4.6 1.4 2.8 5.6-2.6 1.3-2.8-5.6L5.8 16z"/>'),
   kai: svg('<rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M3 9h18M7 9v4M12 9v4M17 9v4"/>'),
   crane: svg('<path d="M6 21V6M3 21h6M6 6h14M17 6v6"/><rect x="15" y="12" width="4" height="3" rx=".6"/><path d="M6 6l6-3"/>'),
+  hazard: svg('<path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18v.5"/>'),
+  emptyyard: svg('<rect x="4" y="6" width="16" height="12" rx="1.5"/><path d="M8 6v12M12 6v12M16 6v12"/>'),
+  fill: svg('<path d="M3 10l9-6 9 6v10H3z"/><path d="M9 20v-6h6v6"/><path d="M12 2v4"/>'),
   lcrane: svg('<path d="M7 21V9M4 21h6M7 9h10M15 9v5"/><rect x="13.5" y="14" width="3.5" height="2.6" rx=".6"/>'),
   tech: svg('<path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/><circle cx="12" cy="12" r="3.5"/>'),
   road: svg('<path d="M8.5 3L5 21M15.5 3L19 21"/><path d="M12 4.5v3M12 10.5v3M12 16.5v3"/>'),
@@ -121,6 +124,9 @@ const TOOLS: ToolDef[] = [
   { cat: 'build', tool: 'pack', label: 'Veredeln', sub: '90k · 3×3', color: '#7a5cc7' },
   { cat: 'store', tool: 'rtg', label: 'Portalkran', sub: '60k', color: '#f2a030' },
   { cat: 'store', tool: 'reefer', label: 'Kühlplatz', sub: '4k', color: '#3b9bd6' },
+  { cat: 'store', tool: 'hazard', label: 'Gefahrgut', sub: '12k', color: '#e8602c' },
+  { cat: 'store', tool: 'emptyyard', label: 'Leerlager', sub: '2k', color: '#7d8da0' },
+  { cat: 'build', tool: 'fill', label: 'Befüllhalle', sub: '110k · 3×2', color: '#3f9a6b' },
   { cat: 'build', tool: 'cold', label: 'Kühlhalle', sub: '80k · 2×2', color: '#3b9bd6' },
   { cat: 'build', tool: 'workshop', label: 'Werkstatt', sub: '40k · 2×2', color: '#5b6b82' },
   { cat: 'build', tool: 'rail', label: 'Gleis', sub: '150k', color: '#5f6f82' },
@@ -152,9 +158,9 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''):
 
 function jobText(j: Job | null): string {
   if (!j) return 'Wartet auf einen Auftrag';
-  const store = j.cargo === 'reef' ? 'Kühlplatz' : 'Stapelplatz';
-  const cargo = { imp: 'Container', reef: 'Kühlcontainer', exp: 'Export-Container', ware: 'ausgepackte Ware', prem: 'Fertigware', food: 'Lebensmittel' }[j.cargo];
-  if (j.stage === 0) return `Fährt zu: ${j.srcKind === 'crane' ? 'Kran' : j.srcKind === 'gate' ? 'Gate' : j.srcKind === 'plant' ? 'Verarbeitung' : store}`;
+  const store = j.cargo === 'reef' ? 'Kühlplatz' : j.cargo === 'haz' ? 'Gefahrgutfläche' : j.cargo === 'empty' ? 'Leerlager' : 'Stapelplatz';
+  const cargo = { imp: 'Container', reef: 'Kühlcontainer', haz: 'Gefahrgut', empty: 'Leercontainer', exp: 'Export-Container', ware: 'ausgepackte Ware', prem: 'Fertigware', food: 'Lebensmittel' }[j.cargo];
+  if (j.stage === 0) return `Fährt zu: ${j.srcKind === 'crane' ? 'Kran' : j.srcKind === 'gate' ? 'Gate' : j.srcKind === 'plant' ? 'Verarbeitung' : j.srcKind === 'rail' ? 'Gleisanschluss' : store}`;
   const dst = j.dstKind === 'store' ? store : j.dstKind === 'gate' ? 'Gate' : j.dstKind === 'rail' ? 'Gleisanschluss' : j.dstKind === 'plant' ? 'Verarbeitung' : 'Kran';
   return `Bringt ${cargo} zu: ${dst}`;
 }
@@ -1201,7 +1207,7 @@ export class UI {
     if (sel.kind === 'ship') {
       const s = sim.ships.find((s) => s.id === sel.id);
       if (!s) return gone();
-      const done = s.total - s.containers - s.reefers;
+      const done = s.total - s.containers - s.reefers - s.haz;
       const late = s.atBerth > s.dwellTarget;
       const c = sim.contracts.find((c) => c.id === s.contractId);
       html = `<h3>${s.name} <span class="tag">${SHIP_TYPES[s.type].name}</span></h3>
@@ -1226,7 +1232,7 @@ export class UI {
       html = `<h3>${CRANE_MODELS[c.model].name} <span class="tag">${Math.round(movesPerHour(c.model) * (1 + 0.1 * sim.tech.spreader) * (sim.tech.akkord ? 1.2 : 1) * (sim.spec === 'hub' ? 1.15 : sim.spec === 'logi' ? 0.95 : 1))} Moves pro Stunde</span></h3>
         ${c.build ? buildRow(c.build, 'Im Bau oder Umbau') : `<div class="meta">${c.state === 'broken' ? 'Ausgefallen: wartet auf die Werkstatt' : st}</div>`}
         ${wearRow(c.wear, c.cap)}
-        <div class="meta">Entladen am Kran: ${c.buffer + c.bufReef} von ${sim.bufCap(c)}${sim.level >= 2 ? ` · Export am Kran: ${c.expBuf} von ${sim.bufCap(c, true)}` : ''}</div>`;
+        <div class="meta">Entladen am Kran: ${c.buffer + c.bufReef + c.bufHaz} von ${sim.bufCap(c)}${sim.level >= 2 ? ` · Export am Kran: ${c.expBuf} von ${sim.bufCap(c, true)}` : ''}</div>`;
       const ui = sim.upgradeInfo('crane', c.id);
       if (ui && !c.build) actions = upgradeBtn('crane', ui.label, ui);
       if (!c.build) actions += overhaulBtn('crane', c.id, c.cap);
@@ -1242,6 +1248,14 @@ export class UI {
       html = `<h3>Stapelplatz <span class="tag">${sim.capAt(sel.id)} Container pro Feld${sim.rtgCovers(sel.id) ? ' mit Portalkran' : ''}</span></h3>
         <div class="meta">Dieses Feld: ${sim.stock[sel.id]} Import, ${sim.stockExp[sel.id]} Export</div>
         <div class="meta">Gesamt: ${sim.yardStock} von ${sim.yardCapacity}</div>`;
+    } else if (sel.kind === 'hazmat') {
+      html = `<h3>Gefahrgutfläche <span class="tag">${sim.capAt(sel.id)} Container pro Feld</span></h3>
+        <div class="meta">Dieses Feld: ${sim.stock[sel.id]} · Gesamt: ${sim.hazStock} von ${sim.hazCapacity}</div>
+        <div class="meta">Gefahrgut bringt 700 € pro Container. Die Fläche braucht 2 Felder Abstand zu Gates, Hallen und Werkstatt.</div>`;
+    } else if (sel.kind === 'emptyyard') {
+      html = `<h3>Leerlager <span class="tag">${sim.capAt(sel.id)} Container pro Feld</span></h3>
+        <div class="meta">Dieses Feld: ${sim.stock[sel.id]} · Gesamt: ${sim.emptyStock} von ${sim.emptyCapacity}</div>
+        <div class="meta">Hier landen leere Container aus der Packhalle. Die Befüllhalle macht daraus mit Ware aus Packhalle oder Zug einen Export-Container. Überzählige gehen für 90 € zurück an die Reederei.</div>`;
     } else if (sel.kind === 'reefer') {
       const left = sim.reeferTimeLeft(sel.id);
       html = `<h3>Kühlplatz <span class="tag">mit Strom</span></h3>
@@ -1254,8 +1268,8 @@ export class UI {
       const pack = p.kind === 'pack';
       html = `<h3>${cfg.name} <span class="tag">${Math.round(60 / cfg.time)} pro Stunde</span></h3>
         ${buildRow(p.build)}
-        <div class="meta">${pack ? `Macht aus 2 Einheiten ausgepackter Ware 1 Container ${PRODUCTS[p.product].name} (zurzeit ${eur(sim.price(p.product))}).` : p.kind === 'cold' ? `Verarbeitet Kühlcontainer zu Lebensmitteln (zurzeit ${eur(sim.price('food'))} statt 400 €).` : 'Packt Import-Container vom Stapelplatz aus. Die Ware geht weiter zur Veredelung.'}</div>
-        <div class="meta">Eingang: ${p.inBuf} von ${PLANT_BUF} · Ausgang: ${p.outBuf} von ${PLANT_BUF} · Hergestellt: ${num(p.made)}</div>
+        <div class="meta">${p.kind === 'fill' ? 'Macht aus einem leeren Container und einer Ladung Ware einen Export-Container (+150 €). Leergut kommt aus dem Leerlager, Ware aus der Packhalle oder vom Zug.' : pack ? `Macht aus 2 Einheiten ausgepackter Ware 1 Container ${PRODUCTS[p.product].name} (zurzeit ${eur(sim.price(p.product))}).` : p.kind === 'cold' ? `Verarbeitet Kühlcontainer zu Lebensmitteln (zurzeit ${eur(sim.price('food'))} statt 400 €).` : 'Packt Import-Container vom Stapelplatz aus. Die Ware geht weiter zur Veredelung.'}</div>
+        <div class="meta">Eingang: ${p.inBuf} von ${PLANT_BUF}${p.kind === 'fill' ? ` · Leergut: ${p.inEmpty} von ${PLANT_BUF}` : ''} · Ausgang: ${p.outBuf} von ${PLANT_BUF}${p.kind === 'unpack' ? ` · Leere Container: ${p.emptyOut}` : ''} · Hergestellt: ${num(p.made)}</div>
         <div class="meta ${p.outBuf >= PLANT_BUF ? 'neg' : ''}">${p.proc > 0 ? 'Arbeitet' : p.outBuf >= PLANT_BUF ? 'Ausgang voll: Es fehlt ein Truck, der abholt' : p.inBuf < cfg.needs ? 'Wartet auf Nachschub' : 'Bereit'}</div>`;
       if (pack) {
         actions = `<div class="rolelabel">Produkt</div><div class="roles">${(['elec', 'cloth'] as ProductId[])
@@ -1305,7 +1319,7 @@ export class UI {
     {
       const sel2 = this.game.selected!;
       let z = 0;
-      if (sel2.kind === 'yard' || sel2.kind === 'reefer') z = sim.zone[sel2.id];
+      if (sel2.kind === 'yard' || sel2.kind === 'reefer' || sel2.kind === 'hazmat' || sel2.kind === 'emptyyard') z = sim.zone[sel2.id];
       else if (sel2.kind === 'crane') z = sim.cranes.find((c) => c.id === sel2.id)?.zone ?? 0;
       else if (sel2.kind === 'gate') z = sim.gates.find((g) => g.id === sel2.id)?.zone ?? 0;
       else if (sel2.kind === 'plant') z = sim.plants.find((p) => p.id === sel2.id)?.zone ?? 0;

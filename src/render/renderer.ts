@@ -9,7 +9,7 @@ export interface View {
   overlay: boolean;
   tool: string;
   hover: { x: number; y: number; ok: boolean } | null;
-  selected: { kind: 'ship' | 'crane' | 'gate' | 'yard' | 'reefer' | 'rail' | 'plant' | 'shop' | 'truck'; id: number } | null;
+  selected: { kind: 'ship' | 'crane' | 'gate' | 'yard' | 'reefer' | 'hazmat' | 'emptyyard' | 'rail' | 'plant' | 'shop' | 'truck'; id: number } | null;
   /** Anteil zwischen letztem und nächstem Tick (0..1) für weiche Bewegung. */
   alpha: number;
   /** Laufzeit in Sekunden (Echtzeit) für Animationen. */
@@ -66,6 +66,8 @@ const CAB = [0xf2b632, 0xe8542f, 0x2f7fd0, 0xf4f5f7];
 /** Export-Container sind einheitlich dunkel, Kühlcontainer weiß. */
 const EXPORT_BOX = 0x4a607c;
 const REEFER_BOX = 0xf4f9fd;
+const HAZ_BOX = 0xe8602c;
+const EMPTY_BOX = 0x9aa8b6;
 /** Ausgepackte Ware ist braun (Kisten), Fertigware gold. */
 const WARE_BOX = 0xb98a52;
 const PREM_BOX = 0xf4c430;
@@ -142,7 +144,8 @@ interface TrainView {
 interface StoreView {
   sprites: Sprite[];
   key: number;
-  reefer: boolean;
+  /** yard, reefer, haz oder empty */
+  type: string;
   cap: number;
   px: number;
   py: number;
@@ -721,6 +724,21 @@ export class Renderer {
             if (!same(1, 0)) g.rect(px + TILE - 2, py, 2, TILE).fill(0x3b9bd6);
             break;
           }
+          case T.Hazmat: {
+            // Gefahrgut: Warnstreifen, rote Umrandung
+            g.rect(px, py, TILE, TILE).fill(0xe9d8b4);
+            for (let sx = -TILE; sx < TILE; sx += 10) g.poly([px + sx, py + TILE, px + sx + 5, py + TILE, px + sx + 5 + TILE, py, px + sx + TILE, py]).fill({ color: 0xf2c230, alpha: 0.55 });
+            g.rect(px + 2, py + 2, TILE - 4, TILE - 4).stroke({ width: 2, color: 0xd9473f });
+            g.poly([px + TILE - 9, py + 3, px + TILE - 3, py + 3, px + TILE - 6, py + 9]).fill(0xd9473f);
+            break;
+          }
+          case T.Empty: {
+            // Leerlager: graue Fläche mit blauer Markierung
+            g.rect(px, py, TILE, TILE).fill(0xcfd6dc);
+            g.rect(px + 2, py + 2, TILE - 4, TILE - 4).stroke({ width: 1.6, color: 0x6d8aa8 });
+            g.rect(px + 3, py + TILE - 4, TILE - 6, 1.4).fill({ color: 0x6d8aa8, alpha: 0.7 });
+            break;
+          }
           case T.Rail: {
             // Schotterbett und Gleis führen nach rechts aus der Karte
             const far = DECOR + 500;
@@ -749,7 +767,7 @@ export class Renderer {
     // Zonen: Lagerfelder mit farbigem Rand, Gebäude mit farbiger Ecke
     for (let i = 0; i < sim.zone.length; i++) {
       const z = sim.zone[i];
-      if (!z || (sim.kind[i] !== T.Yard && sim.kind[i] !== T.Reefer)) continue;
+      if (!z || (sim.kind[i] !== T.Yard && sim.kind[i] !== T.Reefer && sim.kind[i] !== T.Hazmat && sim.kind[i] !== T.Empty)) continue;
       const px = (i % GRID_W) * TILE;
       const py = ((i / GRID_W) | 0) * TILE;
       g.rect(px + 2.5, py + 2.5, TILE - 5, TILE - 5).stroke({ width: 2.2, color: ZONES[z].color });
@@ -837,7 +855,7 @@ export class Renderer {
       const y = p.y * TILE;
       const w = p.w * TILE;
       const h = p.h * TILE;
-      const roof = p.kind === 'pack' ? 0x7a5cc7 : p.kind === 'cold' ? 0x3b9bd6 : 0xc98a3c;
+      const roof = p.kind === 'pack' ? 0x7a5cc7 : p.kind === 'cold' ? 0x3b9bd6 : p.kind === 'fill' ? 0x3f9a6b : 0xc98a3c;
       g.roundRect(x + 4, y + 6, w - 5, h - 13, 3).fill({ color: 0x000000, alpha: 0.25 });
       g.roundRect(x + 2, y + 2.5, w - 5, h - 13, 3).fill(shade(roof, 0.75));
       g.roundRect(x + 3, y + 3.5, w - 7, h - 15, 2.5).fill(roof);
@@ -983,27 +1001,31 @@ export class Renderer {
 
   /** Stapelplatz und Kühlplätze: sechs Stellplätze pro Feld. */
   private syncYard(sim: Sim) {
-    const tiles = new Map<number, boolean>();
-    for (const i of sim.yardTileList) tiles.set(i, false);
-    for (const i of sim.reeferTileList) tiles.set(i, true);
+    const tiles = new Map<number, string>();
+    for (const i of sim.yardTileList) tiles.set(i, 'yard');
+    for (const i of sim.reeferTileList) tiles.set(i, 'reefer');
+    for (const i of sim.hazTileList) tiles.set(i, 'haz');
+    for (const i of sim.emptyTileList) tiles.set(i, 'empty');
     for (const [i, y] of this.yard) {
-      if (tiles.get(i) !== y.reefer) {
+      if (tiles.get(i) !== y.type) {
         for (const s of y.sprites) s.destroy();
         this.yard.delete(i);
       }
     }
-    for (const [i, reefer] of tiles) {
+    for (const [i, type] of tiles) {
       if (this.yard.has(i)) continue;
       const px = (i % GRID_W) * TILE;
       const py = ((i / GRID_W) | 0) * TILE;
       const sprites: Sprite[] = [];
-      for (let k = 0; k < RTG_CAP; k++) {
-        const s = this.box(this.boxV, 0xffffff, px + 2.3 + (k % 3) * 9.4, py + 2.6 + Math.floor(k / 3) * 14);
-        s.visible = false;
+      const slots = type === 'empty' ? 12 : RTG_CAP;
+      for (let k = 0; k < slots; k++) {
+        // Leerlager: vier Reihen flach gestapelt, sonst drei Spalten
+        const s = type === 'empty' ? this.box(this.boxV, 0xffffff, px + 1.5 + (k % 4) * 7.4, py + 1.6 + Math.floor(k / 4) * 10, 1) : this.box(this.boxV, 0xffffff, px + 2.3 + (k % 3) * 9.4, py + 2.6 + Math.floor(k / 3) * 14);
+        if (type === 'empty') s.scale.set(0.78, 0.68);
         this.yardLayer.addChild(s);
         sprites.push(s);
       }
-      this.yard.set(i, { sprites, key: -1, reefer, cap: YARD_CAP_PER_TILE, px, py });
+      this.yard.set(i, { sprites, key: -1, type, cap: YARD_CAP_PER_TILE, px, py });
     }
   }
 
@@ -1015,6 +1037,13 @@ export class Renderer {
       const key = imp * 16 + exp + cap * 256;
       if (key === y.key) continue;
       y.key = key;
+      if (y.type === 'empty') {
+        for (let k = 0; k < y.sprites.length; k++) {
+          y.sprites[k].visible = k < imp;
+          y.sprites[k].tint = EMPTY_BOX;
+        }
+        continue;
+      }
       if (cap !== y.cap) {
         // Mit Portalkran: drei Reihen flacher gestapelt
         y.cap = cap;
@@ -1027,7 +1056,7 @@ export class Renderer {
       for (let k = 0; k < y.sprites.length; k++) {
         const sp = y.sprites[k];
         sp.visible = k < imp + exp;
-        sp.tint = k < imp ? (y.reefer ? REEFER_BOX : BOX[hash(i, k) % BOX.length]) : EXPORT_BOX;
+        sp.tint = k < imp ? (y.type === 'reefer' ? REEFER_BOX : y.type === 'haz' ? HAZ_BOX : BOX[hash(i, k) % BOX.length]) : EXPORT_BOX;
       }
     }
   }
@@ -1140,7 +1169,7 @@ export class Renderer {
       else v.rotor.position.set(Math.sin(r) > 0 ? 2 * TILE : 0, Math.sin(r) > 0 ? 0 : L);
       v.alert.position.set(vert ? TILE : L / 2, 2);
       // Ladung an Deck: was noch an Bord ist, plus was schon verladen wurde
-      const filled = Math.ceil(Math.min(1, (s.containers + s.reefers + s.loaded) / s.total) * v.cargo.length);
+      const filled = Math.ceil(Math.min(1, (s.containers + s.reefers + s.haz + s.loaded) / s.total) * v.cargo.length);
       if (filled !== v.filled) {
         for (let k = 0; k < v.cargo.length; k++) v.cargo[k].visible = k < filled;
         v.filled = filled;
@@ -1387,12 +1416,12 @@ export class Renderer {
       v.hook.visible = carrying;
       v.lamp.tint = c.state === 'working' ? 0x3fe08a : c.state === 'blocked' ? 0xffb020 : c.state === 'storm' ? 0x8fb4ff : 0x9aa5b1;
       v.lamp.alpha = c.state === 'blocked' || c.state === 'storm' ? 0.45 + 0.55 * Math.abs(Math.sin(view.time * 5)) : 1;
-      const key = `${c.buffer}.${c.bufReef}.${c.expBuf}`;
+      const key = `${c.buffer}.${c.bufReef}.${c.bufHaz}.${c.expBuf}`;
       if (key !== v.key) {
         v.key = key;
         for (let k = 0; k < v.buffer.length; k++) {
-          v.buffer[k].visible = k < c.buffer + c.bufReef;
-          v.buffer[k].tint = k < c.buffer ? BOX[hash(c.id, k + 7) % BOX.length] : REEFER_BOX;
+          v.buffer[k].visible = k < c.buffer + c.bufReef + c.bufHaz;
+          v.buffer[k].tint = k < c.buffer ? BOX[hash(c.id, k + 7) % BOX.length] : k < c.buffer + c.bufReef ? REEFER_BOX : HAZ_BOX;
         }
         for (let k = 0; k < v.exp.length; k++) v.exp[k].visible = k < c.expBuf;
       }
@@ -1576,6 +1605,7 @@ export class Renderer {
       if (k === T.Road) col = utilColor(sim.stats.trucks);
       else if (k === T.Yard) col = utilColor((sim.stock[i] + sim.stockExp[i]) / YARD_CAP_PER_TILE);
       else if (k === T.Reefer) col = utilColor(sim.stock[i] / YARD_CAP_PER_TILE);
+      else if (k === T.Hazmat || k === T.Empty) col = utilColor(sim.stock[i] / sim.capAt(i));
       else if (k === T.Gate) col = utilColor(sim.stats.gate);
       else if (k === T.Rail) col = utilColor((sim.railAt(x, y)?.platform ?? 0) / RAIL_CAP);
       else if (k === T.Kai && sim.craneAt(x, y)) col = utilColor(sim.stats.crane);
@@ -2042,7 +2072,7 @@ export class Renderer {
       if (!r) return;
       x = r.x * TILE;
       y = r.y * TILE;
-    } else if (sel.kind === 'yard' || sel.kind === 'reefer') {
+    } else if (sel.kind === 'yard' || sel.kind === 'reefer' || sel.kind === 'hazmat' || sel.kind === 'emptyyard') {
       x = (sel.id % GRID_W) * TILE;
       y = ((sel.id / GRID_W) | 0) * TILE;
     } else {

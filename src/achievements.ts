@@ -13,6 +13,7 @@ export const ACHIEVEMENTS: Achievement[] = [
   { id: 'ship1', name: 'Leinen los', text: 'Das erste Schiff abgefertigt', done: (s) => s.shipsDone >= 1 },
   { id: 'ship100', name: 'Hochbetrieb', text: '100 Schiffe in einem Spiel abgefertigt', done: (s) => s.shipsDone >= 100 },
   { id: 'lvl3', name: LEVELS[2].name, text: 'Stufe 3 erreicht', done: (s) => s.level >= 3 },
+  { id: 'fill', name: 'Kreislaufwirtschaft', text: '30 Container in der Befüllhalle befüllt', done: (s) => s.plants.filter((p) => p.kind === 'fill').reduce((n, p) => n + p.made, 0) >= 30 },
   { id: 'lvl5', name: LEVELS[4].name, text: 'Stufe 5 erreicht', done: (s) => s.level >= 5 },
   { id: 'lvl7', name: LEVELS[6].name, text: 'Die höchste Stufe erreicht', done: (s) => s.level >= 7 },
   { id: 'mega', name: 'Riesenpott', text: '5 Mega-Frachter abgefertigt', done: (s) => s.megaDone >= 5 },

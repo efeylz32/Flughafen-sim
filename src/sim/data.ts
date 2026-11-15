@@ -26,9 +26,11 @@ export enum T {
   Plant = 8,
   Shop = 9,
   Rock = 10,
+  Hazmat = 11,
+  Empty = 12,
 }
 
-export type Tool = 'view' | 'kai' | 'crane' | 'lcrane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'rtg' | 'assign' | 'zone' | 'oneway' | 'buyland' | 'demolish';
+export type Tool = 'view' | 'kai' | 'crane' | 'lcrane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'rtg' | 'hazard' | 'emptyyard' | 'fill' | 'assign' | 'zone' | 'oneway' | 'buyland' | 'demolish';
 export type BuildTool = Exclude<Tool, 'view' | 'demolish' | 'assign' | 'zone' | 'oneway' | 'buyland'>;
 
 export const COST: Record<BuildTool, number> = {
@@ -47,6 +49,9 @@ export const COST: Record<BuildTool, number> = {
   cold: 80_000,
   workshop: 40_000,
   rtg: 60_000,
+  hazard: 12_000,
+  emptyyard: 2_000,
+  fill: 110_000,
 };
 /** Ab welcher Hafenstufe ein Werkzeug verfügbar ist. */
 export const UNLOCK: Record<BuildTool, number> = {
@@ -65,6 +70,9 @@ export const UNLOCK: Record<BuildTool, number> = {
   cold: 3,
   workshop: 2,
   rtg: 3,
+  hazard: 3,
+  emptyyard: 2,
+  fill: 3,
 };
 /** Kranmodelle. Aufrüsten führt jeweils zum nächsten Modell. */
 export type CraneModel = 'light' | 'mobile' | 'bridge' | 'super';
@@ -142,6 +150,7 @@ export const SIZE: Partial<Record<BuildTool, [number, number]>> = {
   pack: [3, 3],
   cold: [2, 2],
   workshop: [2, 2],
+  fill: [3, 2],
 };
 export const sizeOf = (tool: string): [number, number] => SIZE[tool as BuildTool] ?? [1, 1];
 /** Größe mit Drehung: gedreht sind Breite und Höhe vertauscht */
@@ -162,6 +171,8 @@ export const RUN_COST_PER_DAY = {
   plant: 1_800,
   shop: 300,
   yardTile: 15,
+  hazTile: 60,
+  emptyTile: 10,
   reeferTile: 80,
   kaiTile: 10,
 };
@@ -297,11 +308,13 @@ export const FEE_PER_CONTAINER = 200;
 export const PREMIUM_FEE = 900;
 
 /** Verarbeitung im Hafen: Packhalle packt Container aus, die Veredelung macht daraus Fertigware. */
-export type PlantKind = 'unpack' | 'pack' | 'cold';
+export type PlantKind = 'unpack' | 'pack' | 'cold' | 'fill';
 export const PLANTS: Record<PlantKind, { name: string; needs: number; time: number }> = {
   unpack: { name: 'Packhalle', needs: 1, time: 4 },
   pack: { name: 'Veredelung', needs: 2, time: 6 },
   cold: { name: 'Kühlhalle', needs: 1, time: 3 },
+  /** Leerer Container plus Ware ergibt einen Export-Container */
+  fill: { name: 'Befüllhalle', needs: 1, time: 5 },
 };
 /** Lebensmittel aus der Kühlhalle */
 export const FOOD_FEE = 750;
@@ -353,6 +366,7 @@ export const LEVEL_NEWS: { title: string; text: string }[][] = [
     { title: 'Export', text: 'Schiffe wollen jetzt auch beladen werden. Export-Container kommen über das Gate und bringen 250 € pro Stück.' },
     { title: 'Mehr Verträge', text: 'Bis zu 2 Daueraufträge gleichzeitig. Nur über Verträge kommen größere Schiffe.' },
     { title: 'Containerbrücke', text: 'Tippe einen Kran an und rüste ihn auf. Er arbeitet dann doppelt so schnell.' },
+    { title: 'Leerlager', text: 'Beim Auspacken in der Packhalle bleiben leere Container übrig. Das Leerlager nimmt sie auf (ab Stufe 2).' },
     { title: 'Verarbeitung', text: 'Die Packhalle packt Container aus, die Veredelung macht aus zwei davon Fertigware für 900 €. Trucks fahren die Ware dazwischen.' },
     { title: 'Verschleiß und Werkstatt', text: 'Kräne und Trucks nutzen sich ab, werden langsamer und fallen bei 100 % aus. Eine Werkstatt mit Mechaniker repariert sie.' },
     { title: 'Konkurrenz und Ereignisse', text: 'Hafen Nordstadt wirbt Reedereien ab, wenn du unpünktlich bist. Ab und zu musst du Entscheidungen treffen.' },
@@ -360,6 +374,8 @@ export const LEVEL_NEWS: { title: string; text: string }[][] = [
   ],
   [
     { title: 'Kühlfracht', text: 'Kühlcontainer brauchen Kühlplätze mit Strom und verderben nach 10 Stunden. Sie bringen 400 € pro Stück.' },
+    { title: 'Gefahrgut', text: 'Schiffe bringen Gefahrgut (700 € pro Container). Es braucht eine eigene Gefahrgutfläche mit 2 Feldern Abstand zu Gates, Hallen und Werkstatt.' },
+    { title: 'Befüllhalle', text: 'Macht aus einem leeren Container und Ware einen Export-Container. Das Leergut kommt aus der Packhalle (Leerlager bauen), die Ware aus der Packhalle oder von einem Zug am Gleisanschluss.' },
     { title: 'Kühlhalle', text: 'Verarbeitet Kühlcontainer vom Kühlplatz zu Lebensmitteln für 750 € statt 400 €.' },
     { title: 'Gleisanschluss', text: 'Am rechten Kartenrand: Alle 6 Stunden holt ein Zug bis zu 40 Container auf einmal ab.' },
     { title: 'Baggern', text: 'Vertiefe das Wasser vor dem Kai. Ein tiefer Liegeplatz mit 6 Feldern nimmt große Schiffe mit 300 Containern auf.' },
@@ -414,3 +430,19 @@ export const SEASONS = [
 ];
 /** Lagergebühr pro Container und Tag, die ein Spediteur zahlt */
 export const STORAGE_FEE = 6;
+
+// Gefahrgut, Leercontainer und die Befüllkette
+export const HAZ_FEE = 700;
+/** Gefahrgut-Anteil an der Ladung (ab Stufe 3, wenn es eine Gefahrgutfläche gibt) */
+export const HAZ_SHARE = 0.12;
+/** Leere Container gehen für wenig Geld zurück an die Reederei */
+export const EMPTY_FEE = 90;
+/** Zusatzerlös, wenn die Befüllhalle aus Leergut und Ware einen Export-Container macht */
+export const FILL_FEE = 150;
+export const CAP_HAZ = 4;
+export const CAP_EMPTY = 12;
+/** Gefahrgut braucht so viele Felder Abstand zu Gates, Hallen und Werkstatt */
+export const HAZ_DIST = 2;
+/** Ladungen Ware, die ein Zug bringt */
+export const RAIL_GOODS = 12;
+export const RAIL_GOODS_MAX = 24;

@@ -4,14 +4,14 @@ import { BuildTool, COAST_ROW, GRID_H, GRID_W, RTG_CAP, T } from '../src/sim/dat
 import { buildDemo } from '../src/sim/demo';
 import { Sim } from '../src/sim/sim';
 
-const TOOLS: BuildTool[] = ['road', 'road', 'road', 'yard', 'reefer', 'gate', 'truck', 'truck', 'crane', 'kai', 'unpack', 'pack', 'cold', 'workshop', 'rail', 'dredge', 'rtg'];
+const TOOLS: BuildTool[] = ['road', 'road', 'road', 'yard', 'reefer', 'gate', 'truck', 'truck', 'crane', 'kai', 'unpack', 'pack', 'cold', 'workshop', 'rail', 'dredge', 'rtg', 'hazard', 'emptyyard', 'fill', 'emptyyard', 'hazard'];
 
 function check(s: Sim, step: number) {
   const where = `Schritt ${step}`;
   for (let i = 0; i < s.kind.length; i++) {
-    if (s.kind[i] === T.Yard || s.kind[i] === T.Reefer) {
+    if (s.kind[i] === T.Yard || s.kind[i] === T.Reefer || s.kind[i] === T.Hazmat || s.kind[i] === T.Empty) {
       expect(s.stock[i], where).toBeGreaterThanOrEqual(0);
-      expect(s.stock[i] + s.stockExp[i], where).toBeLessThanOrEqual(RTG_CAP);
+      expect(s.stock[i] + s.stockExp[i], where).toBeLessThanOrEqual(Math.max(RTG_CAP, s.capAt(i)));
     } else {
       expect(s.stock[i] + s.stockExp[i], `${where}: Ware auf Feld ohne Lager`).toBe(0);
     }
@@ -23,7 +23,7 @@ function check(s: Sim, step: number) {
   }
   for (const c of s.cranes) {
     expect(s.kind[s.idx(c.x, c.y)], `${where}: Kran ohne Kai`).toBe(T.Kai);
-    expect(c.buffer + c.bufReef).toBeLessThanOrEqual(s.bufCap(c));
+    expect(c.buffer + c.bufReef + c.bufHaz).toBeLessThanOrEqual(s.bufCap(c));
     expect(c.expBuf).toBeLessThanOrEqual(s.bufCap(c, true));
     expect(c.resOut + c.resOutReef + c.resExpIn).toBeGreaterThanOrEqual(0);
   }
@@ -41,10 +41,24 @@ function check(s: Sim, step: number) {
     if (j.dstKind === 'store') wantIn.set(j.dst, (wantIn.get(j.dst) ?? 0) + j.n);
     if (j.stage === 0 && j.srcKind === 'store') wantOut.set(j.src * 2 + (j.cargo === 'exp' ? 1 : 0), (wantOut.get(j.src * 2 + (j.cargo === 'exp' ? 1 : 0)) ?? 0) + j.n);
   }
-  for (const i of [...s.yardTileList, ...s.reeferTileList]) {
+  for (const i of [...s.yardTileList, ...s.reeferTileList, ...s.hazTileList, ...s.emptyTileList]) {
     expect(priv.resIn[i], `${where}: Platzreservierung auf Feld ${i}`).toBe(wantIn.get(i) ?? 0);
     expect(priv.resOut[i], `${where}: Abholreservierung auf Feld ${i}`).toBe(wantOut.get(i * 2) ?? 0);
     expect(priv.resOutExp[i], `${where}: Export-Reservierung auf Feld ${i}`).toBe(wantOut.get(i * 2 + 1) ?? 0);
+  }
+  // Anlagen: Reservierungen für Leergut, Ware und Gefahrgut müssen zu den Fahrten passen
+  const sum = (f: (j: NonNullable<(typeof s.trucks)[number]['job']>) => boolean) => s.trucks.reduce((a, t) => a + (t.job && f(t.job) ? t.job.n : 0), 0);
+  for (const p of s.plants) {
+    expect(p.resIn, `${where}: Halle Eingang`).toBe(sum((j) => j.dstKind === 'plant' && j.dst === p.id && j.cargo !== 'empty'));
+    expect(p.resInE, `${where}: Halle Leergut`).toBe(sum((j) => j.dstKind === 'plant' && j.dst === p.id && j.cargo === 'empty'));
+    expect(p.resOut, `${where}: Halle Ausgang`).toBe(sum((j) => j.stage === 0 && j.srcKind === 'plant' && j.src === p.id && j.cargo !== 'empty'));
+    expect(p.resOutE, `${where}: Halle Leerausgang`).toBe(sum((j) => j.stage === 0 && j.srcKind === 'plant' && j.src === p.id && j.cargo === 'empty'));
+    expect(p.inEmpty + p.resInE).toBeLessThanOrEqual(6);
+  }
+  for (const r of s.rails) expect(r.resOutG, `${where}: Zugware`).toBe(sum((j) => j.stage === 0 && j.srcKind === 'rail' && j.src === r.id));
+  for (const c of s.cranes) {
+    expect(c.resOutHaz, `${where}: Kran Gefahrgut`).toBe(sum((j) => j.stage === 0 && j.srcKind === 'crane' && j.src === c.id && j.cargo === 'haz'));
+    expect(c.resOutReef, `${where}: Kran Kühl`).toBe(sum((j) => j.stage === 0 && j.srcKind === 'crane' && j.src === c.id && j.cargo === 'reef'));
   }
   for (const g of s.gates) {
     const n = s.trucks.reduce((a, t) => a + (t.job && t.job.dstKind === 'gate' && t.job.dst === g.id ? t.job.n : 0), 0);

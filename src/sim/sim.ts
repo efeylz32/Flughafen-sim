@@ -38,6 +38,15 @@ import {
   GRID_H,
   GRID_W,
   LEVELS,
+  HAZ_FEE,
+  HAZ_SHARE,
+  EMPTY_FEE,
+  FILL_FEE,
+  CAP_HAZ,
+  CAP_EMPTY,
+  HAZ_DIST,
+  RAIL_GOODS,
+  RAIL_GOODS_MAX,
   SPECS,
   SpecId,
   WAGE_POLICY,
@@ -109,7 +118,7 @@ import { MISSIONS } from './missions';
 import { SCENARIOS } from './scenarios';
 
 /** Import, Kühlfracht (Import) oder Export */
-export type Cargo = 'imp' | 'reef' | 'exp' | 'ware' | 'prem' | 'food';
+export type Cargo = 'imp' | 'reef' | 'haz' | 'empty' | 'exp' | 'ware' | 'prem' | 'food';
 
 export interface Shop {
   id: number;
@@ -143,6 +152,11 @@ export interface Rtg {
 
 export interface Plant {
   id: number;
+  /** Leere Container: Eingang der Befüllhalle, Ausgang der Packhalle */
+  inEmpty: number;
+  emptyOut: number;
+  resInE: number;
+  resOutE: number;
   build?: number;
   buildMax?: number;
   /** Was die Veredelung herstellt */
@@ -180,6 +194,8 @@ export interface Crane {
   /** Entladene Container am Kran, die auf einen Truck warten */
   buffer: number;
   bufReef: number;
+  bufHaz: number;
+  resOutHaz: number;
   resOut: number;
   resOutReef: number;
   /** Export-Container am Kran, die aufs Schiff sollen */
@@ -233,12 +249,15 @@ export interface Rail {
   zone: number;
   /** Container, die der letzte Zug mitgenommen hat (für die Darstellung) */
   lastLoad: number;
+  /** Ware, die ein Zug gebracht hat und die auf Trucks wartet */
+  goods: number;
+  resOutG: number;
 }
 
 export interface Job {
   cargo: Cargo;
   stage: 0 | 1;
-  srcKind: 'crane' | 'store' | 'gate' | 'plant';
+  srcKind: 'crane' | 'store' | 'gate' | 'plant' | 'rail';
   /** Kran-ID, Lagerfeld oder Gate-ID */
   src: number;
   dstKind: 'store' | 'gate' | 'rail' | 'crane' | 'plant';
@@ -309,6 +328,8 @@ export interface Ship {
   containers: number;
   /** Kühlcontainer an Bord */
   reefers: number;
+  /** Gefahrgut-Container an Bord */
+  haz: number;
   /** Import-Ladung bei Ankunft */
   total: number;
   exportLeft: number;
@@ -538,7 +559,7 @@ const covers = (e: Box, x: number, y: number) => x >= e.x && y >= e.y && x < e.x
 const UNLOADING = 'Wird entladen.';
 const LOADING = 'Wird beladen.';
 const emptyBook = (): DayBook => ({ fees: 0, exportFees: 0, rail: 0, berth: 0, bonus: 0, penalty: 0, running: 0, wages: 0, interest: 0, building: 0, handled: 0, ships: 0, onTime: 0, bn: { crane: 0, trucks: 0, yard: 0, gate: 0 }, jamPeak: 0 });
-const TILE_OF: Partial<Record<BuildTool, T>> = { kai: T.Kai, road: T.Road, yard: T.Yard, reefer: T.Reefer, gate: T.Gate, rail: T.Rail, unpack: T.Plant, pack: T.Plant, cold: T.Plant, workshop: T.Shop };
+const TILE_OF: Partial<Record<BuildTool, T>> = { kai: T.Kai, road: T.Road, yard: T.Yard, reefer: T.Reefer, hazard: T.Hazmat, emptyyard: T.Empty, fill: T.Plant, gate: T.Gate, rail: T.Rail, unpack: T.Plant, pack: T.Plant, cold: T.Plant, workshop: T.Shop };
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 
 const eur = (n: number) => `${Math.round(n).toLocaleString('de-DE')} €`;
@@ -659,6 +680,8 @@ export class Sim {
   private distCache = new Map<number, Int16Array>();
   private yardTiles: number[] = [];
   private reeferTiles: number[] = [];
+  private hazTiles: number[] = [];
+  private emptyTiles: number[] = [];
   /** Belegte Fahrspuren: je Straßenfeld eine Spur pro Fahrtrichtung, darauf passt ein Truck */
   private lane = new Uint8Array(GRID_W * GRID_H * 4);
   /** Wie stark sich der Verkehr auf einem Feld zuletzt gestaut hat (klingt von selbst ab) */
@@ -740,7 +763,7 @@ export class Sim {
     const k = this.kind[i];
     const t = this.truckAtTile(i);
     const ent = this.craneAt(x, y) ?? this.gateAt(x, y) ?? this.plantAt(x, y) ?? this.railAt(x, y) ?? t;
-    if (k === T.Yard || k === T.Reefer) {
+    if (k === T.Yard || k === T.Reefer || k === T.Hazmat || k === T.Empty) {
       if (this.zone[i] === z) return { ok: true, cost: 0 };
       this.zone[i] = z;
     } else if (ent) {
@@ -757,7 +780,7 @@ export class Sim {
   zoneReport(): { z: number; cranes: number; trucks: number; yard: number; reefer: number; gates: number; rails: number; plants: number; problems: string[] }[] {
     const used = new Set<number>();
     for (const e of [...this.cranes, ...this.gates, ...this.plants, ...this.rails, ...this.trucks]) if (e.zone) used.add(e.zone);
-    for (const i of [...this.yardTiles, ...this.reeferTiles]) if (this.zone[i]) used.add(this.zone[i]);
+    for (const i of [...this.yardTiles, ...this.reeferTiles, ...this.hazTiles, ...this.emptyTiles]) if (this.zone[i]) used.add(this.zone[i]);
     if (used.size === 0) return [];
     const free = this.trucks.filter((t) => t.zone === 0).length;
     const out = [];
@@ -766,7 +789,7 @@ export class Sim {
         z,
         cranes: this.cranes.filter((c) => c.zone === z).length,
         trucks: this.trucks.filter((t) => t.zone === z).length,
-        yard: this.yardTiles.filter((i) => this.zone[i] === z).length,
+        yard: [...this.yardTiles, ...this.hazTiles, ...this.emptyTiles].filter((i) => this.zone[i] === z).length,
         reefer: this.reeferTiles.filter((i) => this.zone[i] === z).length,
         gates: this.gates.filter((g) => g.zone === z).length,
         rails: this.rails.filter((q) => q.zone === z).length,
@@ -855,6 +878,9 @@ export class Sim {
   }
   /** Stellplätze auf einem Lagerfeld: mehr, wenn ein besetzter Portalkran in der Nähe steht */
   capAt(i: number): number {
+    const k = this.kind[i];
+    if (k === T.Hazmat) return CAP_HAZ;
+    if (k === T.Empty) return CAP_EMPTY + this.tech.stack;
     return (this.rtgCovers(i) ? RTG_CAP : YARD_CAP_PER_TILE) + this.tech.stack;
   }
   rtgCovers(i: number): boolean {
@@ -895,6 +921,28 @@ export class Sim {
   }
   get reeferTileList(): readonly number[] {
     return this.reeferTiles;
+  }
+  get hazTileList(): readonly number[] {
+    return this.hazTiles;
+  }
+  get emptyTileList(): readonly number[] {
+    return this.emptyTiles;
+  }
+  get hazCapacity(): number {
+    return this.hazTiles.reduce((n, i) => n + this.capAt(i), 0);
+  }
+  get hazStock(): number {
+    return this.hazTiles.reduce((n, i) => n + this.stock[i], 0);
+  }
+  get emptyCapacity(): number {
+    return this.emptyTiles.reduce((n, i) => n + this.capAt(i), 0);
+  }
+  get emptyStock(): number {
+    return this.emptyTiles.reduce((n, i) => n + this.stock[i], 0);
+  }
+  /** Lagerart zu einer Ware */
+  static storeOf(c: Cargo): T {
+    return c === 'reef' ? T.Reefer : c === 'haz' ? T.Hazmat : c === 'empty' ? T.Empty : T.Yard;
   }
   get levelName(): string {
     return LEVELS[this.level - 1].name;
@@ -966,9 +1014,13 @@ export class Sim {
     this.distCache.clear();
     this.yardTiles = [];
     this.reeferTiles = [];
+    this.hazTiles = [];
+    this.emptyTiles = [];
     for (let i = 0; i < this.kind.length; i++) {
       if (this.kind[i] === T.Yard) this.yardTiles.push(i);
       else if (this.kind[i] === T.Reefer) this.reeferTiles.push(i);
+      else if (this.kind[i] === T.Hazmat) this.hazTiles.push(i);
+      else if (this.kind[i] === T.Empty) this.emptyTiles.push(i);
     }
   }
 
@@ -1157,12 +1209,17 @@ export class Sim {
       case 'road':
       case 'yard':
       case 'reefer':
+      case 'emptyyard':
+      case 'hazard':
       case 'gate':
       case 'unpack':
       case 'pack':
       case 'cold':
+      case 'fill':
       case 'workshop':
         if (k !== T.Land) reason = k === T.Water ? 'Nicht auf dem Wasser' : 'Das Feld ist belegt';
+        else if (tool === 'hazard' && this.nearBuildings(x, y, 1, 1)) reason = `Gefahrgut braucht ${HAZ_DIST} Felder Abstand zu Gates, Hallen und Werkstatt`;
+        else if ((tool === 'gate' || tool === 'unpack' || tool === 'pack' || tool === 'cold' || tool === 'fill' || tool === 'workshop') && this.nearHaz(x, y, sw, sh)) reason = `Zu nah an einer Gefahrgutfläche (${HAZ_DIST} Felder Abstand)`;
         break;
       case 'rail':
         if (k !== T.Land) reason = k === T.Water ? 'Nicht auf dem Wasser' : 'Das Feld ist belegt';
@@ -1192,6 +1249,20 @@ export class Sim {
     return this.inBounds(x + dx, y + dy) && this.kind[this.idx(x + dx, y + dy)] === T.Water;
   }
 
+  /** Liegt ein Gebäude (Gate, Halle, Werkstatt) in der Nähe dieses Rechtecks? */
+  private nearBuildings(x: number, y: number, w: number, h: number): boolean {
+    const near = (e: { x: number; y: number; w: number; h: number }) => e.x < x + w + HAZ_DIST && e.x + e.w > x - HAZ_DIST && e.y < y + h + HAZ_DIST && e.y + e.h > y - HAZ_DIST;
+    return this.gates.some(near) || this.plants.some(near) || this.shops.some(near);
+  }
+  /** Liegt Gefahrgut in der Nähe dieses Rechtecks? */
+  private nearHaz(x: number, y: number, w: number, h: number): boolean {
+    return this.hazTiles.some((i) => {
+      const hx = i % GRID_W;
+      const hy = (i / GRID_W) | 0;
+      return hx < x + w + HAZ_DIST && hx + 1 > x - HAZ_DIST && hy < y + h + HAZ_DIST && hy + 1 > y - HAZ_DIST;
+    });
+  }
+
   /** Setzt ein Objekt ohne Prüfung und ohne Kosten. Liefert bei Trucks die neue ID. */
   private place(tool: BuildTool, x: number, y: number, rot = this.rot): number | undefined {
     const [bw, bh] = dimsOf(tool, rot);
@@ -1203,6 +1274,8 @@ export class Sim {
         return undefined;
       case 'yard':
       case 'reefer':
+      case 'hazard':
+      case 'emptyyard':
         this.kind[i] = TILE_OF[tool]!;
         this.stock[i] = 0;
         this.stockExp[i] = 0;
@@ -1225,6 +1298,8 @@ export class Sim {
           paid: COST[tool],
           buffer: 0,
           bufReef: 0,
+          bufHaz: 0,
+          resOutHaz: 0,
           resOut: 0,
           resOutReef: 0,
           expBuf: 0,
@@ -1245,7 +1320,7 @@ export class Sim {
         return undefined;
       case 'rail':
         this.kind[i] = T.Rail;
-        this.rails.push({ id: this.nextId++, x, y, platform: 0, value: 0, resIn: 0, state: 'away', timer: 60, lastLoad: 0, zone: 0 });
+        this.rails.push({ id: this.nextId++, x, y, platform: 0, value: 0, resIn: 0, state: 'away', timer: 60, lastLoad: 0, zone: 0, goods: 0, resOutG: 0 });
         return undefined;
       case 'dredge':
         this.depth[qOfWater(x, y)] = 1;
@@ -1262,8 +1337,9 @@ export class Sim {
       case 'unpack':
       case 'pack':
       case 'cold':
+      case 'fill':
         for (const f of this.footprintOf({ x, y, w: bw, h: bh })) this.kind[f] = T.Plant;
-        this.plants.push({ id: this.nextId++, x, y, w: bw, h: bh, kind: tool, product: 'elec', inBuf: 0, outBuf: 0, resIn: 0, resOut: 0, proc: 0, made: 0, zone: 0 });
+        this.plants.push({ id: this.nextId++, x, y, w: bw, h: bh, kind: tool, product: 'elec', inEmpty: 0, emptyOut: 0, resInE: 0, resOutE: 0, inBuf: 0, outBuf: 0, resIn: 0, resOut: 0, proc: 0, made: 0, zone: 0 });
         return undefined;
       case 'truck': {
         const id = this.nextId++;
@@ -1395,10 +1471,12 @@ export class Sim {
         out.push({ tool: 'road', x, y, refund: this.give(this.costOf('road'), factor) });
         break;
       case T.Yard:
-      case T.Reefer: {
+      case T.Reefer:
+      case T.Hazmat:
+      case T.Empty: {
         const rt = this.rtgAt(x, y);
         if (rt) this.takeRtg(rt, factor, out);
-        const tool: BuildTool = this.kind[i] === T.Yard ? 'yard' : 'reefer';
+        const tool: BuildTool = this.kind[i] === T.Yard ? 'yard' : this.kind[i] === T.Reefer ? 'reefer' : this.kind[i] === T.Hazmat ? 'hazard' : 'emptyyard';
         out.push({ tool, x, y, refund: this.give(this.costOf(tool), factor), stock: this.stock[i], stockExp: this.stockExp[i] });
         this.stock[i] = 0;
         this.stockExp[i] = 0;
@@ -1515,7 +1593,7 @@ export class Sim {
     for (const r of order) {
       const id = this.place(r.tool, r.x, r.y, !!r.rot);
       const i = this.idx(r.x, r.y);
-      if (r.tool === 'yard' || r.tool === 'reefer') {
+      if (r.tool === 'yard' || r.tool === 'reefer' || r.tool === 'hazard' || r.tool === 'emptyyard') {
         this.stock[i] = r.stock ?? 0;
         this.stockExp[i] = r.stockExp ?? 0;
         if (r.tool === 'reefer' && r.stock) this.reefTimes.set(i, new Array(r.stock).fill(this.gm));
@@ -1722,7 +1800,7 @@ export class Sim {
     return this.capAt(i) - this.stock[i] - this.stockExp[i] - this.resIn[i];
   }
   private tilesOf(kind: T): number[] {
-    return kind === T.Reefer ? this.reeferTiles : this.yardTiles;
+    return kind === T.Reefer ? this.reeferTiles : kind === T.Hazmat ? this.hazTiles : kind === T.Empty ? this.emptyTiles : this.yardTiles;
   }
   private hasFreeStore(kind: T, zone = 0): boolean {
     return this.tilesOf(kind).some((i) => this.zone[i] === zone && this.freeAt(i) > 0);
@@ -1773,13 +1851,20 @@ export class Sim {
       const c = this.cranes.find((c) => c.id === j.src);
       if (!c) return;
       if (j.cargo === 'reef') c.resOutReef = Math.max(0, c.resOutReef + d);
+      else if (j.cargo === 'haz') c.resOutHaz = Math.max(0, c.resOutHaz + d);
       else c.resOut = Math.max(0, c.resOut + d);
     } else if (j.srcKind === 'store') {
       if (j.cargo === 'exp') this.resOutExp[j.src] = Math.max(0, this.resOutExp[j.src] + d);
       else this.resOut[j.src] = Math.max(0, this.resOut[j.src] + d);
     } else if (j.srcKind === 'plant') {
       const p = this.plants.find((p) => p.id === j.src);
-      if (p) p.resOut = Math.max(0, p.resOut + d);
+      if (p) {
+        if (j.cargo === 'empty') p.resOutE = Math.max(0, p.resOutE + d);
+        else p.resOut = Math.max(0, p.resOut + d);
+      }
+    } else if (j.srcKind === 'rail') {
+      const r = this.rails.find((r) => r.id === j.src);
+      if (r) r.resOutG = Math.max(0, r.resOutG + d);
     } else {
       const g = this.gates.find((g) => g.id === j.src);
       if (g) g.resOut = Math.max(0, g.resOut + d);
@@ -1796,7 +1881,10 @@ export class Sim {
       if (r) r.resIn = Math.max(0, r.resIn + d);
     } else if (j.dstKind === 'plant') {
       const p = this.plants.find((p) => p.id === j.dst);
-      if (p) p.resIn = Math.max(0, p.resIn + d);
+      if (p) {
+        if (j.cargo === 'empty') p.resInE = Math.max(0, p.resInE + d);
+        else p.resIn = Math.max(0, p.resIn + d);
+      }
     } else {
       const c = this.cranes.find((c) => c.id === j.dst);
       if (c) c.resExpIn = Math.max(0, c.resExpIn + d);
@@ -1817,12 +1905,13 @@ export class Sim {
 
   private jobValid(j: Job): boolean {
     if (this.kind[j.tgt[0]] !== T.Road || this.kind[j.tgt[1]] !== T.Road) return false;
-    const storeKind = j.cargo === 'reef' ? T.Reefer : T.Yard;
+    const storeKind = Sim.storeOf(j.cargo);
     if (j.stage === 0) {
       if (j.srcKind === 'crane' && !this.cranes.some((c) => c.id === j.src)) return false;
       if (j.srcKind === 'store' && this.kind[j.src] !== storeKind) return false;
       if (j.srcKind === 'gate' && !this.gates.some((g) => g.id === j.src)) return false;
       if (j.srcKind === 'plant' && !this.plants.some((p) => p.id === j.src)) return false;
+      if (j.srcKind === 'rail' && !this.rails.some((r) => r.id === j.src)) return false;
     }
     if (j.dstKind === 'store') return this.kind[j.dst] === storeKind;
     if (j.dstKind === 'gate') return this.gates.some((g) => g.id === j.dst);
@@ -1860,16 +1949,16 @@ export class Sim {
       const ci = this.idx(c.x, c.y);
       const ship = this.shipAtBerth(this.cq(c));
       // 1. Entladene Container vom Kran wegfahren
-      const more = ship !== undefined && ship.containers + ship.reefers > 0;
-      const full = c.buffer + c.bufReef >= this.bufCap(c);
-      for (const cargo of ['imp', 'reef'] as const) {
-        const avail = cargo === 'imp' ? c.buffer - c.resOut : c.bufReef - c.resOutReef;
+      const more = ship !== undefined && ship.containers + ship.reefers + ship.haz > 0;
+      const full = c.buffer + c.bufReef + c.bufHaz >= this.bufCap(c);
+      for (const cargo of ['imp', 'reef', 'haz'] as const) {
+        const avail = cargo === 'imp' ? c.buffer - c.resOut : cargo === 'reef' ? c.bufReef - c.resOutReef : c.bufHaz - c.resOutHaz;
         if (avail <= 0) continue;
         // Volle Fahrt abwarten, außer der Kran liefert nichts mehr nach
         if (avail < TRUCK_CAP && more && !full) continue;
         const acc = this.nearestAccess(ci, t.tile);
         if (!acc) continue;
-        const slot = this.findSlot(cargo === 'imp' ? T.Yard : T.Reefer, acc.access, c.zone);
+        const slot = this.findSlot(Sim.storeOf(cargo), acc.access, c.zone);
         if (!slot) continue;
         offer('crane', full ? 3 : 2, acc.d + slot.d, {
           cargo,
@@ -1913,11 +2002,11 @@ export class Sim {
       const room = GATE_APRON_CAP - g.apron.length - g.resIn;
       if (room > 0) {
         const starving = g.apron.length + g.resIn === 0;
-        for (const cargo of ['imp', 'reef'] as const) {
-          const src = this.findSource(cargo === 'imp' ? T.Yard : T.Reefer, cargo, t.tile, g.zone);
+        for (const cargo of ['imp', 'reef', 'haz'] as const) {
+          const src = this.findSource(Sim.storeOf(cargo), cargo, t.tile, g.zone);
           const acc = src ? this.nearestAccess(g, src.access) : null;
           if (!src || !acc) continue;
-          offer('out', (starving ? 2.4 : 1.2) * (cargo === 'reef' ? 1.3 : press), src.d + acc.d, {
+          offer('out', (starving ? 2.4 : 1.2) * (cargo === 'imp' ? press : 1.3), src.d + acc.d, {
             cargo,
             stage: 0,
             srcKind: 'store',
@@ -1927,6 +2016,14 @@ export class Sim {
             tgt: [src.access, acc.access],
             n: Math.min(TRUCK_CAP, src.avail, room),
           });
+        }
+      }
+      // 3b. Überzählige Leercontainer zurück an die Reederei, wenn das Leerlager voll läuft
+      if (room > 0 && this.emptyCapacity > 0 && this.emptyStock / this.emptyCapacity > 0.6) {
+        const src = this.findSource(T.Empty, 'empty', t.tile, g.zone);
+        const acc = src ? this.nearestAccess(g, src.access) : null;
+        if (src && acc) {
+          offer('out', 0.9, src.d + acc.d, { cargo: 'empty', stage: 0, srcKind: 'store', src: src.tile, dstKind: 'gate', dst: g.id, tgt: [src.access, acc.access], n: Math.min(TRUCK_CAP, src.avail, room) });
         }
       }
       // 4. Angekommene Export-Container vom Gate auf den Stapelplatz
@@ -2005,6 +2102,50 @@ export class Sim {
           });
         }
       }
+      // Befüllhalle: Leergut aus dem Leerlager und Ware (aus der Packhalle oder vom Zug)
+      if (p.kind === 'fill') {
+        const roomE = PLANT_BUF - p.inEmpty - p.resInE;
+        if (roomE > 0) {
+          const src = this.findSource(T.Empty, 'empty', t.tile, p.zone);
+          const acc = src ? this.nearestAccess(p, src.access) : null;
+          if (src && acc) {
+            offer('plant', p.inEmpty + p.resInE === 0 ? 2.1 : 1.4, src.d + acc.d, { cargo: 'empty', stage: 0, srcKind: 'store', src: src.tile, dstKind: 'plant', dst: p.id, tgt: [src.access, acc.access], n: Math.min(TRUCK_CAP, src.avail, roomE) });
+          }
+        }
+        if (room > 0) {
+          for (const q of this.plants) {
+            const avail = q.outBuf - q.resOut;
+            if (q.kind !== 'unpack' || avail <= 0 || q.zone !== p.zone || q.build) continue;
+            const a1 = this.nearestAccess(q, t.tile);
+            const a2 = a1 ? this.nearestAccess(p, a1.access) : null;
+            if (a1 && a2) offer('plant', hungry ? 2 : 1.4, a1.d + a2.d, { cargo: 'ware', stage: 0, srcKind: 'plant', src: q.id, dstKind: 'plant', dst: p.id, tgt: [a1.access, a2.access], n: Math.min(TRUCK_CAP, avail, room) });
+          }
+          for (const r of this.rails) {
+            const avail = r.goods - r.resOutG;
+            if (avail <= 0 || r.zone !== p.zone || r.build) continue;
+            const a1 = this.nearestAccess(r, t.tile);
+            const a2 = a1 ? this.nearestAccess(p, a1.access) : null;
+            if (a1 && a2) offer('plant', hungry ? 2.3 : 1.6, a1.d + a2.d, { cargo: 'ware', stage: 0, srcKind: 'rail', src: r.id, dstKind: 'plant', dst: p.id, tgt: [a1.access, a2.access], n: Math.min(TRUCK_CAP, avail, room) });
+          }
+        }
+        // Fertige Export-Container auf den Stapelplatz
+        const made = p.outBuf - p.resOut;
+        if (made > 0) {
+          const a1 = this.nearestAccess(p, t.tile);
+          const slot = a1 ? this.findSlot(T.Yard, a1.access, p.zone) : null;
+          if (a1 && slot) offer('plant out', 2, a1.d + slot.d, { cargo: 'exp', stage: 0, srcKind: 'plant', src: p.id, dstKind: 'store', dst: slot.tile, tgt: [a1.access, slot.access], n: Math.min(TRUCK_CAP, made, slot.free) });
+        }
+        continue;
+      }
+      // Leere Container aus der Packhalle ins Leerlager
+      if (p.kind === 'unpack') {
+        const e = p.emptyOut - p.resOutE;
+        if (e > 0) {
+          const a1 = this.nearestAccess(p, t.tile);
+          const slot = a1 ? this.findSlot(T.Empty, a1.access, p.zone) : null;
+          if (a1 && slot) offer('plant out', 1.5, a1.d + slot.d, { cargo: 'empty', stage: 0, srcKind: 'plant', src: p.id, dstKind: 'store', dst: slot.tile, tgt: [a1.access, slot.access], n: Math.min(TRUCK_CAP, e, slot.free) });
+        }
+      }
       const done = p.kind !== 'unpack' ? p.outBuf - p.resOut : 0;
       const sold: Cargo = p.kind === 'cold' ? 'food' : 'prem';
       if (done > 0) {
@@ -2034,11 +2175,11 @@ export class Sim {
       if (!zOk(r.zone) || r.build) continue;
       const room = RAIL_CAP - r.platform - r.resIn;
       if (room <= 0) continue;
-      for (const cargo of ['imp', 'reef'] as const) {
-        const src = this.findSource(cargo === 'imp' ? T.Yard : T.Reefer, cargo, t.tile, r.zone);
+      for (const cargo of ['imp', 'reef', 'haz'] as const) {
+        const src = this.findSource(Sim.storeOf(cargo), cargo, t.tile, r.zone);
         const acc = src ? this.nearestAccess(r, src.access) : null;
         if (!src || !acc) continue;
-        offer('out', 1.5 * (cargo === 'reef' ? 1.3 : press), src.d + acc.d, {
+        offer('out', 1.5 * (cargo === 'imp' ? press : 1.3), src.d + acc.d, {
           cargo,
           stage: 0,
           srcKind: 'store',
@@ -2066,6 +2207,9 @@ export class Sim {
       if (j.cargo === 'reef') {
         if (c.bufReef < j.n) return false;
         c.bufReef -= j.n;
+      } else if (j.cargo === 'haz') {
+        if (c.bufHaz < j.n) return false;
+        c.bufHaz -= j.n;
       } else {
         if (c.buffer < j.n) return false;
         c.buffer -= j.n;
@@ -2081,8 +2225,18 @@ export class Sim {
       }
     } else if (j.srcKind === 'plant') {
       const p = this.plants.find((p) => p.id === j.src);
-      if (!p || p.outBuf < j.n) return false;
-      p.outBuf -= j.n;
+      if (!p) return false;
+      if (j.cargo === 'empty') {
+        if (p.emptyOut < j.n) return false;
+        p.emptyOut -= j.n;
+      } else {
+        if (p.outBuf < j.n) return false;
+        p.outBuf -= j.n;
+      }
+    } else if (j.srcKind === 'rail') {
+      const r = this.rails.find((r) => r.id === j.src);
+      if (!r || r.goods < j.n) return false;
+      r.goods -= j.n;
     } else {
       const g = this.gates.find((g) => g.id === j.src);
       if (!g || g.inApron < j.n) return false;
@@ -2096,7 +2250,7 @@ export class Sim {
   }
 
   private dropOff(t: Truck, j: Job): boolean {
-    let fee = j.cargo === 'reef' ? REEFER_FEE : FEE_PER_CONTAINER;
+    let fee = j.cargo === 'reef' ? REEFER_FEE : j.cargo === 'haz' ? HAZ_FEE : j.cargo === 'empty' ? EMPTY_FEE : FEE_PER_CONTAINER;
     if (j.cargo === 'prem') fee = this.price(this.plants.find((p) => p.id === j.src)?.product ?? 'elec');
     if (j.cargo === 'food') fee = this.price('food');
     fee = Math.round(fee * (1 + 0.05 * this.tech.sales) * CYCLES[this.cycle.kind].fee * (j.cargo === 'reef' && this.spec === 'cold' ? 1.25 : 1));
@@ -2117,7 +2271,7 @@ export class Sim {
     } else if (j.dstKind === 'gate') {
       const g = this.gates.find((g) => g.id === j.dst);
       if (!g) return false;
-      for (let k = 0; k < j.n; k++) g.apron.push(j.cargo === 'reef' ? fee + 100000 : fee);
+      for (let k = 0; k < j.n; k++) g.apron.push(j.cargo === 'reef' ? fee + 100000 : j.cargo === 'haz' ? fee + 200000 : j.cargo === 'empty' ? fee + 300000 : fee);
     } else if (j.dstKind === 'rail') {
       const r = this.rails.find((r) => r.id === j.dst);
       if (!r) return false;
@@ -2126,7 +2280,8 @@ export class Sim {
     } else if (j.dstKind === 'plant') {
       const p = this.plants.find((p) => p.id === j.dst);
       if (!p) return false;
-      p.inBuf += j.n;
+      if (j.cargo === 'empty') p.inEmpty += j.n;
+      else p.inBuf += j.n;
     } else {
       const c = this.cranes.find((c) => c.id === j.dst);
       if (!c) return false;
@@ -2495,6 +2650,8 @@ export class Sim {
     const st = SHIP_TYPES[type];
     const n = 100 + Math.floor(this.rnd() * 900);
     const reefers = reefer ? Math.round(st.containers * Math.min(0.5, REEFER_SHARE * (this.spec === 'cold' ? 1.4 : 1))) : 0;
+    // Gefahrgut kommt nur, wenn es eine Fläche dafür gibt
+    const haz = this.level >= 3 && this.hazCapacity >= 4 && this.rnd() < 0.5 ? Math.round(st.containers * HAZ_SHARE) : 0;
     const exp = this.level >= 2 ? Math.round(st.containers * EXPORT_SHARE) : 0;
     this.ships.push({
       id: this.nextId++,
@@ -2511,8 +2668,9 @@ export class Sim {
       berthX: -1,
       rot: 0,
       wp: 0,
-      containers: st.containers - reefers,
+      containers: st.containers - reefers - haz,
       reefers,
+      haz,
       total: st.containers,
       exportLeft: exp,
       exportTotal: exp,
@@ -2649,7 +2807,7 @@ export class Sim {
           const r = this.berthStatus(s);
           s.reason = r.text;
           s.blocked = r.blocked;
-          const imports = s.containers + s.reefers;
+          const imports = s.containers + s.reefers + s.haz;
           if (imports <= 0 && (s.exportLeft <= 0 || s.atBerth >= s.dwellTarget)) this.finishShip(s);
           else if (s.atBerth > SHIP_MAX_STAY_GM) this.finishShip(s);
           break;
@@ -2673,11 +2831,14 @@ export class Sim {
     if (cr.length === 0) return bad('Kein Kran am Liegeplatz. Setze einen Kran auf eines der Kai-Felder am Schiff.');
     if (cr.every((c) => c.build)) return { text: 'Der Kran wird noch gebaut.', blocked: false };
     if (cr.every((c) => !c.staffed)) return bad('Kein Kranführer im Dienst. Stelle im Personal jemanden ein.');
-    const imports = s.containers + s.reefers;
+    const imports = s.containers + s.reefers + s.haz;
     if (imports > 0 && cr.every((c) => c.state === 'blocked')) {
       if (this.trucks.length === 0) return bad('Es gibt keinen Truck. Kaufe einen Truck.');
-      const zoned = cr.find((c) => c.zone && c.buffer + c.bufReef > 0 && !this.tilesOf(c.bufReef ? T.Reefer : T.Yard).some((i) => this.zone[i] === c.zone));
+      const zoned = cr.find((c) => c.zone && c.buffer + c.bufReef + c.bufHaz > 0 && !this.tilesOf(c.bufReef ? T.Reefer : T.Yard).some((i) => this.zone[i] === c.zone));
       if (zoned) return bad(`Der Kran gehört zu Zone ${ZONES[zoned.zone].name}, aber es gibt dort kein passendes Lager. Male Lagerflächen in Zone ${ZONES[zoned.zone].name} an.`);
+      if (cr.some((c) => c.bufHaz > 0 && !this.hasFreeStore(T.Hazmat, c.zone))) {
+        return bad(this.hazTiles.length ? 'Gefahrgutfläche voll. Baue mehr Gefahrgutflächen oder mehr Ausgänge.' : 'Gefahrgut braucht eine eigene Fläche mit Abstand zu Gates, Hallen und Werkstatt. Baue eine Gefahrgutfläche an die Straße.');
+      }
       if (cr.some((c) => c.bufReef > 0 && !this.hasFreeStore(T.Reefer, c.zone))) {
         return bad(
           this.reeferTiles.length
@@ -2734,7 +2895,7 @@ export class Sim {
   private finishShip(s: Ship) {
     const st = SHIP_TYPES[s.type];
     const bf = Math.round(st.berthFee * (this.spec === 'hub' ? 1.2 : this.spec === 'cold' ? 0.9 : 1) * CYCLES[this.cycle.kind].fee);
-    const imports = s.containers + s.reefers;
+    const imports = s.containers + s.reefers + s.haz;
     const cc = this.contracts.find((x) => x.id === s.contractId);
     const onTime = imports <= 0 && s.atBerth <= s.dwellTarget + 1 && !(cc?.cond === 'export' && s.exportLeft > 0);
     this.shipsDone++;
@@ -2795,8 +2956,8 @@ export class Sim {
         c.cd = mt;
         continue;
       }
-      const imports = ship.containers + ship.reefers;
-      const canUnload = imports > 0 && c.buffer + c.bufReef < this.bufCap(c);
+      const imports = ship.containers + ship.reefers + ship.haz;
+      const canUnload = imports > 0 && c.buffer + c.bufReef + c.bufHaz < this.bufCap(c);
       const canLoad = ship.exportLeft > 0 && c.expBuf > 0;
       if (canUnload || canLoad) {
         c.state = 'working';
@@ -2821,12 +2982,18 @@ export class Sim {
           } else if (ship.reefers > 0 && this.rnd() < ship.reefers / imports) {
             ship.reefers--;
             c.bufReef++;
+          } else if (ship.haz > 0 && this.rnd() < ship.haz / imports) {
+            ship.haz--;
+            c.bufHaz++;
           } else if (ship.containers > 0) {
             ship.containers--;
             c.buffer++;
-          } else {
+          } else if (ship.reefers > 0) {
             ship.reefers--;
             c.bufReef++;
+          } else {
+            ship.haz--;
+            c.bufHaz++;
           }
         }
       } else if (imports > 0) {
@@ -2902,15 +3069,22 @@ export class Sim {
           if (g.procIn) {
             g.inApron++;
           } else {
-            g.served++;
-            this.containersDone++;
-            this.handled++, this.today.handled++;
-            const reef = g.procFee >= 100000;
-            const fee = reef ? g.procFee - 100000 : g.procFee;
-            if (reef) this.reefersHandled++;
-            this.money += fee;
-            this.today.fees += fee;
-            this.emit(undefined, 'good', { tag: 'container', x: g.x, y: g.y, amount: fee });
+            const type = Math.floor(g.procFee / 100000);
+            const fee = g.procFee - type * 100000;
+            if (type === 3) {
+              // Leere Container zurück an die Reederei: zählt nicht als Umschlag
+              this.money += fee;
+              this.today.fees += fee;
+              this.emit(undefined, 'good', { tag: 'container', x: g.x, y: g.y, amount: fee });
+            } else {
+              g.served++;
+              this.containersDone++;
+              this.handled++, this.today.handled++;
+              if (type === 1) this.reefersHandled++;
+              this.money += fee;
+              this.today.fees += fee;
+              this.emit(undefined, 'good', { tag: 'container', x: g.x, y: g.y, amount: fee });
+            }
           }
         }
       }
@@ -2942,6 +3116,14 @@ export class Sim {
         case 'arriving':
           r.state = 'loading';
           r.timer = RAIL_STAY_GM;
+          // Der Zug bringt Ware, wenn es eine Befüllhalle gibt, die sie braucht
+          if (this.plants.some((p) => p.kind === 'fill' && p.zone === r.zone)) {
+            const add = Math.min(RAIL_GOODS, RAIL_GOODS_MAX - r.goods);
+            if (add > 0) {
+              r.goods += add;
+              this.emit(`Der Zug bringt ${add} Ladungen Ware für die Befüllhalle.`, 'info', { tag: 'train-arrive' });
+            }
+          }
           break;
         case 'loading': {
           const n = r.platform;
@@ -2979,9 +3161,20 @@ export class Sim {
         p.proc = 0;
         p.outBuf++;
         p.made++;
+        // Beim Auspacken bleibt ein leerer Container übrig, wenn es ein Leerlager gibt
+        if (p.kind === 'unpack' && this.emptyTiles.length > 0 && p.emptyOut + p.resOutE < PLANT_BUF) p.emptyOut++;
+        // Die Befüllhalle verkauft die Ware, die in den Export-Container ging
+        if (p.kind === 'fill') {
+          this.money += FILL_FEE;
+          this.today.fees += FILL_FEE;
+        }
       }
-      if (p.inBuf >= cfg.needs && p.outBuf < PLANT_BUF) {
-        p.inBuf -= cfg.needs;
+      const ready = p.kind === 'fill' ? p.inBuf >= 1 && p.inEmpty >= 1 : p.inBuf >= cfg.needs;
+      if (ready && p.outBuf < PLANT_BUF) {
+        if (p.kind === 'fill') {
+          p.inBuf--;
+          p.inEmpty--;
+        } else p.inBuf -= cfg.needs;
         p.proc = cfg.time * (this.spec === 'hub' ? 1.3 : this.spec === 'logi' ? 0.75 : 1);
       }
     }
@@ -3403,7 +3596,7 @@ export class Sim {
     for (const c of this.cranes) cost += CRANE_MODELS[c.model].run;
     for (const t of this.trucks) cost += (t.agv ? R.agv : R.truck) * (this.tech.diesel ? 0.6 : 1);
     cost += this.gates.length * R.gate + this.rails.length * R.rail + this.plants.length * R.plant + this.shops.length * R.shop;
-    cost += this.yardTiles.length * R.yardTile + this.reeferTiles.length * R.reeferTile;
+    cost += this.yardTiles.length * R.yardTile + this.reeferTiles.length * R.reeferTile + this.hazTiles.length * R.hazTile + this.emptyTiles.length * R.emptyTile;
     for (let i = 0; i < this.kind.length; i++) if (this.kind[i] === T.Kai) cost += R.kaiTile;
     return cost;
   }

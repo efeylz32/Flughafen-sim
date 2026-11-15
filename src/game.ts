@@ -10,7 +10,7 @@ import { GameEvent, Removed, Sim } from './sim/sim';
 import type { UI } from './ui/ui';
 
 const SAVE_KEY = 'hafen-imperium-save-v1';
-export const PAINT_TOOLS: Tool[] = ['kai', 'road', 'yard', 'reefer', 'dredge', 'zone', 'demolish'];
+export const PAINT_TOOLS: Tool[] = ['kai', 'road', 'yard', 'reefer', 'hazard', 'emptyyard', 'dredge', 'zone', 'demolish'];
 
 /** So lange (in Spielminuten) lässt sich eine Bauaktion rückgängig machen. */
 const UNDO_WINDOW_GM = 240;
@@ -539,7 +539,7 @@ export class Game {
     if (this.tool === 'zone') {
       const i = this.sim.idx(x, y);
       const k = this.sim.kind[i];
-      return k === T.Yard || k === T.Reefer || !!(this.sim.craneAt(x, y) ?? this.sim.gateAt(x, y) ?? this.sim.plantAt(x, y) ?? this.sim.railAt(x, y) ?? this.sim.truckAtTile(i));
+      return k === T.Yard || k === T.Reefer || k === T.Hazmat || k === T.Empty || !!(this.sim.craneAt(x, y) ?? this.sim.gateAt(x, y) ?? this.sim.plantAt(x, y) ?? this.sim.railAt(x, y) ?? this.sim.truckAtTile(i));
     }
     if (this.tool === 'oneway') return this.sim.kind[this.sim.idx(x, y)] === T.Road;
     if (this.tool === 'buyland') return x >= 0 && x < GRID_W && !this.sim.owned[x];
@@ -583,6 +583,8 @@ export class Game {
       else if (k === T.Shop) this.selected = { kind: 'shop', id: sim.shopAt(tx, ty)!.id };
       else if (k === T.Yard) this.selected = { kind: 'yard', id: sim.idx(tx, ty) };
       else if (k === T.Reefer) this.selected = { kind: 'reefer', id: sim.idx(tx, ty) };
+      else if (k === T.Hazmat) this.selected = { kind: 'hazmat', id: sim.idx(tx, ty) };
+      else if (k === T.Empty) this.selected = { kind: 'emptyyard', id: sim.idx(tx, ty) };
     }
     if (this.selected && (this.selected.kind !== before?.kind || this.selected.id !== before?.id)) this.sound.play('click');
   }
