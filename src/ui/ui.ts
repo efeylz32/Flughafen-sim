@@ -40,6 +40,7 @@ import {
   TechId,
 } from '../sim/data';
 import { ACHIEVEMENTS } from '../achievements';
+import { latestSlot, metaOfSlot, removeSlot, Slot, SLOTS } from '../saves';
 import { MISSIONS } from '../sim/missions';
 import { SCENARIOS } from '../sim/scenarios';
 import type { Contract, Job, Sim } from '../sim/sim';
@@ -146,6 +147,8 @@ const STAGES: { key: 'crane' | 'trucks' | 'yard' | 'gate'; label: string; hint: 
 /** Farben der Truck-Aufgaben, wie auf der Karte */
 const ROLE_DOT: Partial<Record<TruckRole, string>> = { crane: '#e2582c', out: '#2f9e6b', export: '#2f6db0', plant: '#7a5cc7' };
 
+type MenuView = 'main' | 'pause' | 'new' | 'saves' | 'settings' | 'help';
+
 const utilClass = (u: number) => (u < 0.6 ? 'ok' : u < 0.85 ? 'mid' : 'hi');
 const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
 
@@ -195,7 +198,9 @@ export class UI {
   private dealBtn!: HTMLButtonElement;
   private dealBadge!: HTMLElement;
   private menu!: HTMLElement;
-  private resumeBtn!: HTMLButtonElement;
+  private menuView: MenuView = 'main';
+  private menuConfirm = '';
+  private menuNote = '';
   private deals!: HTMLElement;
   private dealsBody!: HTMLElement;
   private staffModal!: HTMLElement;
@@ -483,90 +488,12 @@ export class UI {
 
     this.toasts = el('div', 'toasts');
 
-    // Menü
+    // Menü: Hauptmenü, Pause, Neues Spiel, Spielstände, Einstellungen
     this.menu = el('div', 'modal hidden');
-    this.menu.innerHTML = `
-      <div class="dialog">
-        <h1>Hafen-Imperium</h1>
-        <p class="sub">Vom Anleger zum Weltklasse-Hafen</p>
-        <button class="primary resume">Weiterspielen</button>
-        <div class="difflabel">Schwierigkeit für ein neues Spiel</div>
-        <div class="diff">${(Object.keys(DIFFS) as DiffId[]).map((d) => `<button data-diff="${d}">${DIFFS[d].name}</button>`).join('')}</div>
-        <p class="sub difftext"></p>
-        <div class="difflabel">Karte für einen neuen leeren Hafen</div>
-        <div class="diff">${(Object.keys(MAPS) as MapId[]).map((m) => `<button data-map="${m}">${MAPS[m].name}</button>`).join('')}</div>
-        <p class="sub maptext"></p>
-        <button class="primary demo">Demo-Hafen mit Engpass</button>
-        <button class="secondary empty">Neuer leerer Hafen</button>
-        <div class="difflabel">Szenarien</div>
-        ${SCENARIOS.map((s) => `<button class="secondary scen" data-scenario="${s.id}"><b>${s.name}</b><span>${s.text} Ziel: ${s.goal} bis Tag ${s.days}.</span></button>`).join('')}
-        <button class="secondary achv">Erfolge und Bestenliste</button>
-        <details><summary>Bedienung</summary>
-          <ul>
-            <li><b>Handy:</b> Werkzeug unten wählen, tippen oder ziehen zum Bauen. Mit zwei Fingern verschieben und zoomen, mit „Ansehen" auch mit einem Finger.</li>
-            <li><b>PC:</b> Linksklick baut, Rechtsklick oder Mittelklick verschiebt, Mausrad zoomt.</li>
-            <li><b>Zonen:</b> Unter Geräte „Zonen“ wählen, eine Farbe antippen und Lagerflächen, Kräne, Gates, Hallen, Gleise oder Trucks anmalen. Fahrten verbinden dann nur Dinge derselben Zone, Trucks mit Zone fahren nur dort. Ohne Zone bleibt alles wie bisher.</li>
-            <li><b>Aufrüsten:</b> Mit „Ansehen" einen Kran oder Truck antippen, dann im Info-Blatt aufrüsten.</li>
-            <li><b>Rückgängig:</b> Der Pfeil-Knopf oder Strg+Z nimmt den letzten Bauschritt zurück, mit voller Erstattung. Das geht 4 Spielstunden lang, danach hilft nur der Abriss (50 %).</li>
-            <li><b>Tasten:</b> Leertaste Pause, 1/2/3 Tempo, O Engpass einfärben, M Ton, V K C R Y G T X Werkzeuge, Esc Abbrechen.</li>
-          </ul>
-        </details>
-        <details><summary>Wie verdiene ich Geld?</summary>
-          <ul>
-            <li>Jeder Container, der den Hafen verlässt, bringt 200 €, Kühlcontainer 400 €, Export aufs Schiff 250 €.</li>
-            <li>Jedes abgefertigte Schiff zahlt Liegegebühr. Verträge zahlen Bonus bei pünktlicher Abfertigung und Strafe bei Verspätung.</li>
-            <li>Kräne, Trucks, Gates und Flächen kosten jeden Tag Betrieb. Die Finanzen zeigen, was heute läuft.</li>
-          </ul>
-        </details>
-        <button class="close-menu">Zurück zum Spiel</button>
-      </div>`;
-    this.resumeBtn = this.menu.querySelector('.resume')!;
-    this.resumeBtn.addEventListener('click', () => {
-      if (this.game.load()) this.hideMenu();
+    this.menu.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
+      if (b) this.menuAction(b.dataset.act!, b.dataset.arg ?? '');
     });
-    const diffText = this.menu.querySelector('.difftext')!;
-    const showDiff = () => {
-      for (const b of this.menu.querySelectorAll<HTMLElement>('[data-diff]')) b.classList.toggle('on', b.dataset.diff === this.diff);
-      const d = DIFFS[this.diff];
-      diffText.textContent = `${d.text}. Startgeld ${eur(d.money)}.`;
-    };
-    for (const b of this.menu.querySelectorAll<HTMLElement>('[data-diff]')) {
-      b.addEventListener('click', () => {
-        this.diff = b.dataset.diff as DiffId;
-        showDiff();
-        click();
-      });
-    }
-    showDiff();
-    const mapText = this.menu.querySelector('.maptext')!;
-    const showMap = () => {
-      for (const b of this.menu.querySelectorAll<HTMLElement>('[data-map]')) b.classList.toggle('on', b.dataset.map === this.map);
-      mapText.textContent = `${MAPS[this.map].text} Der Demo-Hafen liegt immer an der Küste.`;
-    };
-    for (const b of this.menu.querySelectorAll<HTMLElement>('[data-map]')) {
-      b.addEventListener('click', () => {
-        this.map = b.dataset.map as MapId;
-        showMap();
-        click();
-      });
-    }
-    showMap();
-    this.menu.querySelector('.demo')!.addEventListener('click', () => {
-      this.game.newGame('demo', this.diff);
-      this.hideMenu();
-    });
-    this.menu.querySelector('.empty')!.addEventListener('click', () => {
-      this.game.newGame('empty', this.diff, this.map);
-      this.hideMenu();
-    });
-    this.menu.querySelector('.close-menu')!.addEventListener('click', () => this.hideMenu());
-    for (const b of this.menu.querySelectorAll<HTMLElement>('[data-scenario]')) {
-      b.addEventListener('click', () => {
-        this.game.newScenario(b.dataset.scenario!);
-        this.hideMenu();
-      });
-    }
-    this.menu.querySelector('.achv')!.addEventListener('click', () => this.showAchievements());
 
     // Verträge
     this.deals = el('div', 'modal hidden');
@@ -650,7 +577,7 @@ export class UI {
     });
     this.endModal.querySelector('.again')!.addEventListener('click', () => {
       this.endModal.classList.add('hidden');
-      this.showMenu();
+      this.showMenu('new');
     });
 
     // Neue Stufe
@@ -675,8 +602,11 @@ export class UI {
     c.classList.toggle('hidden');
   }
 
-  showMenu() {
-    this.resumeBtn.style.display = this.game.hasSave() ? '' : 'none';
+  /** Zeigt das Menü. Ohne Angabe: Pause, wenn ein Spiel läuft, sonst das Hauptmenü. */
+  showMenu(view?: MenuView) {
+    this.menuView = view ?? (this.game.inGame ? 'pause' : 'main');
+    this.menuConfirm = '';
+    this.renderMenu();
     this.menu.classList.remove('hidden');
     this.game.setSpeed(0);
   }
@@ -685,6 +615,215 @@ export class UI {
     if (this.game.speed === 0) this.game.setSpeed(this.game.lastSpeed || 1);
   }
 
+  private menuAction(act: string, arg: string) {
+    const g = this.game;
+    g.sound.play('click');
+    switch (act) {
+      case 'view':
+        this.menuView = arg as MenuView;
+        this.menuConfirm = '';
+        break;
+      case 'close':
+        return this.hideMenu();
+      case 'resume':
+        if (g.load()) return this.hideMenu();
+        this.menuNote = 'Dieser Spielstand lässt sich nicht laden.';
+        break;
+      case 'diff':
+        this.diff = arg as DiffId;
+        break;
+      case 'map':
+        this.map = arg as MapId;
+        break;
+      case 'demo':
+        g.newGame('demo', this.diff);
+        return this.hideMenu();
+      case 'empty':
+        g.newGame('empty', this.diff, this.map);
+        return this.hideMenu();
+      case 'scenario':
+        g.newScenario(arg);
+        return this.hideMenu();
+      case 'achv':
+        return this.showAchievements();
+      case 'main':
+        // Beim Verlassen wird gespeichert, damit „Weiterspielen“ hier weitermacht
+        g.save();
+        this.menuView = 'main';
+        break;
+      case 'save': {
+        const slot = arg as Slot;
+        if (metaOfSlot(slot) && this.menuConfirm !== `save${slot}`) {
+          this.menuConfirm = `save${slot}`;
+          break;
+        }
+        this.menuNote = g.saveSlot(slot) ? `Gespeichert in Spielstand ${slot}.` : 'Speichern ist in diesem Browser nicht möglich.';
+        this.menuConfirm = '';
+        break;
+      }
+      case 'load': {
+        if (this.menuView === 'saves' && this.game.inGame && this.menuConfirm !== `load${arg}`) {
+          this.menuConfirm = `load${arg}`;
+          break;
+        }
+        if (g.load(arg as Slot)) return this.hideMenu();
+        this.menuNote = 'Dieser Spielstand lässt sich nicht laden.';
+        this.menuConfirm = '';
+        break;
+      }
+      case 'delete':
+        if (this.menuConfirm !== `del${arg}`) {
+          this.menuConfirm = `del${arg}`;
+          break;
+        }
+        removeSlot(arg as Slot);
+        this.menuConfirm = '';
+        break;
+      case 'sound':
+        g.toggleSound();
+        break;
+      case 'autosave':
+        g.setSetting('autosave', !g.settings.autosave);
+        break;
+      case 'dayreport':
+        g.setSetting('dayReport', !g.settings.dayReport);
+        if (!g.settings.dayReport) this.dayCard.classList.add('hidden');
+        break;
+      case 'wipe':
+        if (this.menuConfirm !== 'wipe') {
+          this.menuConfirm = 'wipe';
+          break;
+        }
+        for (const sl of ['auto', ...SLOTS] as Slot[]) removeSlot(sl);
+        this.menuConfirm = '';
+        this.menuNote = 'Alle Spielstände gelöscht.';
+        break;
+    }
+    this.renderMenu();
+  }
+
+  private slotRow(slot: Slot, canSave: boolean): string {
+    const m = metaOfSlot(slot);
+    const name = slot === 'auto' ? 'Autosave' : `Spielstand ${slot}`;
+    const info = m
+      ? `Tag ${m.day} · ${m.scenario ? 'Szenario' : DIFFS[m.diff as DiffId]?.name ?? m.diff} · ${m.levelName} · ${eur(m.money)}${m.t ? ` · ${new Date(m.t).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ''}`
+      : 'Leer';
+    const c = this.menuConfirm;
+    const btns: string[] = [];
+    if (canSave && slot !== 'auto') btns.push(`<button class="${c === `save${slot}` ? 'danger' : 'primary'}" data-act="save" data-arg="${slot}">${c === `save${slot}` ? 'Überschreiben?' : 'Speichern'}</button>`);
+    if (m) btns.push(`<button class="${c === `load${slot}` ? 'danger' : 'secondary'}" data-act="load" data-arg="${slot}">${c === `load${slot}` ? 'Laufendes Spiel verwerfen?' : 'Laden'}</button>`);
+    if (m && slot !== 'auto') btns.push(`<button class="${c === `del${slot}` ? 'danger' : 'secondary'}" data-act="delete" data-arg="${slot}">${c === `del${slot}` ? 'Sicher?' : 'Löschen'}</button>`);
+    return `<div class="slot ${m ? '' : 'empty'}"><div class="slotname"><b>${name}</b><span>${info}</span></div><div class="slotbtns">${btns.join('')}</div></div>`;
+  }
+
+  private renderMenu() {
+    const g = this.game;
+    const sim = g.sim;
+    const back = (to: MenuView) => `<button class="close-menu" data-act="view" data-arg="${to}">Zurück</button>`;
+    const note = this.menuNote ? `<p class="menunote">${this.menuNote}</p>` : '';
+    this.menuNote = '';
+    const toggle = (label: string, text: string, on: boolean, act: string) =>
+      `<div class="setrow"><div><b>${label}</b><span>${text}</span></div><button class="switch ${on ? 'on' : ''}" data-act="${act}" aria-pressed="${on}">${on ? 'An' : 'Aus'}</button></div>`;
+    let body = '';
+    switch (this.menuView) {
+      case 'main': {
+        const last = latestSlot();
+        const m = last ? metaOfSlot(last) : null;
+        body = `
+          <h1>Hafen-Imperium</h1>
+          <p class="sub">Vom Anleger zum Weltklasse-Hafen</p>
+          ${note}
+          ${m ? `<button class="primary resume" data-act="resume">Weiterspielen<small>Tag ${m.day} · ${m.levelName} · ${eur(m.money)}</small></button>` : ''}
+          <button class="${m ? 'secondary' : 'primary'}" data-act="view" data-arg="new">Neues Spiel</button>
+          <button class="secondary" data-act="view" data-arg="saves">Spielstand laden</button>
+          <button class="secondary" data-act="achv">Erfolge und Bestenliste</button>
+          <button class="secondary" data-act="view" data-arg="settings">Einstellungen</button>
+          <button class="secondary" data-act="view" data-arg="help">Bedienung und Hilfe</button>`;
+        break;
+      }
+      case 'pause': {
+        const sc = sim.scenario ? SCENARIOS.find((x) => x.id === sim.scenario) : null;
+        body = `
+          <h1>Pause</h1>
+          ${note}
+          <div class="statecard">
+            <div><span>Tag</span><b>${sim.day}</b></div>
+            <div><span>Stufe</span><b>${sim.level} · ${sim.levelName}</b></div>
+            <div><span>Geld</span><b>${eur(sim.money)}</b></div>
+            <div><span>Modus</span><b>${sc ? sc.name : `${DIFFS[sim.diff].name}, ${MAPS[sim.map].name}`}</b></div>
+            <div><span>Ziel</span><b>${sim.status === 'free' ? 'ohne Wertung' : sc ? `${sc.goal} bis Tag ${sim.goalDay}` : `Stufe ${GOAL_LEVEL} bis Tag ${sim.goalDay}`}</b></div>
+            <div><span>Aufträge</span><b>${sim.contracts.length} Verträge · ${sim.shipsDone} Schiffe</b></div>
+          </div>
+          <button class="primary" data-act="close">Weiterspielen</button>
+          <button class="secondary" data-act="view" data-arg="saves">Speichern und Laden</button>
+          <button class="secondary" data-act="view" data-arg="settings">Einstellungen</button>
+          <button class="secondary" data-act="achv">Erfolge und Bestenliste</button>
+          <button class="secondary" data-act="view" data-arg="help">Bedienung und Hilfe</button>
+          <button class="secondary" data-act="view" data-arg="new">Neues Spiel</button>
+          <button class="secondary" data-act="main">Zurück zum Hauptmenü</button>`;
+        break;
+      }
+      case 'new':
+        body = `
+          <h1>Neues Spiel</h1>
+          <div class="difflabel">Schwierigkeit</div>
+          <div class="diff">${(Object.keys(DIFFS) as DiffId[]).map((d) => `<button class="${d === this.diff ? 'on' : ''}" data-act="diff" data-arg="${d}">${DIFFS[d].name}</button>`).join('')}</div>
+          <p class="sub">${DIFFS[this.diff].text}. Startgeld ${eur(DIFFS[this.diff].money)}.</p>
+          <div class="difflabel">Karte für einen neuen leeren Hafen</div>
+          <div class="diff">${(Object.keys(MAPS) as MapId[]).map((m) => `<button class="${m === this.map ? 'on' : ''}" data-act="map" data-arg="${m}">${MAPS[m].name}</button>`).join('')}</div>
+          <p class="sub">${MAPS[this.map].text} Der Demo-Hafen liegt immer an der Küste.</p>
+          <button class="primary" data-act="demo">Demo-Hafen mit Engpass</button>
+          <button class="secondary" data-act="empty">Neuer leerer Hafen</button>
+          <div class="difflabel">Szenarien</div>
+          ${SCENARIOS.map((x) => `<button class="secondary scen" data-act="scenario" data-arg="${x.id}"><b>${x.name}</b><span>${x.text} Ziel: ${x.goal} bis Tag ${x.days}.</span></button>`).join('')}
+          ${back(g.inGame ? 'pause' : 'main')}`;
+        break;
+      case 'saves': {
+        const canSave = g.inGame;
+        body = `
+          <h1>${canSave ? 'Speichern und Laden' : 'Spielstand laden'}</h1>
+          <p class="sub">Drei Speicherplätze und ein Autosave. Der Autosave sichert alle 30 Sekunden, jeden Tag und beim Verlassen. Alles liegt nur in diesem Browser.</p>
+          ${note}
+          ${SLOTS.map((x) => this.slotRow(x, canSave)).join('')}
+          ${this.slotRow('auto', false)}
+          ${back(g.inGame ? 'pause' : 'main')}`;
+        break;
+      }
+      case 'settings':
+        body = `
+          <h1>Einstellungen</h1>
+          ${note}
+          ${toggle('Ton', 'Geräusche und Effekte', g.sound.enabled, 'sound')}
+          ${toggle('Autosave', 'Speichert automatisch in den Autosave-Platz', g.settings.autosave, 'autosave')}
+          ${toggle('Tagesbericht', 'Zeigt nach jedem Tag eine Karte mit dem Ergebnis', g.settings.dayReport, 'dayreport')}
+          <button class="${this.menuConfirm === 'wipe' ? 'danger' : 'secondary'}" data-act="wipe">${this.menuConfirm === 'wipe' ? 'Wirklich alle Spielstände löschen?' : 'Alle Spielstände löschen'}</button>
+          ${back(g.inGame ? 'pause' : 'main')}`;
+        break;
+      case 'help':
+        body = `
+          <h1>Bedienung und Hilfe</h1>
+          <details open><summary>Bedienung</summary>
+            <ul>
+              <li><b>Handy:</b> Werkzeug unten wählen, tippen oder ziehen zum Bauen. Mit zwei Fingern verschieben und zoomen, mit „Ansehen“ auch mit einem Finger.</li>
+              <li><b>PC:</b> Linksklick baut, Rechtsklick oder Mittelklick verschiebt, Mausrad zoomt.</li>
+              <li><b>Zonen:</b> Unter Geräte „Zonen“ wählen, eine Farbe antippen und Lagerflächen, Kräne, Gates, Hallen, Gleise oder Trucks anmalen. Fahrten verbinden dann nur Dinge derselben Zone.</li>
+              <li><b>Aufrüsten:</b> Mit „Ansehen“ einen Kran oder Truck antippen, dann im Info-Blatt aufrüsten.</li>
+              <li><b>Rückgängig:</b> Der Pfeil-Knopf oder Strg+Z nimmt den letzten Bauschritt zurück, mit voller Erstattung (4 Spielstunden lang).</li>
+              <li><b>Tasten:</b> Leertaste Pause, 1/2/3 Tempo, O Engpass einfärben, M Ton, R Drehen, V K C Y G T X Werkzeuge, Esc Abbrechen.</li>
+            </ul>
+          </details>
+          <details><summary>Wie verdiene ich Geld?</summary>
+            <ul>
+              <li>Jeder Container, der den Hafen verlässt, bringt 200 €, Kühlcontainer 400 €, Gefahrgut 700 €, Export aufs Schiff 250 €.</li>
+              <li>Jedes abgefertigte Schiff zahlt Liegegebühr. Verträge zahlen Bonus bei pünktlicher Abfertigung und Strafe bei Verspätung.</li>
+              <li>Kräne, Trucks, Gates und Flächen kosten jeden Tag Betrieb. Die Finanzen zeigen, was heute läuft.</li>
+            </ul>
+          </details>
+          ${back(g.inGame ? 'pause' : 'main')}`;
+        break;
+    }
+    this.menu.innerHTML = `<div class="dialog menu">${body}</div>`;
+  }
   showDeals() {
     this.confirmCancel = 0;
     this.deals.classList.remove('hidden');
@@ -744,7 +883,7 @@ export class UI {
   showDayReport() {
     const sim = this.game.sim;
     const y = sim.history.at(-1);
-    if (!y) return;
+    if (!y || !this.game.settings.dayReport) return;
     const inc = y.fees + y.rail + y.exportFees + y.berth + y.bonus;
     const exp = y.running + y.building + y.penalty + y.wages + (y.interest ?? 0);
     const bn = y.bn ? (Object.entries(y.bn) as [keyof typeof y.bn, number][]).sort((a, b) => b[1] - a[1])[0] : null;

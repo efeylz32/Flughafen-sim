@@ -371,3 +371,31 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .deal .roles button { flex: 1 1 auto; border: 0; padding: 9px 10px; font-size: 13.5px; font-weight: 700; background: #e6ebf2; color: var(--ink); border-radius: 10px; }
 .deal .roles button.on { background: var(--accent); color: #fff; }
 .deal .rolelabel { margin-top: 10px; }
+
+/* Menü */
+.dialog.menu { max-height: calc(100% - 8px); }
+.dialog.menu button { text-align: center; }
+.dialog.menu .resume { display: flex; flex-direction: column; gap: 2px; align-items: center; }
+.dialog.menu .resume small { font-weight: 600; font-size: 13px; opacity: .85; }
+.dialog.menu .danger { background: var(--bad); color: #fff; }
+.dialog.menu .diff { display: flex; gap: 6px; }
+.dialog.menu .diff button { flex: 1; background: #eef2f7; }
+.dialog.menu .diff button.on { background: var(--accent); color: #fff; }
+.dialog.menu .difflabel { font-size: 12px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); margin-top: 4px; }
+.dialog.menu .menunote { background: #e7f6ee; color: #1f6b49; border-radius: 12px; padding: 10px 12px; font-size: 14px; font-weight: 700; margin: 0; }
+.statecard { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.statecard div { background: #f3f6fa; border-radius: 12px; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+.statecard span { font-size: 11.5px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.statecard b { font-size: 14px; }
+.slot { background: #f3f6fa; border-radius: 16px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.slot.empty .slotname span { color: var(--muted); }
+.slotname { display: flex; flex-direction: column; gap: 2px; }
+.slotname b { font-size: 15px; }
+.slotname span { font-size: 13px; color: #34455a; }
+.slotbtns { display: flex; gap: 6px; }
+.slotbtns button { flex: 1; padding: 10px 8px !important; font-size: 14px !important; }
+.setrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: #f3f6fa; border-radius: 14px; padding: 10px 12px; }
+.setrow div { display: flex; flex-direction: column; gap: 2px; }
+.setrow span { font-size: 12.5px; color: var(--muted); }
+.dialog.menu .switch { min-width: 64px; background: #dfe5ec; padding: 10px 12px; font-size: 14px; }
+.dialog.menu .switch.on { background: var(--good); color: #fff; }

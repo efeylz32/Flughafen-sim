@@ -19,12 +19,13 @@ async function boot() {
   for (const ev of ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown']) window.addEventListener(ev, unlock, { capture: true });
   document.addEventListener('visibilitychange', () => game.sound.setHidden(document.hidden));
 
-  // Letzten Spielstand laden, sonst Menü zeigen
-  if (game.hasSave() && game.load()) {
-    game.setSpeed(1);
-  } else {
-    game.ui.showMenu();
-  }
+  // Beim Verlassen oder Wegwischen speichern, damit nichts verloren geht
+  const flush = () => game.save();
+  document.addEventListener('visibilitychange', () => document.hidden && flush());
+  window.addEventListener('pagehide', flush);
+
+  // Zuerst das Hauptmenü: Weiterspielen, Neues Spiel, Laden
+  game.ui.showMenu('main');
 
   // Test- und Debug-Zugriff: ?debug in der URL
   if (new URLSearchParams(location.search).has('debug')) {

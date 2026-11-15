@@ -9,7 +9,7 @@ import { SCENARIOS } from './sim/scenarios';
 import { GameEvent, Removed, Sim } from './sim/sim';
 import type { UI } from './ui/ui';
 
-const SAVE_KEY = 'hafen-imperium-save-v1';
+import { latestSlot, loadSettings, readSlot, saveSettings, Settings, Slot, writeSlot } from './saves';
 export const PAINT_TOOLS: Tool[] = ['kai', 'road', 'yard', 'reefer', 'hazard', 'emptyyard', 'dredge', 'zone', 'demolish'];
 
 /** So lange (in Spielminuten) lässt sich eine Bauaktion rückgängig machen. */
@@ -49,6 +49,9 @@ export class Game {
   private acc = 0;
   private time = 0;
   private saveTimer = 0;
+  settings: Settings = loadSettings();
+  /** Läuft schon ein Spiel (neu gestartet oder geladen)? */
+  inGame = false;
   private undoStack: UndoGroup[] = [];
   private stroke: UndoGroup | null = null;
   /** Einnahmen pro Feld, die gesammelt als ein aufsteigender Text erscheinen */
@@ -98,7 +101,7 @@ export class Game {
       }
     }
     this.saveTimer += dtSec;
-    if (this.saveTimer > 20) {
+    if (this.saveTimer > 30) {
       this.saveTimer = 0;
       this.save();
     }
@@ -184,6 +187,7 @@ export class Game {
         this.sound.play('mission');
         break;
       case 'day':
+        this.save();
         this.sound.play('day');
         this.ui.showDayReport();
         break;
@@ -258,6 +262,7 @@ export class Game {
     this.resetTransient();
     this.setTool('view');
     this.setSpeed(1);
+    this.inGame = true;
     this.fitCamera();
     this.save();
   }
@@ -275,6 +280,7 @@ export class Game {
     this.resetTransient();
     this.setTool('view');
     this.setSpeed(1);
+    this.inGame = true;
     this.fitCamera();
     this.save();
   }
@@ -296,34 +302,40 @@ export class Game {
   }
 
   hasSave(): boolean {
-    try {
-      return localStorage.getItem(SAVE_KEY) !== null;
-    } catch {
-      return false;
-    }
+    return latestSlot() !== null;
   }
 
+  /** Autosave: nur, wenn ein Spiel läuft, es nicht verloren ist und der Autosave an ist */
   save() {
-    try {
-      localStorage.setItem(SAVE_KEY, JSON.stringify(this.sim.serialize()));
-    } catch {
-      /* Speichern ist optional (privater Modus, volle Quote) */
-    }
+    if (!this.inGame || !this.settings.autosave || this.sim.status === 'lost') return;
+    writeSlot('auto', this.sim);
   }
 
-  load(): boolean {
+  /** Speichert in einen der drei Speicherplätze */
+  saveSlot(slot: Slot): boolean {
+    return writeSlot(slot, this.sim);
+  }
+
+  /** Lädt einen Speicherplatz. Ohne Angabe den zuletzt gespeicherten Stand. */
+  load(slot: Slot | null = latestSlot()): boolean {
+    if (!slot) return false;
     try {
-      const raw = localStorage.getItem(SAVE_KEY);
-      if (!raw) return false;
-      const data = JSON.parse(raw);
-      if (data?.v !== 1) return false;
+      const data = readSlot(slot);
+      if (!data) return false;
       this.sim = Sim.deserialize(data);
+      this.inGame = true;
       this.resetTransient();
+      this.setTool('view');
       this.fitCamera();
       return true;
     } catch {
       return false;
     }
+  }
+
+  setSetting<K extends keyof Settings>(k: K, v: Settings[K]) {
+    this.settings[k] = v;
+    saveSettings(this.settings);
   }
 
   // ───────────────────────── Bauen und Rückgängig ─────────────────────────
