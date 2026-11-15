@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { COAST_ROW, GRID_W, T, TICKS_PER_SEC } from '../src/sim/data';
+import { COAST_ROW, GRID_H, GRID_W, T, TICKS_PER_SEC } from '../src/sim/data';
 import { buildDemo } from '../src/sim/demo';
 import { Sim } from '../src/sim/sim';
 
@@ -1511,5 +1511,49 @@ describe('Container-Ziele und Umstapeln', () => {
     const copy = Sim.deserialize(JSON.parse(JSON.stringify(sim.serialize())));
     expect(copy.yardUse[t0]).toBe(2);
     expect(Array.from(copy.stockRail)).toEqual(Array.from(sim.stockRail));
+  });
+});
+
+describe('Gleise ins Land und Außenanbindung', () => {
+  it('ein Bahnhof im Hafen braucht ein durchgehendes Gleis zum Rand, Straßen kreuzen als Bahnübergang', () => {
+    const sim = new Sim();
+    sim.level = 3;
+    sim.money = 1e7;
+    expect(sim.canBuild('rail', 25, k + 3).ok).toBe(false);
+    for (let x = 26; x < GRID_W; x++) sim.build('track', x, k + 3);
+    expect(sim.canBuild('rail', 25, k + 3).ok).toBe(true);
+    sim.build('rail', 25, k + 3);
+    // Straße quer übers Gleis: Bahnübergang, Gleis bleibt durchgehend
+    expect(sim.build('road', 30, k + 3).ok).toBe(true);
+    expect(sim.railX[sim.idx(30, k + 3)]).toBe(1);
+    expect(sim.railLinked(sim.rails[0])).toBe(true);
+    sim.demolish(30, k + 3);
+    expect(sim.kind[sim.idx(30, k + 3)]).toBe(T.Track);
+    sim.demolish(31, k + 3);
+    expect(sim.railLinked(sim.rails[0])).toBe(false);
+  });
+
+  it('Gate mit Straße ins Hinterland arbeitet schneller', () => {
+    const sim = new Sim();
+    for (let x = 4; x <= 12; x++) sim.build('road', x, k + 1);
+    sim.build('gate', 8, k + 2);
+    const g = sim.gates[0];
+    expect(sim.hinterlandMul(g)).toBe(1);
+    for (let y = k + 1; y < GRID_H; y++) sim.build('road', 4, y);
+    expect(sim.hinterlandMul(g)).toBeGreaterThan(1);
+  });
+
+  it('die Befüllhalle bekommt Leercontainer von außen über das Gate', () => {
+    const sim = basicPort(4, 1);
+    sim.level = 3;
+    sim.money = 1e7;
+    sim.build('emptyyard', 6, k + 2);
+    sim.build('emptyyard', 7, k + 2);
+    sim.build('fill', 20, k + 2);
+    sim.finishAll();
+    expect(sim.emptiesWanted()).toBeGreaterThan(0);
+    run(sim, 8);
+    const got = sim.emptyStock + sim.gates.reduce((n, g) => n + g.emptyIn, 0) + sim.plants.reduce((n, p) => n + p.inEmpty, 0);
+    expect(got).toBeGreaterThan(0);
   });
 });

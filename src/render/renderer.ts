@@ -679,6 +679,12 @@ export class Renderer {
                 .fill(C.grassA);
               g.moveTo(ox, oy + dy * 12.5).quadraticCurveTo(ox + dx * 1.5, oy + dy * 1.5, ox + dx * 12.5, oy).stroke({ width: 1.3, color: C.roadEdge, alpha: 0.85 });
             }
+            // Bahnübergang: Schienen über die Straße, weiß-rote Markierung
+            if (sim.railX[y * GRID_W + x]) {
+              g.rect(px, py + 19.6, TILE, 1.5).fill(0x8f979f);
+              g.rect(px, py + 25.4, TILE, 1.5).fill(0x8f979f);
+              for (let k = 0; k < 4; k++) g.rect(px + 2 + k * 8, py + 14, 4, 2).fill(k % 2 ? 0xd9473f : 0xffffff);
+            }
             // Ausbaustufen: Doppelspur mit gelber Doppellinie, Autobahn dunkel mit weißen Randlinien
             const tier = sim.roadTier[y * GRID_W + x];
             if (tier === 1) {
@@ -755,6 +761,15 @@ export class Renderer {
             if (!same(0, 1)) g.rect(px, py + TILE - 2, TILE, 2).fill(0x3b9bd6);
             if (!same(-1, 0)) g.rect(px, py, 2, TILE).fill(0x3b9bd6);
             if (!same(1, 0)) g.rect(px + TILE - 2, py, 2, TILE).fill(0x3b9bd6);
+            break;
+          }
+          case T.Track: {
+            // Gleis: Schotter, Schwellen, zwei Schienen
+            g.rect(px, py, TILE, TILE).fill(0xcbc6ba);
+            g.rect(px, py + 15, TILE, 16).fill(0xb7ad97);
+            for (let sx = px + 2; sx < px + TILE; sx += 6) g.rect(sx, py + 17.5, 2.6, 11).fill(0x6e5d4b);
+            g.rect(px, py + 19.6, TILE, 1.5).fill(0x8f979f);
+            g.rect(px, py + 25.4, TILE, 1.5).fill(0x8f979f);
             break;
           }
           case T.Solar: {
@@ -883,6 +898,19 @@ export class Renderer {
         const by = along ? (oy < 0 ? r.y + 2 : r.y + r.h - 2) : d < 0 ? r.y + 2 : r.y + r.h - 2;
         g.circle(bx, by, 3.2).fill(0xffffff);
         g.circle(bx, by, 2.3).fill(d < 0 ? 0xd9473f : 0x2f9e6b);
+      }
+    }
+    // Hinterland: Straßen am unteren oder linken Rand führen aus der Karte hinaus
+    for (const e of sim.hinterlandExits()) {
+      const ex = (e % GRID_W) * TILE;
+      const ey = ((e / GRID_W) | 0) * TILE;
+      const bottom = ((e / GRID_W) | 0) === GRID_H - 1;
+      if (bottom) {
+        g.rect(ex, ey + TILE, TILE, DECOR).fill(C.road);
+        for (let yy = ey + TILE + 6; yy < ey + TILE + DECOR; yy += 16) g.rect(ex + TILE / 2 - 1, yy, 2, 8).fill(C.roadDash);
+      } else {
+        g.rect(ex - DECOR, ey, DECOR, TILE).fill(C.road);
+        for (let xx = ex - DECOR + 4; xx < ex; xx += 16) g.rect(xx, ey + TILE / 2 - 1, 8, 2).fill(C.roadDash);
       }
     }
     // Rand des Baugebiets
@@ -1545,7 +1573,7 @@ export class Renderer {
       // Der Zug rollt von rechts ein und wieder nach rechts hinaus
       const t = Math.max(0, r.timer - a * TICK_GM) / RAIL_TRAVEL_GM;
       const u = r.state === 'arriving' ? t : r.state === 'leaving' ? 1 - t : 0;
-      v.root.position.set(W + 3 + u * u * 900, 0);
+      v.root.position.set(r.x * TILE + 3 + u * u * (W - r.x * TILE + 900), 0);
       const n = r.state === 'leaving' ? Math.ceil((r.lastLoad / RAIL_CAP) * v.cargo.length) : 0;
       if (n !== v.n) {
         v.n = n;
@@ -1796,9 +1824,11 @@ export class Renderer {
         g.rect((i % GRID_W) * TILE + 1.5, ((i / GRID_W) | 0) * TILE + 1.5, TILE - 3, TILE - 3).stroke({ width: 1.2, color: 0xffffff, alpha: 0.4 });
       }
     } else if (view.tool === 'rail') {
-      for (let y = COAST_ROW + 1; y < GRID_H; y++) {
-        if (sim.kind[y * GRID_W + GRID_W - 1] === T.Land) {
-          g.rect(W - TILE + 1.5, y * TILE + 1.5, TILE - 3, TILE - 3).stroke({ width: 1.5, color: 0xffffff, alpha: 0.5 + 0.2 * Math.sin(view.time * 4) });
+      // Bahnhof: am rechten Rand oder am Ende eines durchgehenden Gleises
+      for (let y = COAST_ROW; y < GRID_H; y++) {
+        for (let x = 0; x < GRID_W; x++) {
+          if (sim.kind[y * GRID_W + x] !== T.Land || (x !== GRID_W - 1 && !sim.trackToEdge(x + 1, y))) continue;
+          g.rect(x * TILE + 1.5, y * TILE + 1.5, TILE - 3, TILE - 3).stroke({ width: 1.5, color: 0xffffff, alpha: 0.5 + 0.2 * Math.sin(view.time * 4) });
         }
       }
     } else if (view.tool === 'crane') {
@@ -1904,6 +1934,29 @@ export class Renderer {
       }
     }
     this.drawSites(g, sim, view.time);
+    // Verkehr ins Hinterland: Speditions-Lkw fahren auf den Anschlussstraßen
+    for (const e of sim.hinterlandExits()) {
+      const ex = (e % GRID_W) * TILE;
+      const ey = ((e / GRID_W) | 0) * TILE;
+      const bottom = ((e / GRID_W) | 0) === GRID_H - 1;
+      for (let k = 0; k < 3; k++) {
+        const u = (view.time * 0.12 + k / 3 + (e % 7) * 0.13) % 1;
+        const away = k % 2 === 0;
+        const d = (away ? u : 1 - u) * 600;
+        const col = BOX[(e + k) % BOX.length];
+        if (bottom) {
+          const tx = ex + (away ? 18 : 6);
+          const ty = ey + TILE + 10 + d;
+          g.roundRect(tx, ty, 8, 20, 2).fill(col);
+          g.roundRect(tx, away ? ty - 6 : ty + 20, 8, 6, 1.5).fill(0x2b323b);
+        } else {
+          const tx = ex - 30 - d;
+          const ty = ey + (away ? 6 : 18);
+          g.roundRect(tx, ty, 20, 8, 2).fill(col);
+          g.roundRect(away ? tx - 6 : tx + 20, ty, 6, 8, 1.5).fill(0x2b323b);
+        }
+      }
+    }
     // Rauch über arbeitenden Hallen und aus den Schornsteinen der Schiffe am Kai
     const puff = (px: number, py: number, seed: number, size: number) => {
       for (let k = 0; k < 4; k++) {

@@ -64,6 +64,7 @@ const ICONS: Record<string, string> = {
   kai: svg('<rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M3 9h18M7 9v4M12 9v4M17 9v4"/>'),
   crane: svg('<path d="M6 21V6M3 21h6M6 6h14M17 6v6"/><rect x="15" y="12" width="4" height="3" rx=".6"/><path d="M6 6l6-3"/>'),
   yarduse: svg('<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><path d="M14 16.5h5M16.5 14v5"/>'),
+  track: svg('<path d="M8 3l-2 18M16 3l2 18M5 7h14M5 12h14M4.5 17h15"/>'),
   solar: svg('<rect x="3" y="6" width="18" height="12" rx="1"/><path d="M3 12h18M9 6v12M15 6v12"/>'),
   battery: svg('<rect x="3" y="7" width="16" height="10" rx="2"/><path d="M21 10v4M7 10v4M11 10v4"/>'),
   monitor: svg('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4M6 12l3-3 3 2 5-5"/>'),
@@ -152,7 +153,8 @@ const TOOLS: ToolDef[] = [
   { cat: 'build', tool: 'solar', label: 'Solar', sub: '15k', color: '#f2c230' },
   { cat: 'build', tool: 'battery', label: 'Batterie', sub: '40k', color: '#2f9e6b' },
   { cat: 'build', tool: 'workshop', label: 'Werkstatt', sub: '40k · 2×2', color: '#5b6b82' },
-  { cat: 'build', tool: 'rail', label: 'Gleis', sub: '150k', color: '#5f6f82' },
+  { cat: 'build', tool: 'rail', label: 'Bahnhof', sub: '150k', color: '#5f6f82' },
+  { cat: 'build', tool: 'track', label: 'Gleis', sub: '3k', color: '#8f7a5b' },
   { cat: 'land', tool: 'oneway', label: 'Einbahn', sub: 'Gratis', color: '#4b525c' },
   { cat: 'land', tool: 'buyland', label: 'Land kaufen', sub: '60k', color: '#6aa953' },
   { cat: 'land', tool: 'dredge', label: 'Baggern', sub: '15k', color: '#1f5f95' },
@@ -1613,7 +1615,8 @@ export class UI {
         ${buildRow(g.build)}
         <div class="meta">${g.proc > 0 ? (g.procIn ? 'Nimmt einen Export-Container an' : 'Fertigt einen Container ab') : 'Wartet auf Container'}</div>
         <div class="meta">Wartend nach draußen: ${g.apron.length} von ${GATE_APRON_CAP}${sim.level >= 2 ? ` · Export wartet auf Truck: ${g.inApron}` : ''}</div>
-        <div class="meta">Abgefertigt: ${num(g.served)}</div>`;
+        <div class="meta">Abgefertigt: ${num(g.served)}${g.emptyIn ? ` · Leercontainer von außen: ${g.emptyIn}` : ''}</div>
+        <div class="meta ${sim.hinterlandMul(g) > 1 ? 'pos' : ''}">${sim.hinterlandMul(g) > 1 ? `Hinterland angebunden: +${Math.round((sim.hinterlandMul(g) - 1) * 100)} % Tempo` : 'Nicht ans Hinterland angebunden: Eine Straße bis zum unteren oder linken Kartenrand bringt +30 % Tempo (mit Autobahn +50 %).'}</div>`;
     } else if (sel.kind === 'yard') {
       const kinds = [sim.stock[sel.id] - sim.stockRail[sel.id], sim.stockRail[sel.id], sim.stockExp[sel.id]].filter((n) => n > 0).length;
       html = `<h3>Stapelplatz <span class="tag">${sim.capAt(sel.id)} Container pro Feld${sim.rtgCovers(sel.id) ? ' mit Portalkran' : ''}</span></h3>

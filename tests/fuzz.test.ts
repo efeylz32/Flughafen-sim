@@ -4,7 +4,7 @@ import { BuildTool, COAST_ROW, GRID_H, GRID_W, RTG_CAP, T } from '../src/sim/dat
 import { buildDemo } from '../src/sim/demo';
 import { Sim } from '../src/sim/sim';
 
-const TOOLS: BuildTool[] = ['road', 'road', 'road', 'yard', 'reefer', 'gate', 'truck', 'truck', 'crane', 'kai', 'unpack', 'pack', 'cold', 'workshop', 'rail', 'dredge', 'rtg', 'hazard', 'emptyyard', 'fill', 'emptyyard', 'hazard', 'road2', 'hwy', 'hwy'];
+const TOOLS: BuildTool[] = ['road', 'road', 'road', 'yard', 'reefer', 'gate', 'truck', 'truck', 'crane', 'kai', 'unpack', 'pack', 'cold', 'workshop', 'rail', 'dredge', 'rtg', 'hazard', 'emptyyard', 'fill', 'emptyyard', 'hazard', 'road2', 'hwy', 'hwy', 'track', 'track', 'solar', 'battery'];
 
 function check(s: Sim, step: number) {
   const where = `Schritt ${step}`;
@@ -60,7 +60,9 @@ function check(s: Sim, step: number) {
     expect(p.resOutE, `${where}: Halle Leerausgang`).toBe(sum((j) => j.stage === 0 && j.srcKind === 'plant' && j.src === p.id && j.cargo === 'empty'));
     expect(p.inEmpty + p.resInE).toBeLessThanOrEqual(6);
   }
-  for (const r of s.rails) expect(r.resOutG, `${where}: Zugware`).toBe(sum((j) => j.stage === 0 && j.srcKind === 'rail' && j.src === r.id));
+  for (const r of s.rails) expect(r.resOutE, `${where}: Zug-Leergut`).toBe(sum((j) => j.stage === 0 && j.srcKind === 'rail' && j.src === r.id && j.cargo === 'empty'));
+  for (const g of s.gates) expect(g.resOutE, `${where}: Gate-Leergut`).toBe(sum((j) => j.stage === 0 && j.srcKind === 'gate' && j.src === g.id && j.cargo === 'empty'));
+  for (const r of s.rails) expect(r.resOutG, `${where}: Zugware`).toBe(sum((j) => j.stage === 0 && j.srcKind === 'rail' && j.src === r.id && j.cargo !== 'empty'));
   for (const c of s.cranes) {
     expect(c.resOutHaz, `${where}: Kran Gefahrgut`).toBe(sum((j) => j.stage === 0 && j.srcKind === 'crane' && j.src === c.id && j.cargo === 'haz'));
     expect(c.resOutRail, `${where}: Kran Bahn`).toBe(sum((j) => j.stage === 0 && j.srcKind === 'crane' && j.src === c.id && j.cargo === 'rimp'));

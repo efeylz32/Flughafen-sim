@@ -38,6 +38,8 @@ import {
   GRID_H,
   GRID_W,
   LEVELS,
+  EMPTY_IN_COST,
+  RAIL_EMPTIES,
   TRAITS,
   TraitId,
   WORLD,
@@ -236,6 +238,11 @@ export interface Crane {
 
 export interface Gate {
   id: number;
+  /** Leercontainer von außen, die auf einen Truck ins Leerlager warten */
+  emptyIn: number;
+  resOutE: number;
+  /** Die laufende Annahme ist ein Leercontainer */
+  procEmpty?: boolean;
   build?: number;
   buildMax?: number;
   x: number;
@@ -274,6 +281,9 @@ export interface Rail {
   /** Ware, die ein Zug gebracht hat und die auf Trucks wartet */
   goods: number;
   resOutG: number;
+  /** Leercontainer, die ein Zug gebracht hat */
+  emptyIn: number;
+  resOutE: number;
 }
 
 export interface Job {
@@ -526,6 +536,7 @@ export interface SaveData {
   zones?: { cranes: number[]; gates: number[]; plants: number[]; rails: number[]; trucks: number[] };
   oneway?: number[];
   roadTier?: number[];
+  railX?: number[];
   owned?: number[];
   plotsBought?: number;
   map?: MapId;
@@ -601,7 +612,7 @@ const covers = (e: Box, x: number, y: number) => x >= e.x && y >= e.y && x < e.x
 const UNLOADING = 'Wird entladen.';
 const LOADING = 'Wird beladen.';
 const emptyBook = (): DayBook => ({ fees: 0, exportFees: 0, rail: 0, berth: 0, bonus: 0, penalty: 0, running: 0, wages: 0, interest: 0, building: 0, handled: 0, ships: 0, onTime: 0, bn: { crane: 0, trucks: 0, yard: 0, gate: 0 }, jamPeak: 0, power: 0 });
-const TILE_OF: Partial<Record<BuildTool, T>> = { kai: T.Kai, road: T.Road, yard: T.Yard, road2: T.Road, hwy: T.Road, solar: T.Solar, battery: T.Battery, reefer: T.Reefer, hazard: T.Hazmat, emptyyard: T.Empty, fill: T.Plant, gate: T.Gate, rail: T.Rail, unpack: T.Plant, pack: T.Plant, cold: T.Plant, workshop: T.Shop };
+const TILE_OF: Partial<Record<BuildTool, T>> = { kai: T.Kai, road: T.Road, yard: T.Yard, road2: T.Road, hwy: T.Road, solar: T.Solar, battery: T.Battery, track: T.Track, reefer: T.Reefer, hazard: T.Hazmat, emptyyard: T.Empty, fill: T.Plant, gate: T.Gate, rail: T.Rail, unpack: T.Plant, pack: T.Plant, cold: T.Plant, workshop: T.Shop };
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 
 const eur = (n: number) => `${Math.round(n).toLocaleString('de-DE')} €`;
@@ -646,6 +657,8 @@ export class Sim {
   oneway = new Int8Array(GRID_W * GRID_H).fill(-1);
   /** Straßenart je Feld: 0 Straße, 1 Doppelspur, 2 Autobahn */
   roadTier = new Uint8Array(GRID_W * GRID_H);
+  /** Bahnübergang: Straße über einem Gleis */
+  railX = new Uint8Array(GRID_W * GRID_H);
   /** Gekaufte Spalten (1 = gehört dir) */
   owned = new Uint8Array(GRID_W).fill(1);
   plotsBought = 0;
@@ -1066,9 +1079,58 @@ export class Sim {
   }
 
   /** Abstandskarte (in Feldern) über das Straßennetz zum Zielfeld. -1 = nicht erreichbar. */
+  /** Liegt ab (x, y) bis zum rechten Kartenrand durchgehend Gleis (oder ein Bahnübergang)? */
+  trackToEdge(x: number, y: number): boolean {
+    for (let xx = x; xx < GRID_W; xx++) {
+      const i = this.idx(xx, y);
+      if (this.kind[i] !== T.Track && !(this.kind[i] === T.Road && this.railX[i])) return false;
+    }
+    return true;
+  }
+  /** Ist der Gleisanschluss mit dem Netz verbunden? */
+  railLinked(r: Rail): boolean {
+    return r.x === GRID_W - 1 || this.trackToEdge(r.x + 1, r.y);
+  }
+  /** Wie viele Leercontainer von außen gebraucht werden (für die Befüllhalle) */
+  emptiesWanted(): number {
+    if (!this.emptyCapacity || !this.plants.some((p) => p.kind === 'fill' && !p.build)) return 0;
+    let incoming = 0;
+    for (const g of this.gates) incoming += g.emptyIn;
+    for (const r of this.rails) incoming += r.emptyIn;
+    return Math.max(0, Math.floor(this.emptyCapacity * 0.5) - this.emptyStock - incoming);
+  }
+  /** Straßenfelder am unteren oder linken Kartenrand: Anschluss ans Hinterland */
+  hinterlandExits(): number[] {
+    const out: number[] = [];
+    for (let x = 0; x < GRID_W; x++) {
+      const i = this.idx(x, GRID_H - 1);
+      if (this.kind[i] === T.Road) out.push(i);
+    }
+    for (let y = COAST_ROW; y < GRID_H - 1; y++) {
+      const i = this.idx(0, y);
+      if (this.kind[i] === T.Road) out.push(i);
+    }
+    return out;
+  }
+  private hlCache: { v: number; m: Map<number, number> } = { v: -1, m: new Map() };
+  /** Tempo eines Gates: mit Straße ins Hinterland +30 %, mit Autobahn-Anschluss +50 % */
+  hinterlandMul(g: Gate): number {
+    if (this.hlCache.v !== this.version) this.hlCache = { v: this.version, m: new Map() };
+    const hit = this.hlCache.m.get(g.id);
+    if (hit !== undefined) return hit;
+    let m = 1;
+    const acc = this.accessOf(g);
+    for (const e of this.hinterlandExits()) {
+      const d = this.distMap(e);
+      if (acc.some((a) => d[a] >= 0)) m = Math.max(m, this.roadTier[e] === 2 ? 1.5 : 1.3);
+    }
+    this.hlCache.m.set(g.id, m);
+    return m;
+  }
+
   /** Anteil der Import-Container, die mit der Bahn weiter sollen */
   get railShare(): number {
-    return this.rails.some((r) => !r.build) ? 0.35 : 0;
+    return this.rails.some((r) => !r.build && this.railLinked(r)) ? 0.35 : 0;
   }
   /** Lagerzweck setzen (0 gemischt, 1 Straße, 2 Bahn, 3 Export) */
   setYardUse(x: number, y: number, use: number): BuildCheck {
@@ -1360,13 +1422,13 @@ export class Sim {
         if (k !== T.Kai) reason = 'Kran braucht ein Kai-Feld';
         else if (this.craneAt(x, y)) reason = 'Hier steht schon ein Kran';
         break;
-      case 'road':
       case 'yard':
       case 'reefer':
       case 'emptyyard':
       case 'hazard':
       case 'solar':
       case 'battery':
+      case 'track':
       case 'gate':
       case 'unpack':
       case 'pack':
@@ -1379,11 +1441,15 @@ export class Sim {
         break;
       case 'rail':
         if (k !== T.Land) reason = k === T.Water ? 'Nicht auf dem Wasser' : 'Das Feld ist belegt';
-        else if (x !== GRID_W - 1) reason = 'Gleisanschluss nur am rechten Kartenrand';
+        else if (x !== GRID_W - 1 && !this.trackToEdge(x + 1, y)) reason = 'Der Gleisanschluss braucht ein durchgehendes Gleis bis zum rechten Kartenrand (Werkzeug „Gleis“)';
         break;
       case 'rtg':
         if (k !== T.Yard && k !== T.Reefer) reason = 'Der Portalkran steht auf einer Lagerfläche';
         else if (this.rtgAt(x, y)) reason = 'Hier steht schon ein Portalkran';
+        break;
+      case 'road':
+        // Straße über ein Gleis wird zum Bahnübergang
+        if (k !== T.Land && k !== T.Track) reason = k === T.Water ? 'Nicht auf dem Wasser' : 'Das Feld ist belegt';
         break;
       case 'road2':
       case 'hwy': {
@@ -1435,10 +1501,12 @@ export class Sim {
     switch (tool) {
       case 'solar':
       case 'battery':
+      case 'track':
         this.kind[i] = TILE_OF[tool]!;
         return undefined;
       case 'kai':
       case 'road':
+        if (tool === 'road') this.railX[i] = this.kind[i] === T.Track ? 1 : 0;
         this.kind[i] = TILE_OF[tool]!;
         this.roadTier[i] = 0;
         return undefined;
@@ -1495,12 +1563,12 @@ export class Sim {
         return undefined;
       case 'gate':
         for (const f of this.footprintOf({ x, y, w: bw, h: bh })) this.kind[f] = T.Gate;
-        this.gates.push({ id: this.nextId++, x, y, w: bw, h: bh, apron: [], resIn: 0, inApron: 0, resOut: 0, proc: 0, procIn: false, procFee: 0, lastIn: false, served: 0, staffed: true, zone: 0 });
+        this.gates.push({ id: this.nextId++, emptyIn: 0, resOutE: 0, x, y, w: bw, h: bh, apron: [], resIn: 0, inApron: 0, resOut: 0, proc: 0, procIn: false, procFee: 0, lastIn: false, served: 0, staffed: true, zone: 0 });
         this.addStaff('gate');
         return undefined;
       case 'rail':
         this.kind[i] = T.Rail;
-        this.rails.push({ id: this.nextId++, x, y, platform: 0, value: 0, resIn: 0, state: 'away', timer: 60, lastLoad: 0, zone: 0, goods: 0, resOutG: 0 });
+        this.rails.push({ id: this.nextId++, x, y, platform: 0, value: 0, resIn: 0, state: 'away', timer: 60, lastLoad: 0, zone: 0, goods: 0, resOutG: 0, emptyIn: 0, resOutE: 0 });
         return undefined;
       case 'dredge':
         this.depth[qOfWater(x, y)] = 1;
@@ -1653,6 +1721,12 @@ export class Sim {
         out.push({ tool: 'road', x, y, refund: this.give(this.costOf(this.roadTier[i] === 2 ? 'hwy' : this.roadTier[i] === 1 ? 'road2' : 'road'), factor), tier: this.roadTier[i], ow: this.oneway[i] });
         this.roadTier[i] = 0;
         this.oneway[i] = -1;
+        // Ein Bahnübergang wird wieder zum Gleis
+        if (this.railX[i]) {
+          this.railX[i] = 0;
+          this.kind[i] = T.Track;
+          return;
+        }
         break;
       case T.Yard:
       case T.Reefer:
@@ -1675,8 +1749,9 @@ export class Sim {
         break;
       }
       case T.Solar:
-      case T.Battery: {
-        const tool: BuildTool = this.kind[i] === T.Solar ? 'solar' : 'battery';
+      case T.Battery:
+      case T.Track: {
+        const tool: BuildTool = this.kind[i] === T.Solar ? 'solar' : this.kind[i] === T.Battery ? 'battery' : 'track';
         out.push({ tool, x, y, refund: this.give(this.costOf(tool), factor) });
         break;
       }
@@ -2088,10 +2163,12 @@ export class Sim {
       }
     } else if (j.srcKind === 'rail') {
       const r = this.rails.find((r) => r.id === j.src);
-      if (r) r.resOutG = Math.max(0, r.resOutG + d);
+      if (r && j.cargo === 'empty') r.resOutE = Math.max(0, r.resOutE + d);
+      else if (r) r.resOutG = Math.max(0, r.resOutG + d);
     } else {
       const g = this.gates.find((g) => g.id === j.src);
-      if (g) g.resOut = Math.max(0, g.resOut + d);
+      if (g && j.cargo === 'empty') g.resOutE = Math.max(0, g.resOutE + d);
+      else if (g) g.resOut = Math.max(0, g.resOut + d);
     }
   }
 
@@ -2251,6 +2328,13 @@ export class Sim {
           offer('out', 0.9, src.d + acc.d, { cargo: 'empty', stage: 0, srcKind: 'store', src: src.tile, dstKind: 'gate', dst: g.id, tgt: [src.access, acc.access], n: Math.min(TRUCK_CAP, src.avail, room) });
         }
       }
+      // 3c. Leercontainer von außen ins Leerlager
+      const ein = g.emptyIn - g.resOutE;
+      if (ein > 0) {
+        const acc = this.nearestAccess(g, t.tile);
+        const slot = acc ? this.findSlot(T.Empty, acc.access, g.zone) : null;
+        if (acc && slot) offer('export', 1.2, acc.d + slot.d, { cargo: 'empty', stage: 0, srcKind: 'gate', src: g.id, dstKind: 'store', dst: slot.tile, tgt: [acc.access, slot.access], n: Math.min(TRUCK_CAP, ein, slot.free) });
+      }
       // 4. Angekommene Export-Container vom Gate auf den Stapelplatz
       const waiting = g.inApron - g.resOut;
       if (waiting > 0) {
@@ -2395,13 +2479,24 @@ export class Sim {
       }
     }
 
+    // 5b. Leercontainer vom Zug ins Leerlager
+    for (const r of this.rails) {
+      const e = r.emptyIn - r.resOutE;
+      if (!zOk(r.zone) || r.build || e <= 0) continue;
+      const acc = this.nearestAccess(r, t.tile);
+      const slot = acc ? this.findSlot(T.Empty, acc.access, r.zone) : null;
+      if (acc && slot) offer('plant', 1.3, acc.d + slot.d, { cargo: 'empty', stage: 0, srcKind: 'rail', src: r.id, dstKind: 'store', dst: slot.tile, tgt: [acc.access, slot.access], n: Math.min(TRUCK_CAP, e, slot.free) });
+    }
+
     // 5. Import-Container vom Lager zum Gleisanschluss
     for (const r of this.rails) {
-      if (!zOk(r.zone) || r.build) continue;
+      if (!zOk(r.zone) || r.build || !this.railLinked(r)) continue;
       const room = RAIL_CAP - r.platform - r.resIn;
       if (room <= 0) continue;
       // Die Bahn nimmt, was für die Bahn bestimmt ist. Gibt es kein Gate, auch normale Importe.
       const railCargo: Cargo[] = this.gates.length ? ['rimp', 'reef', 'haz'] : ['rimp', 'imp', 'reef', 'haz'];
+      // Überzählige Leercontainer fahren mit dem Zug zurück
+      if (this.emptyCapacity > 0 && this.emptyStock / this.emptyCapacity > 0.7) railCargo.push('empty');
       for (const cargo of railCargo) {
         const src = this.findSource(Sim.storeOf(cargo), cargo, t.tile, r.zone);
         const acc = src ? this.nearestAccess(r, src.access) : null;
@@ -2470,12 +2565,24 @@ export class Sim {
       }
     } else if (j.srcKind === 'rail') {
       const r = this.rails.find((r) => r.id === j.src);
-      if (!r || r.goods < j.n) return false;
-      r.goods -= j.n;
+      if (!r) return false;
+      if (j.cargo === 'empty') {
+        if (r.emptyIn < j.n) return false;
+        r.emptyIn -= j.n;
+      } else {
+        if (r.goods < j.n) return false;
+        r.goods -= j.n;
+      }
     } else {
       const g = this.gates.find((g) => g.id === j.src);
-      if (!g || g.inApron < j.n) return false;
-      g.inApron -= j.n;
+      if (!g) return false;
+      if (j.cargo === 'empty') {
+        if (g.emptyIn < j.n) return false;
+        g.emptyIn -= j.n;
+      } else {
+        if (g.inApron < j.n) return false;
+        g.inApron -= j.n;
+      }
     }
     this.srcRes(j, -j.n);
     t.load = j.n;
@@ -3520,7 +3627,11 @@ export class Sim {
         g.proc -= dt;
         if (g.proc <= 0) {
           g.proc = 0;
-          if (g.procIn) {
+          if (g.procIn && g.procEmpty) {
+            g.emptyIn++;
+            this.money -= EMPTY_IN_COST;
+            this.today.penalty += EMPTY_IN_COST;
+          } else if (g.procIn) {
             g.inApron++;
           } else {
             const type = Math.floor(g.procFee / 100000);
@@ -3545,12 +3656,21 @@ export class Sim {
       if (g.proc > 0 || !g.staffed) continue;
       const wantOut = g.apron.length > 0;
       const wantIn = this.exportNeed > 0 && g.inApron < GATE_IN_CAP;
-      if (!wantOut && !wantIn) continue;
+      g.procEmpty = false;
+      if (!wantOut && !wantIn) {
+        // Nichts los: Leercontainer von außen annehmen, wenn die Befüllhalle welche braucht
+        if (this.emptiesWanted() > 0 && g.emptyIn < GATE_IN_CAP) {
+          g.procIn = true;
+          g.procEmpty = true;
+          g.proc = (GATE_PROCESS_GM / (1 + 0.2 * this.tech.scanner) / this.eff('gate')) / this.hinterlandMul(g);
+        }
+        continue;
+      }
       // Abwechselnd rein und raus, wenn beides ansteht
       const takeIn = wantIn && (!wantOut || !g.lastIn);
       g.lastIn = takeIn;
       g.procIn = takeIn;
-      g.proc = GATE_PROCESS_GM / (1 + 0.2 * this.tech.scanner) / (this.spec === 'logi' ? 1.15 : 1) / this.eff('gate');
+      g.proc = GATE_PROCESS_GM / (1 + 0.2 * this.tech.scanner) / (this.spec === 'logi' ? 1.15 : 1) / this.eff('gate') / this.hinterlandMul(g);
       if (takeIn) this.exportNeed--;
       else g.procFee = g.apron.shift()!;
     }
@@ -3558,7 +3678,7 @@ export class Sim {
 
   private updateRails(dt: number) {
     for (const r of this.rails) {
-      if (r.build) continue;
+      if (r.build || !this.railLinked(r)) continue;
       r.timer -= dt;
       if (r.timer > 0) continue;
       switch (r.state) {
@@ -3570,6 +3690,15 @@ export class Sim {
         case 'arriving':
           r.state = 'loading';
           r.timer = RAIL_STAY_GM;
+          // Der Zug bringt Leercontainer, wenn das Leerlager welche braucht
+          {
+            const want = Math.min(RAIL_EMPTIES, this.emptiesWanted(), 2 * RAIL_EMPTIES - r.emptyIn);
+            if (want > 0) {
+              r.emptyIn += want;
+              this.money -= want * EMPTY_IN_COST;
+              this.today.penalty += want * EMPTY_IN_COST;
+            }
+          }
           // Der Zug bringt Ware, wenn es eine Befüllhalle gibt, die sie braucht
           if (this.plants.some((p) => p.kind === 'fill' && p.zone === r.zone)) {
             const add = Math.min(RAIL_GOODS, RAIL_GOODS_MAX - r.goods);
@@ -4209,6 +4338,7 @@ export class Sim {
       },
       oneway: Array.from(this.oneway),
       roadTier: Array.from(this.roadTier),
+      railX: Array.from(this.railX),
       owned: Array.from(this.owned),
       plotsBought: this.plotsBought,
       map: this.map,
@@ -4273,6 +4403,7 @@ export class Sim {
     s.kind.set(d.kind);
     if (d.oneway) s.oneway.set(d.oneway);
     if (d.roadTier) s.roadTier.set(d.roadTier);
+    if (d.railX) s.railX.set(d.railX);
     if (d.owned) s.owned.set(d.owned);
     s.plotsBought = d.plotsBought ?? 0;
     if (d.rivalRate) s.rivalRate = d.rivalRate;

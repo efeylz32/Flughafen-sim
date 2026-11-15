@@ -30,9 +30,10 @@ export enum T {
   Empty = 12,
   Solar = 13,
   Battery = 14,
+  Track = 15,
 }
 
-export type Tool = 'view' | 'kai' | 'crane' | 'lcrane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'road2' | 'hwy' | 'solar' | 'battery' | 'rtg' | 'hazard' | 'emptyyard' | 'fill' | 'assign' | 'copy' | 'paste' | 'yarduse' | 'zone' | 'oneway' | 'buyland' | 'demolish';
+export type Tool = 'view' | 'kai' | 'crane' | 'lcrane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'road2' | 'hwy' | 'solar' | 'battery' | 'track' | 'rtg' | 'hazard' | 'emptyyard' | 'fill' | 'assign' | 'copy' | 'paste' | 'yarduse' | 'zone' | 'oneway' | 'buyland' | 'demolish';
 export type BuildTool = Exclude<Tool, 'view' | 'demolish' | 'assign' | 'copy' | 'paste' | 'yarduse' | 'zone' | 'oneway' | 'buyland'>;
 
 export const COST: Record<BuildTool, number> = {
@@ -53,6 +54,7 @@ export const COST: Record<BuildTool, number> = {
   rtg: 60_000,
   road2: 1_800,
   solar: 15_000,
+  track: 3_000,
   battery: 40_000,
   hwy: 4_000,
   hazard: 12_000,
@@ -78,6 +80,7 @@ export const UNLOCK: Record<BuildTool, number> = {
   rtg: 3,
   road2: 2,
   solar: 2,
+  track: 3,
   battery: 3,
   hwy: 3,
   hazard: 3,
@@ -531,3 +534,8 @@ export const YARD_USES = [
   { name: 'Bahn', color: 0x9c6b3c },
   { name: 'Export', color: 0x2f6db0 },
 ];
+
+/** Leercontainer, die von außen (Gate oder Zug) kommen, kosten Miete */
+export const EMPTY_IN_COST = 40;
+/** So viele Leercontainer bringt ein Zug höchstens */
+export const RAIL_EMPTIES = 10;
