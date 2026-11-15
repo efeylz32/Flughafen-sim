@@ -29,9 +29,12 @@ import {
   sizeOf,
   SHIP_PATIENCE_GM,
   GOAL_LEVEL,
+  WAGE_POLICY,
+  WagePolicy,
+  SPECS,
   COST,
-  USED_PRICE,
   CRANE_MODELS,
+  movesPerHour,
   TECH,
   TECH_IDS,
   TechId,
@@ -611,6 +614,10 @@ export class UI {
       const f = t.closest<HTMLElement>('[data-fire]');
       if (h) this.game.hire(h.dataset.hire as Role);
       else if (f) this.game.fire(f.dataset.fire as Role);
+      const sh = t.closest<HTMLElement>('[data-shift]');
+      const wp = t.closest<HTMLElement>('[data-wage]');
+      if (sh) this.game.sim.setNightShift(sh.dataset.shift === 'night');
+      else if (wp) this.game.sim.setWagePolicy(wp.dataset.wage as WagePolicy);
       this.renderStaff(true);
     });
 
@@ -802,7 +809,8 @@ export class UI {
       for (const b of this.usedPick.querySelectorAll<HTMLElement>('button')) {
         const u = b.dataset.used === '1';
         b.classList.toggle('on', u === this.game.sim.used);
-        b.textContent = u ? `Gebraucht · ${eur(Math.round((price * USED_PRICE) / 100) * 100)} · 50–75 %` : `Neu · ${eur(price)}`;
+        const um = this.game.sim.usedMarket;
+        b.textContent = u ? `Gebraucht (${um.label}) · ${eur(Math.round((price * um.factor) / 100) * 100)} · ${Math.round(um.lo * 100)}–${Math.round(um.hi * 100)} %` : `Neu · ${eur(price)}`;
       }
     }
     this.rotPick.firstElementChild!.innerHTML = `${ICONS.rotate} Drehen (R) · ${dimsOf(this.game.tool, this.game.sim.rot).join(' × ')} Felder`;
@@ -993,6 +1001,11 @@ export class UI {
       <div class="fl total"><b>Ergebnis heute</b><b class="${inc - exp >= 0 ? 'pos' : 'neg'}">${eur(inc - exp)}</b></div>
       <div class="fl sub"><span>Laufend pro Tag: Wartung / Löhne</span><span>${eur(sim.runningCost())} / ${eur((Object.keys(ROLES) as Role[]).reduce((n, r) => n + sim.staff[r] * sim.wagePerHour(r) * 24, 0))}</span></div>
       ${sim.level >= 2 ? `<h3>Konkurrenz</h3><div class="fl sub"><span>${RIVAL_NAME}: pünktlich</span><span>${Math.round(sim.rivalRate * 100)} %</span></div><div class="fl sub"><span>Du gestern</span><span class="${sim.myRate !== null && sim.myRate < sim.rivalRate - 0.1 ? 'neg' : ''}">${sim.myRate === null ? '–' : `${Math.round(sim.myRate * 100)} %`}</span></div><p class="sub">Liegst du mehr als 10 Punkte darunter, wechseln Reedereien und es kommen weniger freie Schiffe.${sim.lostToRival ? ` Bisher verloren: ${sim.lostToRival} Verträge.` : ''}</p>` : ''}
+      <h3>Lage</h3>
+      <div class="fl sub"><span>Konjunktur</span><span class="${sim.cycle.kind === 'crisis' ? 'neg' : sim.cycle.kind === 'boom' ? 'pos' : ''}">${sim.cycleInfo.name} (noch ${sim.cycle.left} ${sim.cycle.left === 1 ? 'Tag' : 'Tage'})</span></div>
+      <div class="fl sub"><span>Jahreszeit</span><span>${sim.season.name}: ${sim.season.text}</span></div>
+      <div class="fl sub"><span>Richtung</span><span>${sim.spec ? SPECS[sim.spec].name : sim.level >= 3 ? 'noch offen' : 'ab Stufe 3'}</span></div>
+      <div class="fl sub"><span>Lagergebühr</span><span>${eur(Math.round(6 * (1 + 0.05 * sim.tech.sales)))} pro Container und Tag</span></div>
       <h3>Markt</h3>
       ${(Object.keys(PRODUCTS) as ProductId[])
         .map((p) => {
@@ -1004,6 +1017,7 @@ export class UI {
       <h3>Kredit</h3>
       <div class="fl sub"><span>Offen</span><span>${eur(sim.loan)} von ${eur(sim.loanLimit)}</span></div>
       <div class="fl sub"><span>Zinsen pro Tag</span><span>${eur(sim.interestPerDay)}</span></div>
+      <div class="fl sub"><span>Kreditwürdigkeit</span><span class="${sim.rateMul > 1.15 ? 'neg' : sim.rateMul < 0.95 ? 'pos' : ''}">Zinsfaktor ${sim.rateMul.toFixed(2)} (Ruf und Pünktlichkeit)</span></div>
       <h3>Ergebnis pro Tag</h3>
       ${chart(res, maxRes, k, true)}
       <h3>Container pro Tag</h3>
@@ -1036,7 +1050,7 @@ export class UI {
       big: sim.cranes.filter((c) => c.big).length,
       cranesBroken: sim.cranes.filter((c) => c.wear >= 1).length,
     };
-    const key = roles.map((r) => `${sim.staff[r]}:${sim.sick[r].length}:${sim.staffNeed(r)}`).join('|') + JSON.stringify(fleet) + byRole.join();
+    const key = roles.map((r) => `${sim.staff[r]}:${sim.sick[r].length}:${sim.staffNeed(r)}:${Math.round(sim.xp[r] * 100)}`).join('|') + JSON.stringify(fleet) + byRole.join() + `|${sim.nightShift}|${sim.wagePolicy}|${Math.round(sim.mood * 100)}`;
     if (!force && key === this.lastStaff) return;
     this.lastStaff = key;
     const total = roles.reduce((n, r) => n + sim.staff[r] * sim.wagePerHour(r), 0);
@@ -1055,6 +1069,16 @@ export class UI {
       ${fleet.worn ? `<p class="sub">${fleet.worn} Trucks sind über 75 % abgenutzt.</p>` : ''}
       <div class="pm"><button class="secondary" data-fleet="auto">Alle auf Automatik</button></div>
       <p class="sub">Kräne: ${fleet.cranes}, davon ${fleet.big} Containerbrücken${fleet.cranesBroken ? `, <span class="neg">${fleet.cranesBroken} ausgefallen</span>` : ''}.</p>
+      <h3>Betrieb und Stimmung</h3>
+      <div class="deal">
+        <div class="dl"><b>Stimmung</b><span class="tag ${sim.mood < 0.35 ? 'neg' : ''}">${Math.round(sim.mood * 100)} %</span></div>
+        <div class="progress"><span style="width:${Math.round(sim.mood * 100)}%"></span></div>
+        <div class="meta">${sim.mood < 0.25 ? 'Streikgefahr!' : sim.mood < 0.4 ? 'Schlecht: mehr Krankmeldungen' : sim.mood > 0.7 ? 'Gut: etwas mehr Tempo' : 'In Ordnung'}. Sie hängt von Lohn, Nachtschicht, Krankenstand und Akkord ab.</div>
+        <div class="rolelabel">Schichtbetrieb</div>
+        <div class="roles"><button data-shift="night" class="${sim.nightShift ? 'on' : ''}">Nachtschicht (+20 % Lohn nachts)</button><button data-shift="day" class="${sim.nightShift ? '' : 'on'}">Nur Tagschicht (nachts halbe Leistung)</button></div>
+        <div class="rolelabel">Lohnpolitik</div>
+        <div class="roles">${(Object.keys(WAGE_POLICY) as WagePolicy[]).map((w) => `<button data-wage="${w}" class="${sim.wagePolicy === w ? 'on' : ''}">${WAGE_POLICY[w].name} (${w === 'normal' ? '±0' : w === 'low' ? '−15' : '+20'} %)</button>`).join('')}</div>
+      </div>
       <h3>Personal</h3>
       <p class="sub">Wer einen Truck, Kran oder ein Gate kauft, stellt automatisch jemanden dafür ein. Jeden Morgen können sich Leute für ein bis zwei Tage krankmelden. Sie bekommen weiter Lohn, ihre Maschine steht aber still. Stelle Ersatz ein, wenn du das abfedern willst.</p>
       ${roles
@@ -1065,6 +1089,7 @@ export class UI {
           const miss = Math.max(0, need - avail);
           return `<div class="deal">
             <div class="dl"><b>${ROLES[r].name}</b><span class="tag">${sim.wagePerHour(r)} € pro Stunde</span></div>
+            <div class="meta">Erfahrung ${Math.round(sim.xp[r] * 100)} %: Tempo ${Math.round((0.85 + 0.3 * sim.xp[r]) * 100)} %. Neue Leute fangen bei 30 % an und drücken den Schnitt.</div>
             <div class="terms"><span>Angestellt ${sim.staff[r]}</span><span>Gebraucht ${need}</span>${sick ? `<span class="neg">Krank ${sick}</span>` : ''}${
               miss ? `<span class="neg">Es fehlen ${miss}</span>` : avail > need ? `<span class="pos">Reserve ${avail - need}</span>` : ''
             }</div>
@@ -1078,7 +1103,9 @@ export class UI {
 
   private contractCard(c: Contract, active: boolean, canAccept: boolean): string {
     const st = SHIP_TYPES[c.ship];
-    const tags = `<span class="tag">${st.name} · ${st.containers} Container</span>${c.reefer ? '<span class="tag cold">Kühlfracht</span>' : ''}`;
+    const condTag = c.cond === 'export' ? '<span class="tag">Export muss mit</span>' : c.cond === 'rush' ? '<span class="tag">Eilauftrag</span>' : c.cond === 'exclusive' ? '<span class="tag">Exklusiv</span>' : '';
+    const condText = c.cond === 'export' ? 'Pünktlich zählt nur, wenn der gesamte Export mitgeladen ist. Bonus +40 %.' : c.cond === 'rush' ? 'Eilauftrag: 20 % kürzere Liegezeit, dafür Bonus +50 %.' : c.cond === 'exclusive' ? 'Exklusiv: Solange der Vertrag läuft, kommen keine freien Schiffe. Bonus +60 %.' : '';
+    const tags = `<span class="tag">${st.name} · ${st.containers} Container</span>${c.reefer ? '<span class="tag cold">Kühlfracht</span>' : ''}${condTag}`;
     const need =
       st.deep && !this.game.sim.hasDeepBerth(st.len)
         ? `<div class="warn">Braucht einen tiefen Liegeplatz mit ${st.len} Kai-Feldern.</div>`
@@ -1098,7 +1125,7 @@ export class UI {
         <span class="pos">Bonus ${eur(c.bonus)}</span>
         <span class="neg">Strafe ${eur(c.penalty)}</span>
         ${active ? `<span>Nächstes Schiff in ${hours(Math.max(0, c.next))}</span>` : ''}
-      </div>${active && c.missed ? '<div class="warn">Verwarnt: Der nächste verpasste Anlauf beendet den Vertrag.</div>' : ''}${need}${btn}</div>`;
+      </div>${condText ? `<div class="meta">${condText}</div>` : ''}${active && c.missed ? '<div class="warn">Verwarnt: Der nächste verpasste Anlauf beendet den Vertrag.</div>' : ''}${need}${btn}</div>`;
   }
 
   private renderTech(force: boolean) {
@@ -1196,7 +1223,7 @@ export class UI {
             : c.state === 'storm'
               ? 'Steht wegen Sturm still'
               : 'Wartet auf ein Schiff';
-      html = `<h3>${CRANE_MODELS[c.model].name} <span class="tag">${Math.round(60 / sim.moveTime({ ...c, wear: 0 }))} Moves pro Stunde</span></h3>
+      html = `<h3>${CRANE_MODELS[c.model].name} <span class="tag">${Math.round(movesPerHour(c.model) * (1 + 0.1 * sim.tech.spreader) * (sim.tech.akkord ? 1.2 : 1) * (sim.spec === 'hub' ? 1.15 : sim.spec === 'logi' ? 0.95 : 1))} Moves pro Stunde</span></h3>
         ${c.build ? buildRow(c.build, 'Im Bau oder Umbau') : `<div class="meta">${c.state === 'broken' ? 'Ausgefallen: wartet auf die Werkstatt' : st}</div>`}
         ${wearRow(c.wear, c.cap)}
         <div class="meta">Entladen am Kran: ${c.buffer + c.bufReef} von ${sim.bufCap(c)}${sim.level >= 2 ? ` · Export am Kran: ${c.expBuf} von ${sim.bufCap(c, true)}` : ''}</div>`;

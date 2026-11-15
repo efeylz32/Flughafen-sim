@@ -368,3 +368,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .progress.cap i { position: absolute; top: -2px; bottom: -2px; width: 2px; background: #1d2a3a; border-radius: 1px; }
 .meta.warnline { color: #b7791f; font-weight: 700; }
 .usedpick button { font-size: 12.5px; }
+.deal .roles button { flex: 1 1 auto; border: 0; padding: 9px 10px; font-size: 13.5px; font-weight: 700; background: #e6ebf2; color: var(--ink); border-radius: 10px; }
+.deal .roles button.on { background: var(--accent); color: #fff; }
+.deal .rolelabel { margin-top: 10px; }

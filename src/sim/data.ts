@@ -81,7 +81,7 @@ export const CRANE_MODELS: Record<
 export const movesPerHour = (m: CraneModel) => Math.round(60 / CRANE_MODELS[m].move);
 
 /** Kleine Verbesserungen in Stufen. Jede Stufe kostet mehr und braucht eine Mindest-Hafenstufe. */
-export type TechId = 'spreader' | 'scanner' | 'stack' | 'sales' | 'radio' | 'engine' | 'cool' | 'maint';
+export type TechId = 'spreader' | 'scanner' | 'stack' | 'sales' | 'radio' | 'engine' | 'cool' | 'maint' | 'akkord' | 'diesel';
 export const TECH: Record<TechId, { name: string; text: string; per: string; cost: number[]; level: number[] }> = {
   spreader: { name: 'Twin-Spreader', text: 'Kräne laden und löschen schneller.', per: '+10 % Kranmoves', cost: [30_000, 60_000, 120_000], level: [1, 2, 3] },
   scanner: { name: 'Gate-Scanner', text: 'Gates fertigen Container schneller ab.', per: '+20 % Gate-Tempo', cost: [25_000, 50_000, 100_000], level: [1, 2, 3] },
@@ -90,6 +90,8 @@ export const TECH: Record<TechId, { name: string; text: string; per: string; cos
   radio: { name: 'Leitstelle', text: 'Digitaler Funk: Automatik-Trucks bekommen schneller ihren nächsten Auftrag.', per: '−30 % Funkzeit', cost: [20_000, 50_000], level: [1, 2] },
   engine: { name: 'Motoren', text: 'Stärkere Zugmaschinen.', per: '+8 % Truck-Tempo', cost: [30_000, 70_000, 140_000], level: [1, 2, 3] },
   cool: { name: 'Kühltechnik', text: 'Bessere Aggregate an den Kühlplätzen.', per: '+30 % Haltbarkeit', cost: [30_000, 60_000], level: [3, 3] },
+  akkord: { name: 'Akkord-Schichten', text: 'Kräne arbeiten schneller, aber die Belegschaft wird öfter krank, die Stimmung sinkt und überlastete Kräne haben eher Unfälle.', per: '+20 % Kranmoves, doppelter Krankenstand', cost: [60_000], level: [2] },
+  diesel: { name: 'Billigdiesel', text: 'Trucks sind günstiger im Betrieb, verschleißen aber schneller.', per: '−40 % Truck-Betriebskosten, +30 % Verschleiß', cost: [40_000], level: [2] },
   maint: { name: 'Wartungsplan', text: 'Vorbeugende Wartung.', per: '−20 % Verschleiß', cost: [30_000, 60_000, 120_000], level: [2, 3, 4] },
 };
 export const TECH_IDS = Object.keys(TECH) as TechId[];
@@ -376,3 +378,39 @@ export const LEVEL_NEWS: { title: string; text: string }[][] = [
   [{ title: 'Bis zu 6 Verträge', text: 'Mehr Mega-Frachter, mehr Verträge. Jetzt zählt der Durchsatz.' }],
   [{ title: 'Bis zu 7 Verträge', text: 'Der größte Hafen der Welt. Alles Weitere ist Rekordjagd.' }],
 ];
+
+/** Spezialisierung ab Stufe 3: Eine Richtung wählen, die anderen sind damit zu. */
+export type SpecId = 'hub' | 'logi' | 'cold';
+export const SPECS: Record<SpecId, { name: string; text: string; pros: string; cons: string }> = {
+  hub: { name: 'Umschlag-Hub', text: 'Schnelle Schiffe, schnelle Kräne.', pros: 'Kräne +15 % Tempo, Liegegebühren +20 %', cons: 'Veredelung und Hallen 30 % langsamer' },
+  logi: { name: 'Logistik-Hafen', text: 'Verarbeitung und Landverkehr.', pros: 'Hallen 25 % schneller, Gates +15 % Tempo, Fertigware +10 % Preis', cons: 'Kräne 5 % langsamer' },
+  cold: { name: 'Kühlhafen', text: 'Kühlfracht und Lebensmittel.', pros: 'Kühlcontainer halten 50 % länger, Kühlgebühr +25 %, Lebensmittel +15 %, mehr Kühlfracht an Bord', cons: 'Liegegebühren −10 %' },
+};
+
+/** Schichtbetrieb und Löhne */
+export type WagePolicy = 'low' | 'normal' | 'high';
+export const WAGE_POLICY: Record<WagePolicy, { name: string; mul: number; mood: number }> = {
+  low: { name: 'Sparkurs', mul: 0.85, mood: -0.2 },
+  normal: { name: 'Tarif', mul: 1, mood: 0 },
+  high: { name: 'Übertarif', mul: 1.2, mood: 0.2 },
+};
+/** Nachtschicht: Zuschlag auf den Lohn. Ohne Nachtschicht läuft zwischen 22 und 6 Uhr alles mit halber Kraft. */
+export const NIGHT_WAGE = 1.2;
+export const NIGHT_SLOW = 0.5;
+
+/** Konjunktur und Jahreszeiten */
+export type CycleKind = 'boom' | 'normal' | 'crisis';
+export const CYCLES: Record<CycleKind, { name: string; ships: number; fee: number; used: number }> = {
+  boom: { name: 'Boom', ships: 0.75, fee: 1.1, used: 1.25 },
+  normal: { name: 'Normale Lage', ships: 1, fee: 1, used: 1 },
+  crisis: { name: 'Krise', ships: 1.4, fee: 0.9, used: 0.75 },
+};
+export const SEASON_DAYS = 15;
+export const SEASONS = [
+  { name: 'Frühling', text: 'Kleidung gefragt' },
+  { name: 'Sommer', text: 'viel Kühlfracht' },
+  { name: 'Herbst', text: 'Elektronik vor Weihnachten gefragt' },
+  { name: 'Winter', text: 'mehr Stürme, Lebensmittel gefragt' },
+];
+/** Lagergebühr pro Container und Tag, die ein Spediteur zahlt */
+export const STORAGE_FEE = 6;

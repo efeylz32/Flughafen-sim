@@ -1631,7 +1631,7 @@ export class Renderer {
       for (let k = 0; k < gt.apron.length; k++) {
         const bx = px + 3.5 + k * 6.4;
         g.roundRect(bx + 0.8, py + 22.3, 5.4, 7.4, 0.8).fill({ color: 0x000000, alpha: 0.3 });
-        g.roundRect(bx, py + 21.5, 5.4, 7.4, 0.8).fill(gt.apron[k] > 300 ? REEFER_BOX : BOX[(gt.id + k) % BOX.length]);
+        g.roundRect(bx, py + 21.5, 5.4, 7.4, 0.8).fill(gt.apron[k] >= 100000 ? REEFER_BOX : BOX[(gt.id + k) % BOX.length]);
       }
       // Angekommener Export wartet oben am Gate auf einen Truck
       for (let k = 0; k < gt.inApron; k++) {

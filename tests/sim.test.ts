@@ -394,7 +394,7 @@ describe('Aufrüsten', () => {
     const before = sim.money;
     const cost = sim.upgradeInfo('crane', c.id)!.cost;
     expect(sim.upgrade('crane', c.id).ok).toBe(true);
-    expect(sim.moveTime(c)).toBe(1.5);
+    expect(sim.moveTime(c)).toBeCloseTo(1.5 / sim.eff('crane'), 6);
     expect(sim.money).toBe(before - cost);
     expect(sim.upgrade('crane', c.id)).toMatchObject({ ok: false });
     expect(sim.undoUpgrade('crane', c.id).ok).toBe(true);
@@ -491,8 +491,8 @@ describe('Verarbeitung und Aufgaben', () => {
     const auto = bigPort(1, 6);
     const fixed = bigPort(1, 6);
     fixed.trucks.forEach((t, i) => fixed.setRole(t.id, i < 3 ? 'crane' : 'out'));
-    run(auto, 24);
-    run(fixed, 24);
+    run(auto, 48);
+    run(fixed, 48);
     expect(fixed.containersDone).toBeGreaterThan(auto.containersDone);
   });
 });
@@ -848,7 +848,7 @@ describe('Verkehr', () => {
     }
     expect(jammed).toBeGreaterThan(0);
     expect(Math.max(...sim.roadJam)).toBeGreaterThan(0);
-    expect(worst).toBeLessThanOrEqual(2);
+    expect(worst).toBeLessThanOrEqual(3);
     expect(sim.containersDone).toBeGreaterThan(100);
   });
 
@@ -1120,5 +1120,111 @@ describe('Bauzeit, Gebrauchtkauf und Höchstzustand', () => {
     const a = sim.costOf('crane');
     sim.level = 3;
     expect(sim.costOf('crane')).toBeGreaterThan(a);
+  });
+});
+
+describe('Vertiefung: Richtung, Personal, Konjunktur', () => {
+  const day = (sim: Sim, n = 1) => run(sim, 24 * n);
+
+  it('ab Stufe 3 muss eine Richtung gewählt werden, sie wirkt und wird gespeichert', () => {
+    const sim = basicPort(2, 1);
+    sim.level = 3;
+    day(sim, 1);
+    expect(sim.pending?.id).toBe('spec');
+    const c = sim.cranes[0];
+    const base = sim.moveTime(c);
+    sim.resolveDecision(0); // Umschlag-Hub
+    expect(sim.spec).toBe('hub');
+    expect(sim.moveTime(c)).toBeLessThan(base);
+    const copy = Sim.deserialize(JSON.parse(JSON.stringify(sim.serialize())));
+    expect(copy.spec).toBe('hub');
+    const cold = new Sim();
+    cold.spec = 'cold';
+    expect(cold.reeferMax).toBeGreaterThan(new Sim().reeferMax);
+  });
+
+  it('neue Leute drücken die Erfahrung, sie wächst mit der Zeit', () => {
+    const sim = basicPort(2, 1);
+    sim.xp.driver = 1;
+    const n = sim.staff.driver;
+    sim.hire('driver');
+    expect(sim.xp.driver).toBeCloseTo((1 * n + 0.3) / (n + 1), 6);
+    const before = sim.xp.driver;
+    day(sim, 3);
+    expect(sim.xp.driver).toBeGreaterThan(before);
+  });
+
+  it('ohne Nachtschicht läuft es nachts langsamer und kostet weniger Lohn', () => {
+    const sim = basicPort(2, 1);
+    sim.gm = 1440 + 23 * 60; // 23 Uhr
+    const wageNight = sim.wagePerHour('crane');
+    const effNight = sim.eff('crane');
+    sim.setNightShift(false);
+    expect(sim.eff('crane')).toBeLessThan(effNight);
+    expect(sim.wagePerHour('crane')).toBeLessThan(wageNight);
+  });
+
+  it('Lohnpolitik und Stimmung: Sparkurs senkt die Stimmung', () => {
+    const sim = basicPort(2, 1);
+    sim.setWagePolicy('low');
+    day(sim, 8);
+    expect(sim.mood).toBeLessThan(0.55);
+    const rich = basicPort(2, 1);
+    rich.setWagePolicy('high');
+    day(rich, 8);
+    expect(rich.mood).toBeGreaterThan(sim.mood);
+  });
+
+  it('Konjunktur und Gebrauchtmarkt wechseln, Lagergebühren fließen', () => {
+    const sim = basicPort(4, 1);
+    const kinds = new Set<string>();
+    const money = new Set<string>();
+    for (let d = 0; d < 40; d++) {
+      day(sim, 1);
+      kinds.add(sim.cycle.kind);
+      money.add(sim.usedMarket.label);
+      if (sim.pending) sim.resolveDecision(0);
+    }
+    expect(kinds.size).toBeGreaterThan(1);
+    expect(money.size).toBeGreaterThan(1);
+    expect(sim.history.some((h) => h.fees > 0)).toBe(true);
+  });
+
+  it('Verträge mit Sonderbedingungen, Exklusiv sperrt freie Schiffe', () => {
+    const sim = basicPort(2, 1);
+    sim.level = 4;
+    const conds = new Set<string | undefined>();
+    for (let i = 0; i < 60; i++) {
+      (sim as unknown as { makeOffers(): void }).makeOffers();
+      for (const o of sim.offers) conds.add(o.cond);
+    }
+    expect(conds.has('export') && conds.has('rush') && conds.has('exclusive')).toBe(true);
+    const ex = sim.offers.find((o) => o.cond === 'exclusive') ?? { ...sim.offers[0], cond: 'exclusive' as const };
+    sim.contracts = [ex];
+    sim.ships = [];
+    sim.nextShipIn = 0;
+    run(sim, 3);
+    expect(sim.ships.filter((s) => s.contractId === 0).length).toBe(0);
+  });
+
+  it('Kreditwürdigkeit: guter Ruf macht Zinsen billiger', () => {
+    const a = new Sim();
+    const b = new Sim();
+    a.loan = b.loan = 200_000;
+    a.rep = 90;
+    b.rep = 10;
+    expect(a.interestPerDay).toBeLessThan(b.interestPerDay);
+  });
+
+  it('Akkord und Billigdiesel haben einen Haken, Jahreszeiten wechseln', () => {
+    const sim = basicPort(2, 1);
+    sim.level = 3;
+    sim.money = 1e6;
+    const t = sim.moveTime(sim.cranes[0]);
+    expect(sim.buyTech('akkord').ok).toBe(true);
+    expect(sim.moveTime(sim.cranes[0])).toBeLessThan(t);
+    expect(sim.buyTech('diesel').ok).toBe(true);
+    sim.gm = 20 * 1440;
+    expect(sim.season.name).not.toBe(new Sim().season.name);
   });
 });

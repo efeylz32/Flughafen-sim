@@ -24,6 +24,15 @@ Der Aufstiegsbonus ist klein (40.000 € bis 600.000 €). Löhne steigen je Stu
 - **Bauzeit:** Kräne, Gates, Hallen, Werkstatt, Portalkran und Gleis brauchen nach dem Kauf eine Weile (1 bis 6 Spielstunden), bis sie arbeiten. Auch Kran-Umbauten dauern. Straße, Lager und Kai sind sofort fertig.
 - **Preissteigerung:** Mit jeder Hafenstufe wird alles 15 % teurer (Bauen, Aufrüsten, Verbesserungen).
 - **Gebraucht kaufen und Höchstzustand:** Kräne und Trucks gibt es gebraucht zum halben Preis, mit einem Höchstzustand von 50 bis 75 %. Jedes Gerät hat einen Höchstzustand wie ein Akku: Er sinkt mit der Nutzung, und die Werkstatt repariert nur bis dorthin. Alte Geräte sind langsamer und fallen ab Stufe 2 öfter zufällig aus. Eine Generalüberholung (35 % vom Neupreis) hebt den Höchstwert wieder auf 90 %.
+- **Richtung (ab Stufe 3):** Du wählst einmal Umschlag-Hub, Logistik-Hafen oder Kühlhafen. Jede Richtung hat Vor- und Nachteile, die anderen sind damit zu.
+- **Verbesserungen mit Haken:** Akkord-Schichten (+20 % Kranmoves, aber doppelter Krankenstand, schlechtere Stimmung, mehr Unfälle) und Billigdiesel (Trucks günstiger, aber mehr Verschleiß).
+- **Vertragsbedingungen:** Manche Verträge verlangen, dass der Export mitgeladen wird, sind Eilaufträge (kürzere Liegezeit) oder exklusiv (solange sie laufen, kommen keine freien Schiffe). Dafür gibt es mehr Bonus.
+- **Personal:** Erfahrung wächst mit der Zeit, neue Leute fangen bei 30 % an und drücken den Schnitt. Schichtbetrieb: Nachtschicht kostet 20 % Lohnzuschlag, ohne sie läuft nachts alles mit halber Kraft. Lohnpolitik (Sparkurs, Tarif, Übertarif) und Krankenstand bestimmen die Stimmung, bei sehr schlechter Stimmung streikt die Belegschaft.
+- **Konjunktur und Jahreszeiten:** Boom und Krise wechseln alle paar Tage (Schiffe, Gebühren, Gebrauchtpreise). Alle 15 Tage wechselt die Jahreszeit (Kleidung im Frühling, Kühlfracht im Sommer, Elektronik im Herbst, Stürme im Winter).
+- **Gebrauchtmarkt:** Täglich wechselndes Angebot: Schnäppchen, Durchschnitt oder Schrott, mit eigenem Preis und eigener Spanne des Höchstzustands.
+- **Lagergebühren und Stapel:** Container im Lager bringen täglich 6 € Gebühr. Hohe Stapel verlängern das Abholen, wenn kein Portalkran im Umkreis steht.
+- **Kreditwürdigkeit:** Guter Ruf und hohe Pünktlichkeit senken den Zinsfaktor.
+- **Unfälle und Kontrollen:** Alte oder überlastete Kräne können Container fallen lassen (Sperrung, Kosten, Ruf). Alle 10 bis 18 Tage kommt eine Kontrolle: alte Geräte und überlastete Belegschaft kosten Strafe, sonst gibt es Ruf.
 - **Kranmodelle:** Leichtkran (40k, 13 Moves/h), Mobilkran (80k, 20), Containerbrücke (Aufrüstung ab Stufe 2, 40, zwei Felder), Super-Brücke (Aufrüstung ab Stufe 4, 60). Jedes Modell hat eigene Betriebskosten und Pufferplätze.
 - **Verbesserungen:** Kleine Upgrades in Stufen (Knopf mit dem Zahnrad): Twin-Spreader, Gate-Scanner, Stapeltechnik, Vertrieb, Leitstelle, Motoren, Kühltechnik, Wartungsplan. Jede Stufe kostet mehr und braucht eine Mindest-Hafenstufe.
 - **Wetter:** Bei Sturm stehen die Kräne (die Liegezeit läuft dann nicht), bei Nebel läuft kein Schiff ein. Es gibt zwei Stunden Vorwarnung.

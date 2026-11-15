@@ -38,11 +38,20 @@ import {
   GRID_H,
   GRID_W,
   LEVELS,
+  SPECS,
+  SpecId,
+  WAGE_POLICY,
+  WagePolicy,
+  NIGHT_WAGE,
+  NIGHT_SLOW,
+  CYCLES,
+  CycleKind,
+  SEASON_DAYS,
+  SEASONS,
+  STORAGE_FEE,
   INFLATION_PER_LEVEL,
   BUILD_GM,
   UPGRADE_GM,
-  USED_PRICE,
-  USED_CAP,
   CAP_LOSS,
   CAP_MIN,
   CRASH_RATE,
@@ -117,7 +126,7 @@ export interface Shop {
 }
 
 export interface Decision {
-  id: 'strike' | 'customs' | 'vip' | 'parts' | 'press';
+  id: 'strike' | 'customs' | 'vip' | 'parts' | 'press' | 'spec';
   title: string;
   text: string;
   options: string[];
@@ -333,6 +342,8 @@ export interface Contract {
   penalty: number;
   /** Spielminuten bis zum nächsten Anlauf */
   next: number;
+  /** Sonderbedingung: Export muss mitgeladen werden, knappe Liegezeit oder Exklusivität (keine freien Schiffe) */
+  cond?: 'export' | 'rush' | 'exclusive';
   /** Verpasste Anläufe in Folge. Beim zweiten kündigt die Reederei. */
   missed?: number;
 }
@@ -481,6 +492,14 @@ export interface SaveData {
   reefersHandled?: number;
   trainsDone?: number;
   bigShipsDone?: number;
+  spec?: SpecId | null;
+  nightShift?: boolean;
+  wagePolicy?: WagePolicy;
+  mood?: number;
+  xp?: Record<Role, number>;
+  cycle?: { kind: CycleKind; left: number };
+  usedMarket?: { factor: number; lo: number; hi: number; label: string };
+  nextInspect?: number;
   tech?: Partial<Record<TechId, number>>;
   megaDone?: number;
   shipsDone: number;
@@ -521,8 +540,7 @@ const LOADING = 'Wird beladen.';
 const emptyBook = (): DayBook => ({ fees: 0, exportFees: 0, rail: 0, berth: 0, bonus: 0, penalty: 0, running: 0, wages: 0, interest: 0, building: 0, handled: 0, ships: 0, onTime: 0, bn: { crane: 0, trucks: 0, yard: 0, gate: 0 }, jamPeak: 0 });
 const TILE_OF: Partial<Record<BuildTool, T>> = { kai: T.Kai, road: T.Road, yard: T.Yard, reefer: T.Reefer, gate: T.Gate, rail: T.Rail, unpack: T.Plant, pack: T.Plant, cold: T.Plant, workshop: T.Shop };
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
-/** Gebühr eines Kühlcontainers (auch mit Vertriebs-Aufschlag) erkennen */
-const j_isReefer = (fee: number, sales: number) => fee === Math.round(REEFER_FEE * (1 + 0.05 * sales));
+
 const eur = (n: number) => `${Math.round(n).toLocaleString('de-DE')} €`;
 
 export class Sim {
@@ -619,7 +637,20 @@ export class Sim {
   used = false;
   private firstOffers = false;
   /** Gekaufte Verbesserungen: Stufe je Verbesserung */
-  tech: Record<TechId, number> = { spreader: 0, scanner: 0, stack: 0, sales: 0, radio: 0, engine: 0, cool: 0, maint: 0 };
+  tech: Record<TechId, number> = { spreader: 0, scanner: 0, stack: 0, sales: 0, radio: 0, engine: 0, cool: 0, maint: 0, akkord: 0, diesel: 0 };
+  /** Gewählte Spezialisierung (ab Stufe 3) */
+  spec: SpecId | null = null;
+  /** Nachtschicht an: rund um die Uhr volle Leistung, dafür Lohnzuschlag */
+  nightShift = true;
+  wagePolicy: WagePolicy = 'normal';
+  /** Stimmung der Belegschaft 0..1 */
+  mood = 0.6;
+  /** Erfahrung je Rolle 0..1: wächst mit der Zeit, neue Leute verdünnen sie */
+  xp: Record<Role, number> = { driver: 0.4, crane: 0.4, gate: 0.4, mech: 0.4 };
+  cycle: { kind: CycleKind; left: number } = { kind: 'normal', left: 6 };
+  /** Heutiges Gebrauchtangebot: Preisfaktor und Spanne des Höchstzustands */
+  usedMarket = { factor: 0.5, lo: 0.5, hi: 0.75, label: 'Durchschnittliche Ware' };
+  nextInspect = 12;
   /** Gebäude beim nächsten Bauen gedreht (Breite und Höhe getauscht). Nur Bedienung, wird nicht gespeichert. */
   rot = false;
 
@@ -836,7 +867,14 @@ export class Sim {
   }
   /** Aktueller Verkaufspreis einer Ware */
   price(p: ProductId): number {
-    return Math.round((PRODUCTS[p].base * this.market[p]) / 10) * 10;
+    let m = this.market[p];
+    const si = this.season.index;
+    if (p === 'cloth' && si === 0) m *= 1.15;
+    if (p === 'elec' && si === 2) m *= 1.2;
+    if (p === 'food' && si === 3) m *= 1.1;
+    if (this.spec === 'logi' && p !== 'food') m *= 1.1;
+    if (this.spec === 'cold' && p === 'food') m *= 1.15;
+    return Math.round((PRODUCTS[p].base * m) / 10) * 10;
   }
   /** Alle Container auf dem Stapelplatz (Import und Export) */
   get yardStock(): number {
@@ -872,7 +910,8 @@ export class Sim {
     return Math.min(1, Math.max(0, (this.handled - base) / (next.need - base)));
   }
   moveTime(c: Crane): number {
-    return CRANE_MODELS[c.model].move / (1 + 0.1 * this.tech.spreader) / (1 - WEAR_SLOWDOWN * Math.min(1, c.wear));
+    const spec = this.spec === 'hub' ? 1.15 : this.spec === 'logi' ? 0.95 : 1;
+    return CRANE_MODELS[c.model].move / (1 + 0.1 * this.tech.spreader) / (this.tech.akkord ? 1.2 : 1) / spec / this.eff('crane') / (1 - WEAR_SLOWDOWN * Math.min(1, c.wear));
   }
   /** Ältester Kühlcontainer auf einem Kühlplatz: verbleibende Spielminuten, oder null */
   reeferTimeLeft(tile: number): number | null {
@@ -1087,7 +1126,7 @@ export class Sim {
   // ───────────────────────── Bauen ─────────────────────────
 
   canBuild(tool: BuildTool, x: number, y: number): BuildCheck {
-    const cost = Math.round((this.costOf(tool) * (this.used && Sim.usable(tool) ? USED_PRICE : 1)) / 100) * 100;
+    const cost = Math.round((this.costOf(tool) * (this.used && Sim.usable(tool) ? this.usedMarket.factor : 1)) / 100) * 100;
     if (!this.inBounds(x, y)) return { ok: false, reason: 'Außerhalb der Karte', cost };
     if (this.level < UNLOCK[tool]) return { ok: false, reason: `Erst ab Stufe ${UNLOCK[tool]} (${LEVELS[UNLOCK[tool] - 1].name})`, cost };
     const i = this.idx(x, y);
@@ -1197,12 +1236,12 @@ export class Sim {
           wear: 0,
           zone: 0,
         });
-        this.staff.crane++;
+        this.addStaff('crane');
         return undefined;
       case 'gate':
         for (const f of this.footprintOf({ x, y, w: bw, h: bh })) this.kind[f] = T.Gate;
         this.gates.push({ id: this.nextId++, x, y, w: bw, h: bh, apron: [], resIn: 0, inApron: 0, resOut: 0, proc: 0, procIn: false, procFee: 0, lastIn: false, served: 0, staffed: true, zone: 0 });
-        this.staff.gate++;
+        this.addStaff('gate');
         return undefined;
       case 'rail':
         this.kind[i] = T.Rail;
@@ -1213,12 +1252,12 @@ export class Sim {
         return undefined;
       case 'rtg':
         this.rtgs.push({ id: this.nextId++, x, y, staffed: true });
-        this.staff.crane++;
+        this.addStaff('crane');
         return undefined;
       case 'workshop':
         for (const f of this.footprintOf({ x, y, w: 2, h: 2 })) this.kind[f] = T.Shop;
         this.shops.push({ id: this.nextId++, x, y, w: 2, h: 2, staffed: true, target: null });
-        this.staff.mech++;
+        this.addStaff('mech');
         return undefined;
       case 'unpack':
       case 'pack':
@@ -1229,7 +1268,7 @@ export class Sim {
       case 'truck': {
         const id = this.nextId++;
         this.trucks.push({ id, tile: i, next: -1, prog: 0, fx: x, fy: y, px: x, py: y, wait: 0, load: 0, cargo: 'imp', agv: false, job: null, angle: 0, dir: -1, stuck: 0, slot: 0, staffed: true, role: 'auto', wear: 0, zone: 0, cap: 1, paid: COST.truck });
-        this.staff.driver++;
+        this.addStaff('driver');
         return id;
       }
     }
@@ -1246,7 +1285,7 @@ export class Sim {
     if (dev) {
       dev.paid = chk.cost;
       if (this.used && Sim.usable(tool)) {
-        dev.cap = USED_CAP[0] + this.rnd() * (USED_CAP[1] - USED_CAP[0]);
+        dev.cap = this.usedMarket.lo + this.rnd() * (this.usedMarket.hi - this.usedMarket.lo);
         dev.wear = 1 - dev.cap + 0.05;
       }
     }
@@ -1553,7 +1592,7 @@ export class Sim {
   }
   /** Haltbarkeit der Kühlcontainer in Spielminuten */
   get reeferMax(): number {
-    return REEFER_MAX_GM * (1 + 0.3 * this.tech.cool);
+    return REEFER_MAX_GM * (1 + 0.3 * this.tech.cool) * (this.spec === 'cold' ? 1.5 : 1);
   }
   /** Verschleiß wächst, der Höchstzustand sinkt dabei langsam mit (wie ein Akku) */
   private addWear(o: { wear: number; cap: number }, d: number) {
@@ -2060,7 +2099,7 @@ export class Sim {
     let fee = j.cargo === 'reef' ? REEFER_FEE : FEE_PER_CONTAINER;
     if (j.cargo === 'prem') fee = this.price(this.plants.find((p) => p.id === j.src)?.product ?? 'elec');
     if (j.cargo === 'food') fee = this.price('food');
-    fee = Math.round(fee * (1 + 0.05 * this.tech.sales));
+    fee = Math.round(fee * (1 + 0.05 * this.tech.sales) * CYCLES[this.cycle.kind].fee * (j.cargo === 'reef' && this.spec === 'cold' ? 1.25 : 1));
     if (j.dstKind === 'gate' || j.dstKind === 'rail') {
       if (j.cargo === 'prem') this.premiumDone += j.n;
       if (j.cargo === 'food') this.foodDone += j.n;
@@ -2078,7 +2117,7 @@ export class Sim {
     } else if (j.dstKind === 'gate') {
       const g = this.gates.find((g) => g.id === j.dst);
       if (!g) return false;
-      for (let k = 0; k < j.n; k++) g.apron.push(fee);
+      for (let k = 0; k < j.n; k++) g.apron.push(j.cargo === 'reef' ? fee + 100000 : fee);
     } else if (j.dstKind === 'rail') {
       const r = this.rails.find((r) => r.id === j.dst);
       if (!r) return false;
@@ -2112,6 +2151,8 @@ export class Sim {
       t.wait = TRUCK_HANDLE_GM * (t.role === 'auto' ? 1 : ROUTINE_HANDLE);
       const storeTile = j.stage === 0 ? (j.srcKind === 'store' ? j.src : -1) : j.dstKind === 'store' ? j.dst : -1;
       if (storeTile >= 0 && this.rtgCovers(storeTile)) t.wait *= RTG_HANDLE;
+      // Hohe Stapel: Wer unten steht, muss erst freigeräumt werden (Abholen vom Lager)
+      else if (storeTile >= 0 && j.stage === 0) t.wait *= 1 + 0.6 * Math.min(1, (this.stock[storeTile] + this.stockExp[storeTile]) / this.capAt(storeTile));
       const ok = j.stage === 0 ? this.pickUp(t, j) : this.dropOff(t, j);
       if (!ok) this.cancelJob(t);
       return;
@@ -2158,9 +2199,9 @@ export class Sim {
       t.stuck = 0;
     }
 
-    t.prog += (t.agv ? AGV_SPEED : TRUCK_SPEED) * (1 + 0.08 * this.tech.engine) * (t.role === 'auto' ? 1 : ROUTINE_SPEED) * (1 - WEAR_SLOWDOWN * t.wear) * dt;
+    t.prog += (t.agv ? AGV_SPEED : TRUCK_SPEED) * (t.agv ? 1 : this.eff('driver')) * (1 + 0.08 * this.tech.engine) * (t.role === 'auto' ? 1 : ROUTINE_SPEED) * (1 - WEAR_SLOWDOWN * t.wear) * dt;
     if (this.level >= 2) {
-      this.addWear(t, WEAR_TRUCK_PER_GM * this.wearMul * dt);
+      this.addWear(t, WEAR_TRUCK_PER_GM * this.wearMul * (this.tech.diesel ? 1.3 : 1) * dt);
       if (t.wear >= 1) this.noteBroken('Ein Truck');
     }
     const nx = t.next % GRID_W;
@@ -2231,10 +2272,41 @@ export class Sim {
   }
   wagePerHour(role: Role): number {
     // Größere Häfen zahlen Tariflohn: +8 % je Stufe
-    return Math.round(ROLES[role].wage * DIFFS[this.diff].wage * this.wageBoost[role] * (1 + 0.08 * (Math.min(this.level, 7) - 1)));
+    const night = this.nightShift && this.isNight ? NIGHT_WAGE : 1;
+    return Math.round(ROLES[role].wage * DIFFS[this.diff].wage * this.wageBoost[role] * (1 + 0.08 * (Math.min(this.level, 7) - 1)) * WAGE_POLICY[this.wagePolicy].mul * night);
+  }
+  /** Neue Leute fangen mit wenig Erfahrung an und verdünnen den Schnitt der Belegschaft */
+  private addStaff(role: Role) {
+    const n = this.staff[role];
+    this.xp[role] = (this.xp[role] * n + 0.3) / (n + 1);
+    this.staff[role]++;
   }
   hire(role: Role) {
-    this.staff[role]++;
+    this.addStaff(role);
+  }
+  /** Stunde des Tages 0..24 */
+  get hour(): number {
+    return (this.gm % MIN_PER_DAY) / 60;
+  }
+  get isNight(): boolean {
+    return this.hour >= 22 || this.hour < 6;
+  }
+  /** Leistung einer Belegschaft: Erfahrung, Stimmung und Nachtbetrieb */
+  eff(role: Role): number {
+    const xp = 0.85 + 0.3 * this.xp[role];
+    const mood = 0.95 + 0.1 * this.mood;
+    return xp * mood * (this.isNight && !this.nightShift ? NIGHT_SLOW : 1);
+  }
+  get season(): { index: number; name: string; text: string } {
+    const i = Math.floor((this.day - 1) / SEASON_DAYS) % 4;
+    return { index: i, ...SEASONS[i] };
+  }
+  get cycleInfo() {
+    return { ...CYCLES[this.cycle.kind], kind: this.cycle.kind, left: this.cycle.left };
+  }
+  /** Zinsfaktor: Guter Ruf und Pünktlichkeit machen Kredit billiger */
+  get rateMul(): number {
+    return clamp(1.7 - this.rep / 100 - (this.myRate ?? 0.5) * 0.4, 0.7, 1.6);
   }
   fire(role: Role): BuildCheck {
     if (this.staff[role] <= 0) return { ok: false, reason: 'Niemand angestellt', cost: 0 };
@@ -2277,6 +2349,19 @@ export class Sim {
       if (this.rnd() < CRASH_RATE * (1 - o.cap) ** 2) {
         o.wear = 1;
         this.noteBroken('model' in o ? 'Ein Kran' : 'Ein Truck');
+      }
+      // Unfall: Ein alter oder überlasteter Kran lässt einen Container fallen
+      if ('model' in o && o.state === 'working') {
+        const risk = (o.cap < 0.55 ? (0.55 - o.cap) * 0.12 : 0) + (this.tech.akkord ? 0.004 : 0) + (o.wear > 0.8 ? 0.01 : 0);
+        if (this.rnd() < risk) {
+          const cost = Math.round((12_000 * this.inflation) / 500) * 500;
+          this.money -= cost;
+          this.today.penalty += cost;
+          this.rep = Math.max(0, this.rep - 3);
+          this.mood = Math.max(0, this.mood - 0.1);
+          o.build = o.buildMax = 180;
+          this.emit(`Unfall am Kran: Ein Container ist abgestürzt. Der Bereich ist 3 Stunden gesperrt. −${eur(cost)}, Ruf −3`, 'bad', { tag: 'broken', x: o.x, y: o.y });
+        }
       }
     }
   }
@@ -2342,7 +2427,7 @@ export class Sim {
 
   /** Jeden Morgen: Kranke werden gesund, neue melden sich krank. */
   private rollSickness() {
-    const p = DIFFS[this.diff].sick;
+    const p = DIFFS[this.diff].sick * (this.tech.akkord ? 2 : 1) * (this.mood < 0.4 ? 1.3 : 1);
     for (const r of Object.keys(ROLES) as Role[]) {
       this.sick[r] = this.sick[r].map((d) => d - 1).filter((d) => d > 0);
       let fresh = 0;
@@ -2399,7 +2484,7 @@ export class Sim {
   }
 
   private planWeather() {
-    if (this.level < 2 || this.forecast || this.weather !== 'clear' || this.rnd() > 0.55) return;
+    if (this.level < 2 || this.forecast || this.weather !== 'clear' || this.rnd() > (this.season.index === 3 ? 0.75 : 0.55)) return;
     const kind = this.rnd() < 0.5 ? 'storm' : 'fog';
     this.forecast = { kind, in: 180 + this.rnd() * 900, dur: kind === 'storm' ? 120 + this.rnd() * 120 : 120 + this.rnd() * 90, warned: false };
   }
@@ -2409,7 +2494,7 @@ export class Sim {
   private addShip(type: ShipTypeId, c: Contract | null, reefer: boolean) {
     const st = SHIP_TYPES[type];
     const n = 100 + Math.floor(this.rnd() * 900);
-    const reefers = reefer ? Math.round(st.containers * REEFER_SHARE) : 0;
+    const reefers = reefer ? Math.round(st.containers * Math.min(0.5, REEFER_SHARE * (this.spec === 'cold' ? 1.4 : 1))) : 0;
     const exp = this.level >= 2 ? Math.round(st.containers * EXPORT_SHARE) : 0;
     this.ships.push({
       id: this.nextId++,
@@ -2471,12 +2556,17 @@ export class Sim {
       return;
     }
     // Ohne Vertrag kommen nur Küstenfrachter. Große Schiffe gibt es nur über Verträge.
-    const reefer = this.level >= 3 && this.reeferCapacity >= 12 && this.rnd() < 0.3;
+    // Exklusivverträge schließen freie Schiffe aus.
+    if (this.contracts.some((c) => c.cond === 'exclusive')) {
+      this.nextShipIn = 60;
+      return;
+    }
+    const reefer = this.level >= 3 && this.reeferCapacity >= 12 && this.rnd() < (this.season.index === 1 ? 0.5 : 0.3) * (this.spec === 'cold' ? 1.5 : 1);
     this.addShip('coaster', null, reefer);
     // Ist die Konkurrenz pünktlicher als du, kommen weniger freie Schiffe
     const mine = this.myRate;
     const rival = this.level >= 2 && mine !== null ? 1 + Math.max(0, this.rivalRate - mine) : 1;
-    const base = (Math.min(300, Math.max(120, 300 - this.rep * 1.5)) + this.contracts.length * 90) * (this.level >= 2 ? MAPS[this.map].ships : 1) * rival;
+    const base = (Math.min(300, Math.max(120, 300 - this.rep * 1.5)) + this.contracts.length * 90) * (this.level >= 2 ? MAPS[this.map].ships : 1) * rival * CYCLES[this.cycle.kind].ships;
     this.nextShipIn = base * (0.8 + this.rnd() * 0.4);
   }
 
@@ -2643,8 +2733,10 @@ export class Sim {
 
   private finishShip(s: Ship) {
     const st = SHIP_TYPES[s.type];
+    const bf = Math.round(st.berthFee * (this.spec === 'hub' ? 1.2 : this.spec === 'cold' ? 0.9 : 1) * CYCLES[this.cycle.kind].fee);
     const imports = s.containers + s.reefers;
-    const onTime = imports <= 0 && s.atBerth <= s.dwellTarget + 1;
+    const cc = this.contracts.find((x) => x.id === s.contractId);
+    const onTime = imports <= 0 && s.atBerth <= s.dwellTarget + 1 && !(cc?.cond === 'export' && s.exportLeft > 0);
     this.shipsDone++;
     this.today.ships++;
     if (st.deep && imports <= 0) this.bigShipsDone++;
@@ -2652,19 +2744,19 @@ export class Sim {
     const c = this.contracts.find((c) => c.id === s.contractId);
     const bonus = onTime && c ? c.bonus : 0;
     if (imports <= 0) {
-      this.money += st.berthFee;
-      this.today.berth += st.berthFee;
+      this.money += bf;
+      this.today.berth += bf;
     }
     if (onTime) {
       this.shipsOnTime++;
       this.today.onTime++;
       this.rep = Math.min(REP_MAX, this.rep + 1);
       const extra = bonus ? ` und ${eur(bonus)} Vertragsbonus` : '';
-      this.emit(`${s.name} abgefertigt: +${eur(st.berthFee)} Liegegebühr${extra}, Ruf +1`, 'good', {
+      this.emit(`${s.name} abgefertigt: +${eur(bf)} Liegegebühr${extra}, Ruf +1`, 'good', {
         tag: 'ship-done',
         x: this.shipBox(s).x + this.shipBox(s).w / 2,
         y: this.shipBox(s).y,
-        amount: st.berthFee + bonus,
+        amount: bf + bonus,
       });
     } else if (imports > 0) {
       this.rep = Math.max(0, this.rep - 3);
@@ -2813,10 +2905,12 @@ export class Sim {
             g.served++;
             this.containersDone++;
             this.handled++, this.today.handled++;
-            if (j_isReefer(g.procFee, this.tech.sales)) this.reefersHandled++;
-            this.money += g.procFee;
-            this.today.fees += g.procFee;
-            this.emit(undefined, 'good', { tag: 'container', x: g.x, y: g.y, amount: g.procFee });
+            const reef = g.procFee >= 100000;
+            const fee = reef ? g.procFee - 100000 : g.procFee;
+            if (reef) this.reefersHandled++;
+            this.money += fee;
+            this.today.fees += fee;
+            this.emit(undefined, 'good', { tag: 'container', x: g.x, y: g.y, amount: fee });
           }
         }
       }
@@ -2828,7 +2922,7 @@ export class Sim {
       const takeIn = wantIn && (!wantOut || !g.lastIn);
       g.lastIn = takeIn;
       g.procIn = takeIn;
-      g.proc = GATE_PROCESS_GM / (1 + 0.2 * this.tech.scanner);
+      g.proc = GATE_PROCESS_GM / (1 + 0.2 * this.tech.scanner) / (this.spec === 'logi' ? 1.15 : 1) / this.eff('gate');
       if (takeIn) this.exportNeed--;
       else g.procFee = g.apron.shift()!;
     }
@@ -2888,7 +2982,7 @@ export class Sim {
       }
       if (p.inBuf >= cfg.needs && p.outBuf < PLANT_BUF) {
         p.inBuf -= cfg.needs;
-        p.proc = cfg.time;
+        p.proc = cfg.time * (this.spec === 'hub' ? 1.3 : this.spec === 'logi' ? 0.75 : 1);
       }
     }
   }
@@ -3028,7 +3122,7 @@ export class Sim {
   }
 
   private rollDecision() {
-    if (this.level < 2 || this.pending || this.status === 'lost' || this.rnd() > EVENT_CHANCE) return;
+    if (this.level < 2 || this.pending || this.status === 'lost' || (this.level >= 3 && !this.spec) || this.rnd() > EVENT_CHANCE) return;
     const pen = DIFFS[this.diff].penalty;
     const list: Decision[] = [
       {
@@ -3078,6 +3172,13 @@ export class Sim {
       this.today.penalty += n;
     };
     switch (d.id) {
+      case 'spec': {
+        const k = (Object.keys(SPECS) as SpecId[])[choice] ?? 'hub';
+        this.spec = k;
+        this.version++;
+        this.emit(`Neue Richtung: ${SPECS[k].name}. ${SPECS[k].pros}.`, 'good', { tag: 'level' });
+        break;
+      }
       case 'strike':
         if (choice === 0) {
           this.wageBoost.driver *= 1.1;
@@ -3161,7 +3262,7 @@ export class Sim {
     return LOAN_LIMIT_PER_LEVEL * this.level;
   }
   get interestPerDay(): number {
-    return Math.round(this.loan * LOAN_RATE * DIFFS[this.diff].rate);
+    return Math.round(this.loan * LOAN_RATE * DIFFS[this.diff].rate * this.rateMul);
   }
   takeLoan(): BuildCheck {
     if (this.loan + LOAN_STEP > this.loanLimit) {
@@ -3222,7 +3323,17 @@ export class Sim {
     const calls = 6 + Math.floor(this.rnd() * 9);
     const tight = (SHIP_TYPES[ship].dwell - dwell) / 60;
     const raw = (big ? 12_000 : 2_500) + tight * 1_500 + this.rnd() * (big ? 8_000 : 2_000) + (reefer ? 2_000 : 0);
-    const bonus = Math.round(raw / 500) * 500;
+    let bonus = Math.round(raw / 500) * 500;
+    // Sonderbedingungen mit höherem Bonus: Export mitladen, knappe Frist oder exklusiv
+    const cr = this.rnd();
+    const cond: Contract['cond'] = this.level < 2 ? undefined : cr < 0.22 ? 'export' : cr < 0.4 ? 'rush' : cr < 0.52 ? 'exclusive' : undefined;
+    let dwellF = dwell;
+    if (cond === 'export') bonus = Math.round((bonus * 1.4) / 500) * 500;
+    if (cond === 'rush') {
+      bonus = Math.round((bonus * 1.5) / 500) * 500;
+      dwellF = Math.round(dwell * 0.8);
+    }
+    if (cond === 'exclusive') bonus = Math.round((bonus * 1.6) / 500) * 500;
     return {
       id: this.nextId++,
       line: l.line,
@@ -3233,7 +3344,8 @@ export class Sim {
       interval,
       calls,
       callsTotal: calls,
-      dwell,
+      dwell: dwellF,
+      cond,
       bonus,
       penalty: Math.round((bonus * 0.8 * DIFFS[this.diff].penalty) / 500) * 500,
       next: 30 + this.rnd() * 30,
@@ -3289,7 +3401,7 @@ export class Sim {
     const R = RUN_COST_PER_DAY;
     let cost = 0;
     for (const c of this.cranes) cost += CRANE_MODELS[c.model].run;
-    for (const t of this.trucks) cost += t.agv ? R.agv : R.truck;
+    for (const t of this.trucks) cost += (t.agv ? R.agv : R.truck) * (this.tech.diesel ? 0.6 : 1);
     cost += this.gates.length * R.gate + this.rails.length * R.rail + this.plants.length * R.plant + this.shops.length * R.shop;
     cost += this.yardTiles.length * R.yardTile + this.reeferTiles.length * R.reeferTile;
     for (let i = 0; i < this.kind.length; i++) if (this.kind[i] === T.Kai) cost += R.kaiTile;
@@ -3315,8 +3427,84 @@ export class Sim {
     this.updateRival();
     this.rollDecision();
     this.updateMarket();
+    this.rollWorld();
     this.emit(`Tagesabschluss: Betriebskosten −${eur(cost)}${interest ? `, Zinsen −${eur(interest)}` : ''}`, 'info', { tag: 'day' });
     this.checkEnd();
+  }
+
+  /** Täglich: Erfahrung, Stimmung, Konjunktur, Gebrauchtmarkt, Lagergebühren, Kontrollen, Spezialisierung */
+  private rollWorld() {
+    // Erfahrung wächst
+    for (const r of Object.keys(ROLES) as Role[]) this.xp[r] += (1 - this.xp[r]) * 0.03;
+    // Stimmung strebt ihrem Ziel zu
+    const heads = (Object.keys(ROLES) as Role[]).reduce((n, r) => n + this.staff[r], 0);
+    const sick = (Object.keys(ROLES) as Role[]).reduce((n, r) => n + this.sick[r].length, 0);
+    let target = 0.6 + WAGE_POLICY[this.wagePolicy].mood - (this.nightShift ? 0.08 : 0) - (this.tech.akkord ? 0.1 : 0) - (heads ? (sick / heads) * 0.3 : 0) - (this.strikeLeft > 0 ? 0.2 : 0);
+    target = clamp(target, 0, 1);
+    this.mood = clamp(this.mood + (target - this.mood) * 0.35, 0, 1);
+    if (this.mood < 0.25 && this.level >= 2 && this.strikeLeft <= 0 && this.rnd() < 0.3) {
+      this.strikeLeft = 480;
+      this.emit('Die Stimmung ist am Boden: Die Fahrer streiken 8 Stunden.', 'bad');
+    }
+    // Konjunktur
+    this.cycle.left--;
+    if (this.cycle.left <= 0) {
+      const roll = this.rnd();
+      const kind: CycleKind = roll < 0.5 ? 'normal' : roll < 0.75 ? 'boom' : 'crisis';
+      this.cycle = { kind, left: 4 + Math.floor(this.rnd() * 6) };
+      if (kind === 'boom') this.emit(`Konjunktur: Boom für ${this.cycle.left} Tage. Mehr Schiffe, höhere Gebühren, Gebrauchtes wird teurer.`, 'good');
+      else if (kind === 'crisis') this.emit(`Konjunktur: Krise für ${this.cycle.left} Tage. Weniger Schiffe, niedrigere Gebühren, aber Gebrauchtes ist billig.`, 'bad');
+      else this.emit('Konjunktur: Wieder normale Lage.', 'info');
+    }
+    // Gebrauchtmarkt: täglich wechselnde Ware
+    const q = this.rnd();
+    const cm = CYCLES[this.cycle.kind].used;
+    if (q < 0.2) this.usedMarket = { factor: Math.round(0.4 * cm * 100) / 100, lo: 0.6, hi: 0.8, label: 'Schnäppchen' };
+    else if (q < 0.45) this.usedMarket = { factor: Math.round(0.35 * cm * 100) / 100, lo: 0.3, hi: 0.5, label: 'Schrott' };
+    else this.usedMarket = { factor: Math.round(0.5 * cm * 100) / 100, lo: 0.5, hi: 0.75, label: 'Durchschnitt' };
+    // Lagergebühr: Spediteure zahlen für Container, die im Lager stehen
+    const stored = this.yardStock + this.reeferStock;
+    if (stored > 0) {
+      const f = Math.round(stored * STORAGE_FEE * (1 + 0.05 * this.tech.sales));
+      this.money += f;
+      this.today.fees += f;
+      this.emit(`Lagergebühren: +${eur(f)} für ${stored} Container im Lager`, 'good');
+    }
+    // Kontrolle durch Zoll und Arbeitsschutz
+    if (this.level >= 2 && this.day >= this.nextInspect) {
+      this.nextInspect = this.day + 10 + Math.floor(this.rnd() * 8);
+      const old = [...this.cranes, ...this.trucks].filter((o) => o.cap < 0.5).length;
+      const tired = this.nightShift && this.mood < 0.4 ? 1 : 0;
+      const bad = old + tired * 2;
+      if (bad === 0) {
+        this.rep = Math.min(REP_MAX, this.rep + 2);
+        this.emit('Kontrolle des Arbeitsschutzes bestanden. Ruf +2', 'good');
+      } else {
+        const fine = Math.round((5_000 * bad * this.inflation) / 500) * 500;
+        this.money -= fine;
+        this.today.penalty += fine;
+        this.emit(`Kontrolle: ${old ? `${old} Geräte in schlechtem Zustand` : 'Überlastete Belegschaft'}. Strafe −${eur(fine)}`, 'bad');
+      }
+    }
+    // Spezialisierung ab Stufe 3
+    if (this.level >= 3 && !this.spec && !this.pending && this.status !== 'lost') {
+      this.pending = {
+        id: 'spec',
+        title: 'Wähle die Richtung deines Hafens',
+        text: (Object.keys(SPECS) as SpecId[]).map((k) => `${SPECS[k].name}: ${SPECS[k].pros}. Nachteil: ${SPECS[k].cons}.`).join(' '),
+        options: (Object.keys(SPECS) as SpecId[]).map((k) => SPECS[k].name),
+      };
+      this.emit(undefined, 'info', { tag: 'decision' });
+    }
+  }
+
+  setNightShift(on: boolean) {
+    this.nightShift = on;
+    this.version++;
+  }
+  setWagePolicy(p: WagePolicy) {
+    this.wagePolicy = p;
+    this.version++;
   }
 
   // ───────────────────────── Speichern ─────────────────────────
@@ -3377,6 +3565,14 @@ export class Sim {
       reefersHandled: this.reefersHandled,
       trainsDone: this.trainsDone,
       bigShipsDone: this.bigShipsDone,
+      spec: this.spec,
+      nightShift: this.nightShift,
+      wagePolicy: this.wagePolicy,
+      mood: this.mood,
+      xp: this.xp,
+      cycle: this.cycle,
+      usedMarket: this.usedMarket,
+      nextInspect: this.nextInspect,
       tech: this.tech,
       megaDone: this.megaDone,
       shipsDone: this.shipsDone,
@@ -3474,6 +3670,14 @@ export class Sim {
     s.exportsLoaded = d.exportsLoaded ?? 0;
     s.reefersHandled = d.reefersHandled ?? 0;
     s.trainsDone = d.trainsDone ?? 0;
+    s.spec = d.spec ?? null;
+    s.nightShift = d.nightShift ?? true;
+    s.wagePolicy = d.wagePolicy ?? 'normal';
+    s.mood = d.mood ?? 0.6;
+    if (d.xp) s.xp = { ...s.xp, ...d.xp };
+    if (d.cycle) s.cycle = d.cycle;
+    if (d.usedMarket) s.usedMarket = d.usedMarket;
+    s.nextInspect = d.nextInspect ?? 12;
     s.bigShipsDone = d.bigShipsDone ?? 0;
     if (d.tech) s.tech = { ...s.tech, ...d.tech };
     s.megaDone = d.megaDone ?? 0;
