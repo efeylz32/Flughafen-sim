@@ -592,9 +592,9 @@ describe('Einbahnstraßen', () => {
     for (let x = 2; x <= 6; x++) sim.build('road', x, k + 2);
     const a = sim.idx(2, k + 2);
     const b = sim.idx(6, k + 2);
-    expect(sim.distMap(b)[a]).toBe(4);
+    expect(sim.distMap(b)[a]).toBe(40);
     sim.toggleOneway(4, k + 2); // Ost
-    expect(sim.distMap(b)[a]).toBe(4);
+    expect(sim.distMap(b)[a]).toBe(40);
     expect(sim.distMap(a)[b]).toBe(-1);
     sim.toggleOneway(4, k + 2); // Süd: gar kein Durchkommen mehr
     expect(sim.distMap(b)[a]).toBe(-1);
@@ -622,8 +622,8 @@ describe('Einbahnstraßen', () => {
     for (let y = k + 3; y <= k + 6; y++) set(2, y, 3);
     const a = sim.idx(3, k + 2);
     const b = sim.idx(3, k + 6);
-    expect(sim.distMap(b)[a]).toBe(10);
-    expect(sim.distMap(a)[b]).toBe(6);
+    expect(sim.distMap(b)[a]).toBe(100);
+    expect(sim.distMap(a)[b]).toBe(60);
   });
 });
 
@@ -1357,5 +1357,71 @@ describe('Straßenausbau: Doppelspur und Autobahn', () => {
       b.build('hwy', x, k + 1);
     }
     expect(b.runningCost()).toBeGreaterThan(a.runningCost());
+  });
+});
+
+describe('Zeit-Routing', () => {
+  it('Trucks nehmen die schnellere Autobahn, auch wenn sie länger ist', () => {
+    const sim = new Sim();
+    sim.level = 3;
+    sim.money = 1e7;
+    // Direkter Weg: normale Straße (12 Felder). Umweg: Autobahn mit 3 Feldern mehr.
+    for (let x = 4; x <= 16; x++) sim.build('road', x, k + 1);
+    for (let y = k + 2; y <= k + 3; y++) {
+      sim.build('road', 4, y);
+      sim.build('road', 16, y);
+    }
+    for (let x = 4; x <= 16; x++) sim.build('hwy', x, k + 4);
+    for (let x = 4; x <= 16; x++) sim.build('hwy', x, k + 5);
+    sim.build('road', 4, k + 4); // Anschlüsse in Fahrtrichtung
+    const a = sim.idx(4, k + 1);
+    const b = sim.idx(16, k + 1);
+    const d = sim.distMap(b)[a];
+    expect(d).toBeGreaterThan(0);
+    expect(d).toBeLessThanOrEqual(12 * 10);
+    // Reine Normalstrecke wäre 12 Felder = 120; mit Zeitkosten liefert die Karte ein Vielfaches von Zehnteln
+    expect(sim.stepCost(sim.idx(8, k + 4))).toBeLessThan(10);
+  });
+});
+
+describe('Weiterbildung und Vorziehen', () => {
+  it('Weiterbildung kostet, hebt die Erfahrung und lässt eine Kraft fehlen', () => {
+    const sim = basicPort(2, 1);
+    sim.money = 1e6;
+    const avail = sim.staffAvail('driver');
+    const xp = sim.xp.driver;
+    expect(sim.train('driver').ok).toBe(true);
+    expect(sim.xp.driver).toBeGreaterThan(xp);
+    expect(sim.staffAvail('driver')).toBe(avail - 1);
+    expect(sim.train('driver').ok).toBe(false);
+    run(sim, 24 * 4);
+    expect(sim.trainLeft.driver).toBe(0);
+  });
+
+  it('ein vorgezogenes Schiff bekommt den freien Liegeplatz zuerst', () => {
+    const sim = basicPort(2, 1);
+    sim.money = 1e6;
+    sim.ships = [];
+    const add = (sim as unknown as { addShip(t: string, c: null, r: boolean): void }).addShip.bind(sim);
+    add('coaster', null, false);
+    add('coaster', null, false);
+    const second = sim.ships[1];
+    expect(sim.prioritize(second.id).ok).toBe(true);
+    sim.tick();
+    expect(second.state).toBe('sailing');
+    expect(sim.ships[0].state).toBe('queued');
+  });
+});
+
+describe('Sandbox', () => {
+  it('Sandbox-Zustand wird gespeichert und hat kein Ende', () => {
+    const sim = new Sim(1, 'easy');
+    sim.sandbox = true;
+    sim.status = 'free';
+    sim.gm += 200 * 1440;
+    run(sim, 24);
+    expect(sim.status).toBe('free');
+    const copy = Sim.deserialize(JSON.parse(JSON.stringify(sim.serialize())));
+    expect(copy.sandbox).toBe(true);
   });
 });

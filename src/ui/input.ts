@@ -99,7 +99,7 @@ export function setupInput(game: Game, el: HTMLElement) {
     const wantPan = e.button === 1 || e.button === 2;
     if (wantPan) {
       mode = 'pan';
-    } else if (game.tool === 'assign') {
+    } else if (game.tool === 'assign' || game.tool === 'copy') {
       mode = 'rect';
       const t = tileOf(p);
       game.rect = { x0: t.x, y0: t.y, x1: t.x, y1: t.y };
@@ -196,7 +196,8 @@ export function setupInput(game: Game, el: HTMLElement) {
     } else if (mode === 'paint') {
       finishPaint();
     } else if (mode === 'rect' && game.rect) {
-      game.assignRect(game.rect);
+      if (game.tool === 'copy') game.copyRect(game.rect);
+      else game.assignRect(game.rect);
       game.rect = null;
     }
     if (ptrs.size === 0) {

@@ -11,6 +11,8 @@ export interface View {
   hover: { x: number; y: number; ok: boolean } | null;
   /** Die Vorschau ist festgesetzt und wartet auf den zweiten Klick */
   ghost: boolean;
+  /** Blaupause, die gerade eingefügt werden soll (für die Vorschau) */
+  bp?: { w: number; h: number; items: { dx: number; dy: number; tool: string; rot?: boolean }[] } | null;
   selected: { kind: 'ship' | 'crane' | 'gate' | 'yard' | 'reefer' | 'hazmat' | 'emptyyard' | 'rail' | 'plant' | 'shop' | 'truck'; id: number } | null;
   /** Anteil zwischen letztem und nächstem Tick (0..1) für weiche Bewegung. */
   alpha: number;
@@ -1868,6 +1870,20 @@ export class Renderer {
       }
     }
     this.drawSites(g, sim, view.time);
+    // Rauch über arbeitenden Hallen und aus den Schornsteinen der Schiffe am Kai
+    const puff = (px: number, py: number, seed: number, size: number) => {
+      for (let k = 0; k < 4; k++) {
+        const u = (view.time * 0.35 + k / 4 + seed * 0.37) % 1;
+        const wind = Math.sin(seed + view.time * 0.3) * 6;
+        g.circle(px + u * 16 + wind * u, py - u * 26, size * (0.5 + u * 0.9)).fill({ color: 0xe9edf1, alpha: 0.42 * (1 - u) });
+      }
+    };
+    for (const p of sim.plants) if (p.proc > 0 && !p.build) puff((p.x + p.w - 0.5) * TILE - 6, p.y * TILE + 6, p.id, 4);
+    for (const sh of sim.ships) {
+      if (sh.state !== 'unloading') continue;
+      const b = sim.shipBox(sh);
+      puff((b.x + b.w * 0.5) * TILE, (b.y + b.h * 0.5) * TILE - 4, sh.id, 3.2);
+    }
     this.drawWaitBars(g, sim, a);
     if (view.selected) this.drawSelection(g, sim, view.selected, a, view.time);
 
@@ -1876,13 +1892,21 @@ export class Renderer {
       const { x, y, ok } = view.hover;
       if (x >= 0 && y >= 0 && x < GRID_W && y < GRID_H) {
         const col = view.tool === 'demolish' || !ok ? C.bad : C.good;
-        const [fw, fh] = view.tool === 'hwy' ? (sim.rot ? [2, 1] : [1, 2]) : dimsOf(view.tool, sim.rot);
+        const [fw, fh] = view.tool === 'paste' && view.bp ? [view.bp.w, view.bp.h] : view.tool === 'hwy' ? (sim.rot ? [2, 1] : [1, 2]) : dimsOf(view.tool, sim.rot);
         // Festgesetzte Vorschau pulsiert und hat einen dicken Rahmen mit Eckmarken
         const pulse = view.ghost ? 0.5 + 0.25 * Math.sin(view.time * 6) : 0.38;
         g.roundRect(x * TILE, y * TILE, fw * TILE, fh * TILE, 3).fill({ color: col, alpha: pulse });
         g.roundRect(x * TILE + 1, y * TILE + 1, fw * TILE - 2, fh * TILE - 2, 3).stroke({ width: view.ghost ? 3 : 2, color: 0xffffff, alpha: 0.95 });
         if (view.ghost) {
           for (const [cx, cy] of [[x, y], [x + fw, y], [x, y + fh], [x + fw, y + fh]]) g.circle(cx * TILE, cy * TILE, 4.5).fill(0xffffff).stroke({ width: 1.5, color: ok ? C.good : C.bad });
+        }
+        // Blaupause: jedes Teil als Farbfläche
+        if (view.tool === 'paste' && view.bp) {
+          const col: Record<string, number> = { kai: 0xb8b2a3, road: 0x59606a, road2: 0x4a5560, hwy: 0x2f6db0, yard: 0xc9b88a, reefer: 0x3b9bd6, hazard: 0xe8602c, emptyyard: 0x7d8da0, gate: 0xd9534f, unpack: 0xc98a3c, pack: 0x7a5cc7, cold: 0x3b9bd6, fill: 0x3f9a6b, workshop: 0x5b6b82, rtg: 0xf2a030, crane: 0xe2582c, lcrane: 0xe0a526 };
+          for (const it of view.bp.items) {
+            const [iw, ih] = dimsOf(it.tool, !!it.rot);
+            g.rect((x + it.dx) * TILE + 3, (y + it.dy) * TILE + 3, iw * TILE - 6, ih * TILE - 6).fill({ color: col[it.tool] ?? 0x888888, alpha: 0.75 });
+          }
         }
         // Autobahn: Fahrtrichtung der beiden Spuren andeuten
         if (view.tool === 'hwy') {

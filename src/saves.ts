@@ -47,7 +47,7 @@ function read(slot: Slot): Stored | null {
 }
 
 export function metaOf(sim: Sim): Meta {
-  return { t: Date.now(), day: sim.day, level: sim.level, levelName: sim.levelName, money: Math.round(sim.money), diff: sim.diff, map: sim.map, scenario: sim.scenario, status: sim.status };
+  return { t: Date.now(), day: sim.day, level: sim.level, levelName: sim.levelName, money: Math.round(sim.money), diff: sim.sandbox ? 'Sandbox' : sim.diff, map: sim.map, scenario: sim.scenario, status: sim.status };
 }
 
 export function writeSlot(slot: Slot, sim: Sim): boolean {

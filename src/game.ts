@@ -10,6 +10,29 @@ import { GameEvent, Removed, Sim } from './sim/sim';
 import type { UI } from './ui/ui';
 
 import { latestSlot, loadSettings, readSlot, saveSettings, Settings, Slot, writeSlot } from './saves';
+interface BpItem {
+  dx: number;
+  dy: number;
+  tool: BuildTool;
+  rot?: boolean;
+  ow?: number;
+}
+export interface Blueprint {
+  w: number;
+  h: number;
+  items: BpItem[];
+}
+const BP_KEY = 'hafen-imperium-blueprint';
+const BP_ORDER: BuildTool[] = ['kai', 'road', 'road2', 'hwy', 'yard', 'reefer', 'hazard', 'emptyyard', 'gate', 'unpack', 'pack', 'cold', 'fill', 'workshop', 'rtg', 'crane', 'lcrane'];
+function loadBp(): Blueprint | null {
+  try {
+    const raw = localStorage.getItem(BP_KEY);
+    return raw ? (JSON.parse(raw) as Blueprint) : null;
+  } catch {
+    return null;
+  }
+}
+
 export const PAINT_TOOLS: Tool[] = ['kai', 'road', 'road2', 'hwy', 'yard', 'reefer', 'hazard', 'emptyyard', 'dredge', 'zone', 'demolish'];
 
 /** So lange (in Spielminuten) lässt sich eine Bauaktion rückgängig machen. */
@@ -42,6 +65,8 @@ export class Game {
   hover: View['hover'] = null;
   /** Festgesetzte Vorschau: erst ein zweiter Klick baut wirklich */
   ghost: { x: number; y: number } | null = null;
+  /** Kopierter Bauplan (bleibt im Browser gespeichert) */
+  blueprint: Blueprint | null = loadBp();
   /** Aufgabe, die die Sammelzuweisung vergibt */
   assignRole: TruckRole = 'crane';
   /** Zone, die das Zonen-Werkzeug vergibt (0 = entfernen) */
@@ -88,6 +113,7 @@ export class Game {
       tool: this.tool,
       hover: this.hover,
       ghost: !!this.ghost,
+      bp: this.tool === 'paste' ? this.blueprint : null,
       selected: this.selected,
       alpha: this.speed > 0 ? this.acc : 1,
       time: this.time,
@@ -238,6 +264,16 @@ export class Game {
     this.sound.play('upgrade');
     this.ui.toast('Generalüberholung läuft. Das Gerät ist eine Weile außer Betrieb.', 'good');
   }
+  prioritizeShip(id: number) {
+    const r = this.sim.prioritize(id);
+    if (!r.ok) return this.fail(r.reason ?? 'Nicht möglich');
+    this.sound.play('upgrade');
+  }
+  trainRole(role: Role) {
+    const r = this.sim.train(role);
+    if (!r.ok) return this.fail(r.reason ?? 'Nicht möglich');
+    this.sound.play('upgrade');
+  }
   buyTech(id: TechId) {
     const r = this.sim.buyTech(id);
     if (!r.ok) return this.fail(r.reason ?? 'Nicht möglich');
@@ -282,6 +318,25 @@ export class Game {
     this.sim = new Sim(Math.floor(Math.random() * 1e9), diff, mode === 'demo' ? 'coast' : map);
     if (mode === 'demo') buildDemo(this.sim);
     this.sim.limitLand();
+    this.resetTransient();
+    this.setTool('view');
+    this.setSpeed(1);
+    this.inGame = true;
+    this.fitCamera();
+    this.save();
+  }
+
+  /** Sandbox: Startgeld frei wählbar, alle Werkzeuge, keine Frist und keine Pleite */
+  newSandbox(money: number, map: MapId = 'coast') {
+    this.sim = new Sim(Math.floor(Math.random() * 1e9), 'easy', map);
+    this.sim.sandbox = true;
+    this.sim.status = 'free';
+    this.sim.level = 5;
+    this.sim.money = money;
+    this.sim.mission = 30;
+    this.sim.limitLand();
+    this.sim.owned.fill(1);
+    this.sim.nextShipIn = 5;
     this.resetTransient();
     this.setTool('view');
     this.setSpeed(1);
@@ -370,7 +425,8 @@ export class Game {
 
   /** Wendet das aktive Werkzeug auf ein Feld an. Liefert den Fehlergrund oder null bei Erfolg. */
   applyTool(x: number, y: number): string | null {
-    if (this.tool === 'view' || this.tool === 'assign') return null;
+    if (this.tool === 'view' || this.tool === 'assign' || this.tool === 'copy') return null;
+    if (this.tool === 'paste') return this.pasteAt(x, y);
     if (this.tool === 'zone') {
       const r = this.sim.setZone(x, y, this.zonePick);
       if (!r.ok) return r.reason ?? 'Nicht möglich';
@@ -429,14 +485,94 @@ export class Game {
     return null;
   }
 
+  // ───────────────────────── Blaupausen ─────────────────────────
+
+  /** Kopiert alles im Rahmen: Kai, Straßen (mit Ausbau und Einbahn), Lager, Gebäude, Kräne. Trucks, Zonen und Aufrüstungen nicht. */
+  copyRect(r: NonNullable<View['rect']>) {
+    const x0 = Math.min(r.x0, r.x1);
+    const x1 = Math.max(r.x0, r.x1);
+    const y0 = Math.min(r.y0, r.y1);
+    const y1 = Math.max(r.y0, r.y1);
+    const sim = this.sim;
+    const inside = (x: number, y: number, w = 1, h = 1) => x >= x0 && y >= y0 && x + w - 1 <= x1 && y + h - 1 <= y1;
+    const items: BpItem[] = [];
+    const add = (tool: BuildTool, x: number, y: number, extra: Partial<BpItem> = {}) => items.push({ dx: x - x0, dy: y - y0, tool, ...extra });
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const i = sim.idx(x, y);
+        const k = sim.kind[i];
+        if (k === T.Kai) add('kai', x, y);
+        else if (k === T.Road) add(sim.roadTier[i] === 2 ? 'hwy' : sim.roadTier[i] === 1 ? 'road2' : 'road', x, y, sim.oneway[i] >= 0 ? { ow: sim.oneway[i] } : {});
+        else if (k === T.Yard) add('yard', x, y);
+        else if (k === T.Reefer) add('reefer', x, y);
+        else if (k === T.Hazmat) add('hazard', x, y);
+        else if (k === T.Empty) add('emptyyard', x, y);
+      }
+    }
+    for (const gt of sim.gates) if (inside(gt.x, gt.y, gt.w, gt.h)) add('gate', gt.x, gt.y, { rot: gt.h > gt.w });
+    for (const p of sim.plants) if (inside(p.x, p.y, p.w, p.h)) add(p.kind, p.x, p.y, { rot: p.w !== sizeOf(p.kind)[0] });
+    for (const s of sim.shops) if (inside(s.x, s.y, s.w, s.h)) add('workshop', s.x, s.y);
+    for (const t of sim.rtgs) if (inside(t.x, t.y)) add('rtg', t.x, t.y);
+    for (const c of sim.cranes) if (inside(c.x, c.y)) add(c.model === 'light' ? 'lcrane' : 'crane', c.x, c.y);
+    if (!items.length) return this.fail('Im Rahmen ist nichts zum Kopieren');
+    this.blueprint = { w: x1 - x0 + 1, h: y1 - y0 + 1, items };
+    try {
+      localStorage.setItem(BP_KEY, JSON.stringify(this.blueprint));
+    } catch {
+      /* nur für diese Sitzung */
+    }
+    this.ui.toast(`${items.length} Teile kopiert. Mit „Einfügen“ setzt du sie irgendwo hin.`, 'good');
+    this.sound.play('upgrade');
+    this.setTool('paste');
+  }
+
+  /** Geschätzte Kosten der Blaupause zu heutigen Preisen */
+  bpCost(): number {
+    return (this.blueprint?.items ?? []).reduce((n, it) => n + this.sim.costOf(it.tool), 0);
+  }
+
+  private pasteAt(x: number, y: number): string | null {
+    const bp = this.blueprint;
+    if (!bp) return 'Noch nichts kopiert';
+    if (x < 0 || y < 0 || x + bp.w > GRID_W || y + bp.h > GRID_H) return 'Passt nicht auf die Karte';
+    const items = [...bp.items].sort((a, b) => BP_ORDER.indexOf(a.tool) - BP_ORDER.indexOf(b.tool));
+    const rot = this.sim.rot;
+    let ok = 0;
+    let cost = 0;
+    let fail: string | undefined;
+    this.beginStroke();
+    for (const it of items) {
+      const tx = x + it.dx;
+      const ty = y + it.dy;
+      this.sim.rot = !!it.rot;
+      const res = this.sim.build(it.tool, tx, ty);
+      if (!res.ok) {
+        fail ??= res.reason;
+        continue;
+      }
+      ok++;
+      cost += res.cost;
+      if (it.ow !== undefined) this.sim.setOneway(tx, ty, it.ow);
+      this.record({ kind: 'build', tool: it.tool, x: tx, y: ty, truckId: res.truckId, prev: res.prev });
+    }
+    this.endStroke();
+    this.sim.rot = rot;
+    if (!ok) return fail ?? 'Nichts gebaut';
+    this.renderer.addPop(x, y, 'build');
+    this.sound.play('buildBig');
+    this.ui.toast(`${ok} von ${items.length} Teilen gebaut${fail ? ` (${fail})` : ''}: −${cost.toLocaleString('de-DE')} €`, ok === items.length ? 'good' : 'info');
+    return null;
+  }
+
   // ───────────────────────── Vorschau mit Bestätigung ─────────────────────────
 
   /** Große Bauten werden erst als Vorschau gesetzt, verschoben und mit einem zweiten Klick gebaut. */
   needsConfirm(tool: Tool = this.tool): boolean {
-    return ['crane', 'lcrane', 'gate', 'unpack', 'pack', 'cold', 'fill', 'workshop', 'rtg', 'rail', 'truck'].includes(tool);
+    return ['paste', 'crane', 'lcrane', 'gate', 'unpack', 'pack', 'cold', 'fill', 'workshop', 'rtg', 'rail', 'truck'].includes(tool);
   }
   /** Größe der Vorschau in Feldern */
   ghostSize(): [number, number] {
+    if (this.tool === 'paste') return this.blueprint ? [this.blueprint.w, this.blueprint.h] : [1, 1];
     return dimsOf(this.tool, this.sim.rot);
   }
   inGhost(x: number, y: number): boolean {
@@ -616,6 +752,7 @@ export class Game {
     if (this.tool === 'oneway') return this.sim.kind[this.sim.idx(x, y)] === T.Road;
     if (this.tool === 'buyland') return x >= 0 && x < GRID_W && !this.sim.owned[x];
     if (this.tool === 'demolish') return this.sim.canDemolish(x, y).ok;
+    if (this.tool === 'paste') return !!this.blueprint && x >= 0 && y >= 0 && x + this.blueprint.w <= GRID_W && y + this.blueprint.h <= GRID_H;
     if (this.tool === 'hwy') {
       const b = this.sim.rot ? { x: x + 1, y } : { x, y: y + 1 };
       return this.sim.canBuild('hwy', x, y).ok && this.sim.canBuild('hwy', b.x, b.y).ok;

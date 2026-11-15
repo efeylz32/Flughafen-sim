@@ -30,8 +30,8 @@ export enum T {
   Empty = 12,
 }
 
-export type Tool = 'view' | 'kai' | 'crane' | 'lcrane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'road2' | 'hwy' | 'rtg' | 'hazard' | 'emptyyard' | 'fill' | 'assign' | 'zone' | 'oneway' | 'buyland' | 'demolish';
-export type BuildTool = Exclude<Tool, 'view' | 'demolish' | 'assign' | 'zone' | 'oneway' | 'buyland'>;
+export type Tool = 'view' | 'kai' | 'crane' | 'lcrane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'road2' | 'hwy' | 'rtg' | 'hazard' | 'emptyyard' | 'fill' | 'assign' | 'copy' | 'paste' | 'zone' | 'oneway' | 'buyland' | 'demolish';
+export type BuildTool = Exclude<Tool, 'view' | 'demolish' | 'assign' | 'copy' | 'paste' | 'zone' | 'oneway' | 'buyland'>;
 
 export const COST: Record<BuildTool, number> = {
   kai: 5_000,
@@ -459,3 +459,5 @@ export const ROAD_SPEED = [1, 1, 1.7];
 export const ROAD_LANES = [1, 2, 2];
 /** Betrieb pro Feld und Tag */
 export const ROAD_RUN = [0, 6, 20];
+/** Entfernungen werden in Zehnteln eines Feldes gerechnet, damit schnelle Straßen Bruchteile kosten */
+export const DIST_UNIT = 10;

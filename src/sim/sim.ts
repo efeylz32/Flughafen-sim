@@ -39,6 +39,7 @@ import {
   GRID_W,
   LEVELS,
   ROAD_SPEED,
+  DIST_UNIT,
   ROAD_LANES,
   ROAD_RUN,
   HAZ_FEE,
@@ -347,6 +348,8 @@ export interface Ship {
   reason: string;
   /** Das Schiff kommt nicht voran und braucht die Aufmerksamkeit des Spielers. */
   blocked: boolean;
+  /** Vorgezogen: bekommt den nächsten freien Liegeplatz */
+  vip?: boolean;
 }
 
 export interface Contract {
@@ -530,6 +533,8 @@ export interface SaveData {
   cycle?: { kind: CycleKind; left: number };
   usedMarket?: { factor: number; lo: number; hi: number; label: string };
   nextInspect?: number;
+  sandbox?: boolean;
+  trainLeft?: Record<Role, number>;
   tech?: Partial<Record<TechId, number>>;
   megaDone?: number;
   shipsDone: number;
@@ -683,6 +688,10 @@ export class Sim {
   /** Heutiges Gebrauchtangebot: Preisfaktor und Spanne des Höchstzustands */
   usedMarket = { factor: 0.5, lo: 0.5, hi: 0.75, label: 'Durchschnittliche Ware' };
   nextInspect = 12;
+  /** Sandbox: frei bauen, keine Frist, keine Pleite */
+  sandbox = false;
+  /** Tage, die eine Weiterbildung noch läuft (eine Kraft fehlt) */
+  trainLeft: Record<Role, number> = { driver: 0, crane: 0, gate: 0, mech: 0 };
   /** Gebäude beim nächsten Bauen gedreht (Breite und Höhe getauscht). Nur Bedienung, wird nicht gespeichert. */
   rot = false;
 
@@ -1002,33 +1011,81 @@ export class Sim {
   }
 
   /** Abstandskarte (in Feldern) über das Straßennetz zum Zielfeld. -1 = nicht erreichbar. */
+  /** Kosten, ein Feld zu befahren, in Zehnteln einer Normalstraße: Autobahnen sind schneller. */
+  stepCost(tile: number): number {
+    return Math.round(DIST_UNIT / ROAD_SPEED[this.roadTier[tile]]);
+  }
+
+  /** Fahrzeit-Karte über das Straßennetz zum Zielfeld (Dijkstra, in Zehnteln eines Feldes). -1 = nicht erreichbar. */
   distMap(target: number): Int16Array {
     let d = this.distCache.get(target);
     if (d) return d;
     d = new Int16Array(GRID_W * GRID_H).fill(-1);
     if (this.kind[target] === T.Road) {
-      const q: number[] = [target];
+      // Kleiner Binärhaufen aus [Kosten, Feld]
+      const heap: number[] = [];
+      const push = (cost: number, node: number) => {
+        let k = heap.length;
+        heap.push(cost * 4096 + node);
+        while (k > 0) {
+          const p = (k - 1) >> 1;
+          if (heap[p] <= heap[k]) break;
+          [heap[p], heap[k]] = [heap[k], heap[p]];
+          k = p;
+        }
+      };
+      const pop = (): number => {
+        const top = heap[0];
+        const last = heap.pop()!;
+        if (heap.length) {
+          heap[0] = last;
+          let k = 0;
+          for (;;) {
+            const l = 2 * k + 1;
+            const r = l + 1;
+            let m = k;
+            if (l < heap.length && heap[l] < heap[m]) m = l;
+            if (r < heap.length && heap[r] < heap[m]) m = r;
+            if (m === k) break;
+            [heap[m], heap[k]] = [heap[k], heap[m]];
+            k = m;
+          }
+        }
+        return top;
+      };
       d[target] = 0;
-      for (let qi = 0; qi < q.length; qi++) {
-        const c = q[qi];
+      push(0, target);
+      const done = new Uint8Array(d.length);
+      while (heap.length) {
+        const top = pop();
+        const c = top % 4096;
+        const cost = (top - c) / 4096;
+        if (done[c]) continue;
+        done[c] = 1;
         const cx = c % GRID_W;
         const cy = (c / GRID_W) | 0;
         // Von n nach c wird in Richtung dir gefahren: n westlich von c heißt Fahrt nach Osten usw.
         const cand = [cx > 0 ? c - 1 : -1, cx < GRID_W - 1 ? c + 1 : -1, cy > 0 ? c - GRID_W : -1, cy < GRID_H - 1 ? c + GRID_W : -1];
         const dirs = [0, 2, 1, 3];
-        const ow = this.oneway;
         for (let ci = 0; ci < 4; ci++) {
           const n = cand[ci];
-          const dir = dirs[ci];
-          if (n >= 0 && d[n] < 0 && this.kind[n] === T.Road && (ow[n] < 0 || ow[n] === dir) && (ow[c] < 0 || ow[c] !== (dir + 2) % 4)) {
-            d[n] = d[c] + 1;
-            q.push(n);
+          if (n < 0 || done[n] || !this.canStep(n, c, dirs[ci])) continue;
+          const nc = cost + this.stepCost(c);
+          if (d[n] < 0 || nc < d[n]) {
+            d[n] = nc;
+            push(nc, n);
           }
         }
       }
     }
     this.distCache.set(target, d);
     return d;
+  }
+
+  /** Darf ein Truck von Feld n nach Feld c fahren (Richtung dir)? Beachtet Einbahnen. */
+  canStep(n: number, c: number, dir: number): boolean {
+    const ow = this.oneway;
+    return this.kind[n] === T.Road && this.kind[c] === T.Road && (ow[n] < 0 || ow[n] === dir) && (ow[c] < 0 || ow[c] !== (dir + 2) % 4);
   }
 
   private touch() {
@@ -1982,7 +2039,7 @@ export class Sim {
     // Jede Fahrt gehört zu einer Aufgabe. Trucks mit fester Aufgabe nehmen nur die passenden.
     const offer = (tag: string, weight: number, dist: number, job: Job) => {
       if (job.n <= 0 || (t.role !== 'auto' && !tag.includes(t.role))) return;
-      const score = weight / (1 + dist / 15);
+      const score = weight / (1 + dist / (15 * DIST_UNIT));
       if (score > bestScore) {
         bestScore = score;
         best = job;
@@ -2375,7 +2432,7 @@ export class Sim {
       let pickDir = -1;
       for (let dir = 0; dir < 4; dir++) {
         const n = cand[dir];
-        if (n < 0 || d[n] !== here - 1) continue;
+        if (n < 0 || d[n] < 0 || d[n] + this.stepCost(n) !== here || !this.canStep(t.tile, n, dir)) continue;
         // Unter gleich kurzen Wegen den nehmen, dessen Spur frei ist
         const free = this.lane[n * 4 + dir] < this.laneCap(n, dir);
         if (pick < 0 || free) {
@@ -2473,13 +2530,52 @@ export class Sim {
   /** Angestellt und nicht krank */
   staffAvail(role: Role): number {
     if (role === 'driver' && this.strikeLeft > 0) return 0;
-    return Math.max(0, this.staff[role] - this.sick[role].length);
+    return Math.max(0, this.staff[role] - this.sick[role].length - (this.trainLeft[role] > 0 ? 1 : 0));
   }
   wagePerHour(role: Role): number {
     // Größere Häfen zahlen Tariflohn: +8 % je Stufe
     const night = this.nightShift && this.isNight ? NIGHT_WAGE : 1;
     return Math.round(ROLES[role].wage * DIFFS[this.diff].wage * this.wageBoost[role] * (1 + 0.08 * (Math.min(this.level, 7) - 1)) * WAGE_POLICY[this.wagePolicy].mul * night);
   }
+  /** Ein wartendes Schiff vorziehen: kostet Lotsengebühr, die anderen Wartenden werden ungeduldiger */
+  prioritize(id: number): BuildCheck {
+    const cost = Math.round((3_000 * this.inflation) / 500) * 500;
+    const s = this.ships.find((x) => x.id === id);
+    if (!s || s.state !== 'queued') return { ok: false, reason: 'Nur wartende Schiffe lassen sich vorziehen', cost };
+    if (s.vip) return { ok: false, reason: 'Das Schiff ist schon vorgezogen', cost };
+    if (this.money < cost) return { ok: false, reason: 'Zu wenig Geld', cost };
+    this.money -= cost;
+    this.today.building += cost;
+    s.vip = true;
+    s.queuedFor = Math.max(0, s.queuedFor - 60);
+    for (const o of this.ships) if (o !== s && o.state === 'queued') o.queuedFor += 45;
+    this.emit(`${s.name} wird vorgezogen (Lotsengebühr ${eur(cost)}). Die anderen Wartenden werden ungeduldiger.`, 'info');
+    return { ok: true, cost };
+  }
+
+  /** Weiterbildung: Die Belegschaft einer Rolle wird erfahrener, einer fehlt dafür ein paar Tage */
+  trainCost(_role?: Role): number {
+    return Math.round((9_000 * this.inflation) / 500) * 500;
+  }
+  canTrain(role: Role): BuildCheck {
+    const cost = this.trainCost(role);
+    if (this.staff[role] <= 0) return { ok: false, reason: 'Niemand angestellt', cost };
+    if (this.trainLeft[role] > 0) return { ok: false, reason: `Läuft noch ${this.trainLeft[role]} Tage`, cost };
+    if (this.xp[role] >= 0.98) return { ok: false, reason: 'Schon voll ausgebildet', cost };
+    if (this.money < cost) return { ok: false, reason: 'Zu wenig Geld', cost };
+    return { ok: true, cost };
+  }
+  train(role: Role): BuildCheck {
+    const chk = this.canTrain(role);
+    if (!chk.ok) return chk;
+    this.money -= chk.cost;
+    this.today.building += chk.cost;
+    this.xp[role] = Math.min(1, this.xp[role] + 0.2);
+    this.trainLeft[role] = 3;
+    this.emit(`${ROLES[role].name}: Weiterbildung läuft 3 Tage. Eine Kraft fehlt solange.`, 'info');
+    return chk;
+  }
+
   /** Neue Leute fangen mit wenig Erfahrung an und verdünnen den Schnitt der Belegschaft */
   private addStaff(role: Role) {
     const n = this.staff[role];
@@ -2797,7 +2893,9 @@ export class Sim {
   private updateShips(dt: number) {
     const fog = this.weather === 'fog';
     if (!fog) {
-      for (const s of this.ships) {
+      // Vorgezogene Schiffe zuerst, sonst in der Reihenfolge der Ankunft
+      const order = [...this.ships].sort((a, b) => Number(!!b.vip) - Number(!!a.vip));
+      for (const s of order) {
         if (s.state !== 'queued') continue;
         const b = this.findBerth(s.len, SHIP_TYPES[s.type].deep);
         if (b < 0) continue;
@@ -3678,6 +3776,7 @@ export class Sim {
 
   /** Täglich: Erfahrung, Stimmung, Konjunktur, Gebrauchtmarkt, Lagergebühren, Kontrollen, Spezialisierung */
   private rollWorld() {
+    for (const r of Object.keys(ROLES) as Role[]) if (this.trainLeft[r] > 0) this.trainLeft[r]--;
     // Erfahrung wächst
     for (const r of Object.keys(ROLES) as Role[]) this.xp[r] += (1 - this.xp[r]) * 0.03;
     // Stimmung strebt ihrem Ziel zu
@@ -3818,6 +3917,8 @@ export class Sim {
       cycle: this.cycle,
       usedMarket: this.usedMarket,
       nextInspect: this.nextInspect,
+      sandbox: this.sandbox,
+      trainLeft: this.trainLeft,
       tech: this.tech,
       megaDone: this.megaDone,
       shipsDone: this.shipsDone,
@@ -3924,6 +4025,8 @@ export class Sim {
     if (d.cycle) s.cycle = d.cycle;
     if (d.usedMarket) s.usedMarket = d.usedMarket;
     s.nextInspect = d.nextInspect ?? 12;
+    s.sandbox = d.sandbox ?? false;
+    if (d.trainLeft) s.trainLeft = { ...s.trainLeft, ...d.trainLeft };
     s.bigShipsDone = d.bigShipsDone ?? 0;
     if (d.tech) s.tech = { ...s.tech, ...d.tech };
     s.megaDone = d.megaDone ?? 0;
