@@ -75,6 +75,7 @@ Alle Werte stehen in `src/sim/data.ts`. Das Balancing ist grob und noch nicht du
 
 ## Menü und Spielstände
 
+- **Hintergrund:** Hinter dem Hauptmenü läuft ein voller Schauhafen (Kräne, Schiffe, Trucks, Hallen), über den die Kamera langsam wie eine Drohne gleitet.
 - **Hauptmenü** beim Start: Weiterspielen (letzter Stand), Neues Spiel, Spielstand laden, Erfolge, Einstellungen, Hilfe.
 - **Menü-Knopf im Spiel** (Pause): Spielstand-Übersicht, Speichern und Laden, Einstellungen, Erfolge, Hilfe, Neues Spiel, Zurück zum Hauptmenü.
 - **Spielstände:** 3 Speicherplätze und ein Autosave (alle 30 Sekunden, jeden Tag, beim Verlassen des Tabs und beim Zurück zum Hauptmenü). Alles liegt nur im Browser (localStorage).

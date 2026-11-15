@@ -629,9 +629,18 @@ export class UI {
     this.renderMenu();
     this.menu.classList.remove('hidden');
     this.game.setSpeed(0);
+    if (this.menuView === 'main' && !this.game.showcase) this.enterShowcase();
+  }
+  private enterShowcase() {
+    this.game.startShowcase();
+    this.root.classList.add('showcase');
   }
   hideMenu() {
     this.menu.classList.add('hidden');
+    if (this.game.showcase) {
+      this.game.endShowcase();
+      this.root.classList.remove('showcase');
+    }
     if (this.game.speed === 0) this.game.setSpeed(this.game.lastSpeed || 1);
   }
 
@@ -673,6 +682,7 @@ export class UI {
         // Beim Verlassen wird gespeichert, damit „Weiterspielen“ hier weitermacht
         g.save();
         this.menuView = 'main';
+        this.enterShowcase();
         break;
       case 'save': {
         const slot = arg as Slot;
@@ -753,7 +763,7 @@ export class UI {
         const last = latestSlot();
         const m = last ? metaOfSlot(last) : null;
         body = `
-          <h1>Hafen-Imperium</h1>
+          <h1 class="title">Hafen-Imperium</h1>
           <p class="sub">Vom Anleger zum Weltklasse-Hafen</p>
           ${note}
           ${m ? `<button class="primary resume" data-act="resume">Weiterspielen<small>Tag ${m.day} · ${m.levelName} · ${eur(m.money)}</small></button>` : ''}

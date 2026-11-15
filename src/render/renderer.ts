@@ -11,6 +11,8 @@ export interface View {
   hover: { x: number; y: number; ok: boolean } | null;
   /** Die Vorschau ist festgesetzt und wartet auf den zweiten Klick */
   ghost: boolean;
+  /** Hauptmenü-Hintergrund: keine Warnzeichen, Staumarkierungen und Balken */
+  calm?: boolean;
   /** Blaupause, die gerade eingefügt werden soll (für die Vorschau) */
   bp?: { w: number; h: number; items: { dx: number; dy: number; tool: string; rot?: boolean }[] } | null;
   selected: { kind: 'ship' | 'crane' | 'gate' | 'yard' | 'reefer' | 'hazmat' | 'emptyyard' | 'rail' | 'plant' | 'shop' | 'truck'; id: number } | null;
@@ -1221,7 +1223,7 @@ export class Renderer {
       }
       // Leichtes Schaukeln am Liegeplatz, stärker bei Sturm
       v.body.position.y = moving ? 0 : Math.sin(view.time * 1.4 + s.id) * (0.5 + this.stormA * 1.5);
-      v.alert.visible = s.blocked;
+      v.alert.visible = s.blocked && !view.calm;
       if (s.blocked) v.alert.scale.set(1 + Math.sin(view.time * 6) * 0.12);
     }
     for (const [id, v] of this.ships) {
@@ -1679,7 +1681,7 @@ export class Renderer {
     // Stau: Felder, auf denen Trucks zuletzt warten mussten, färben sich rot
     for (let i = COAST_ROW * GRID_W; i < sim.roadJam.length; i++) {
       const j = sim.roadJam[i];
-      if (j < 1.2 || sim.kind[i] !== T.Road) continue;
+      if (view.calm || j < 1.2 || sim.kind[i] !== T.Road) continue;
       g.rect((i % GRID_W) * TILE, ((i / GRID_W) | 0) * TILE, TILE, TILE).fill({ color: C.bad, alpha: Math.min(0.42, 0.1 + j * 0.035) });
     }
 
@@ -1884,7 +1886,7 @@ export class Renderer {
       const b = sim.shipBox(sh);
       puff((b.x + b.w * 0.5) * TILE, (b.y + b.h * 0.5) * TILE - 4, sh.id, 3.2);
     }
-    this.drawWaitBars(g, sim, a);
+    if (!view.calm) this.drawWaitBars(g, sim, a);
     if (view.selected) this.drawSelection(g, sim, view.selected, a, view.time);
 
     // Bau-Vorschau

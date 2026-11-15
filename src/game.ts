@@ -3,7 +3,7 @@ import { Renderer, View } from './render/renderer';
 import { BuildTool, DiffId, GRID_H, GRID_W, MapId, ProductId, Role, ROLE_NAMES, T, TICKS_PER_SEC, TILE, Tool, TruckRole } from './sim/data';
 import { Progress } from './achievements';
 import { CRANE_MODELS, DIFFS, dimsOf, MAPS, movesPerHour, sizeOf, TechId } from './sim/data';
-import { buildDemo } from './sim/demo';
+import { buildDemo, buildShowcase } from './sim/demo';
 import { setupScenario } from './sim/scenario-setup';
 import { SCENARIOS } from './sim/scenarios';
 import { GameEvent, Removed, Sim } from './sim/sim';
@@ -79,6 +79,8 @@ export class Game {
   settings: Settings = loadSettings();
   /** Läuft schon ein Spiel (neu gestartet oder geladen)? */
   inGame = false;
+  /** Hauptmenü: Ein Schauhafen läuft im Hintergrund, die Kamera schwebt darüber */
+  showcase = false;
   private undoStack: UndoGroup[] = [];
   private stroke: UndoGroup | null = null;
   /** Einnahmen pro Feld, die gesammelt als ein aufsteigender Text erscheinen */
@@ -93,6 +95,13 @@ export class Game {
   private frame(dtSec: number) {
     dtSec = Math.min(dtSec, 0.1);
     this.time += dtSec;
+    if (this.showcase) {
+      // Drohnenflug: langsames Gleiten und leichtes Zoomen
+      const t = this.time;
+      const r = this.renderer;
+      r.panBy(Math.cos(t * 0.11) * 30 * dtSec, Math.sin(t * 0.17) * 9 * dtSec);
+      r.zoomAt(window.innerWidth / 2, window.innerHeight / 2, Math.exp(Math.cos(t * 0.07) * 0.018 * dtSec * 6));
+    }
     if (this.speed > 0) {
       this.acc += dtSec * TICKS_PER_SEC * this.speed;
       let n = 0;
@@ -113,6 +122,7 @@ export class Game {
       tool: this.tool,
       hover: this.hover,
       ghost: !!this.ghost,
+      calm: this.showcase,
       bp: this.tool === 'paste' ? this.blueprint : null,
       selected: this.selected,
       alpha: this.speed > 0 ? this.acc : 1,
@@ -122,7 +132,7 @@ export class Game {
     });
     this.ui.update(dtSec);
     // Erfolge etwa einmal pro Sekunde prüfen
-    this.achTimer += dtSec;
+    if (!this.showcase) this.achTimer += dtSec;
     if (this.achTimer > 1) {
       this.achTimer = 0;
       for (const a of this.progress.check(this.sim)) {
@@ -138,6 +148,7 @@ export class Game {
   }
 
   private onEvent(e: GameEvent) {
+    if (this.showcase) return;
     if (e.text) this.ui.toast(e.text, e.kind);
     switch (e.tag) {
       case 'container': {
@@ -359,6 +370,24 @@ export class Game {
   fitCamera() {
     const wide = window.innerWidth >= 760;
     this.renderer.fitCamera({ left: wide ? 350 : 0, top: wide ? 70 : 190, right: wide ? 70 : 0, bottom: 150 });
+  }
+
+  /** Zeigt im Hintergrund einen vollen Hafen mit schwebender Kamera */
+  startShowcase() {
+    this.sim = new Sim(20240607, 'easy', 'coast');
+    buildShowcase(this.sim);
+    for (let i = 0; i < 4000; i++) this.sim.tick();
+    this.sim.drainEvents();
+    this.inGame = false;
+    this.showcase = true;
+    this.resetTransient();
+    this.setTool('view');
+    this.fitCamera();
+    this.setSpeed(2);
+  }
+  endShowcase() {
+    this.showcase = false;
+    this.setSpeed(1);
   }
 
   hasSave(): boolean {

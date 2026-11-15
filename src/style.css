@@ -413,3 +413,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .ghostbtns .secondary svg { width: 20px; height: 20px; }
 .ghostbtns .hidden { display: none; }
 @media (max-width: 759px) { .ghostbar { bottom: calc(168px + env(safe-area-inset-bottom, 0px)); } }
+
+/* Hauptmenü über dem Schauhafen */
+#hud.showcase > :not(.modal) { display: none; }
+#hud.showcase > .modal:not(.hidden) { background: linear-gradient(90deg, rgba(8,22,40,.62), rgba(8,22,40,.12) 70%); justify-content: flex-start; padding-left: clamp(16px, 6vw, 90px); }
+#hud.showcase .dialog.menu { background: rgba(255,255,255,.88); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+#hud.showcase .dialog.menu .title { font-size: 34px; letter-spacing: -.01em; }
+@media (max-width: 760px) {
+  #hud.showcase > .modal:not(.hidden) { justify-content: center; padding-left: 16px; background: linear-gradient(0deg, rgba(8,22,40,.6), rgba(8,22,40,.1)); }
+}
