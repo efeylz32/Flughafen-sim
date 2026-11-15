@@ -38,6 +38,9 @@ import {
   GRID_H,
   GRID_W,
   LEVELS,
+  ROAD_SPEED,
+  ROAD_LANES,
+  ROAD_RUN,
   HAZ_FEE,
   HAZ_SHARE,
   EMPTY_FEE,
@@ -443,6 +446,8 @@ export interface BuildCheck {
 }
 
 export interface BuildResult extends BuildCheck {
+  /** Zustand des Feldes vor einem Straßenausbau (Rückgängig stellt ihn wieder her) */
+  prev?: { tier: number; ow: number };
   /** ID des neuen Trucks, damit ein Kauf rückgängig gemacht werden kann. */
   truckId?: number;
 }
@@ -462,6 +467,9 @@ export interface Removed {
   upgraded?: boolean;
   /** Gebäude war gedreht */
   rot?: boolean;
+  /** Straßenart und Einbahnrichtung für Rückgängig */
+  tier?: number;
+  ow?: number;
   model?: CraneModel;
   paid?: number;
   cap?: number;
@@ -490,6 +498,7 @@ export interface SaveData {
   devs?: { cranes: number[][]; trucks: number[][]; gates: number[]; plants: number[]; rails: number[]; rtgs: number[]; shops: number[] };
   zones?: { cranes: number[]; gates: number[]; plants: number[]; rails: number[]; trucks: number[] };
   oneway?: number[];
+  roadTier?: number[];
   owned?: number[];
   plotsBought?: number;
   map?: MapId;
@@ -559,7 +568,7 @@ const covers = (e: Box, x: number, y: number) => x >= e.x && y >= e.y && x < e.x
 const UNLOADING = 'Wird entladen.';
 const LOADING = 'Wird beladen.';
 const emptyBook = (): DayBook => ({ fees: 0, exportFees: 0, rail: 0, berth: 0, bonus: 0, penalty: 0, running: 0, wages: 0, interest: 0, building: 0, handled: 0, ships: 0, onTime: 0, bn: { crane: 0, trucks: 0, yard: 0, gate: 0 }, jamPeak: 0 });
-const TILE_OF: Partial<Record<BuildTool, T>> = { kai: T.Kai, road: T.Road, yard: T.Yard, reefer: T.Reefer, hazard: T.Hazmat, emptyyard: T.Empty, fill: T.Plant, gate: T.Gate, rail: T.Rail, unpack: T.Plant, pack: T.Plant, cold: T.Plant, workshop: T.Shop };
+const TILE_OF: Partial<Record<BuildTool, T>> = { kai: T.Kai, road: T.Road, yard: T.Yard, road2: T.Road, hwy: T.Road, reefer: T.Reefer, hazard: T.Hazmat, emptyyard: T.Empty, fill: T.Plant, gate: T.Gate, rail: T.Rail, unpack: T.Plant, pack: T.Plant, cold: T.Plant, workshop: T.Shop };
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 
 const eur = (n: number) => `${Math.round(n).toLocaleString('de-DE')} €`;
@@ -597,6 +606,8 @@ export class Sim {
   scenario: string | null = null;
   /** Einbahnstraßen: erlaubte Fahrtrichtung je Feld (0 Ost, 1 Süd, 2 West, 3 Nord), -1 = beide Richtungen */
   oneway = new Int8Array(GRID_W * GRID_H).fill(-1);
+  /** Straßenart je Feld: 0 Straße, 1 Doppelspur, 2 Autobahn */
+  roadTier = new Uint8Array(GRID_W * GRID_H);
   /** Gekaufte Spalten (1 = gehört dir) */
   owned = new Uint8Array(GRID_W).fill(1);
   plotsBought = 0;
@@ -831,9 +842,18 @@ export class Sim {
   toggleOneway(x: number, y: number): BuildCheck {
     if (!this.inBounds(x, y) || this.kind[this.idx(x, y)] !== T.Road) return { ok: false, reason: 'Einbahnstraße geht nur auf einer Straße', cost: 0 };
     const i = this.idx(x, y);
+    if (this.roadTier[i] === 2) return { ok: false, reason: 'Die Autobahn hat eine feste Richtung', cost: 0 };
     this.oneway[i] = this.oneway[i] >= 3 ? -1 : this.oneway[i] + 1;
     this.touch();
     return { ok: true, cost: 0 };
+  }
+
+  /** Setzt eine Einbahnrichtung direkt (0 Ost, 1 Süd, 2 West, 3 Nord) */
+  setOneway(x: number, y: number, dir: number) {
+    if (this.inBounds(x, y) && this.kind[this.idx(x, y)] === T.Road) {
+      this.oneway[this.idx(x, y)] = dir;
+      this.touch();
+    }
   }
 
   // ───────────────────────── Hilfen ─────────────────────────
@@ -972,10 +992,12 @@ export class Sim {
     const x = i % GRID_W;
     const y = (i / GRID_W) | 0;
     const out: number[] = [];
-    if (x > 0 && this.kind[i - 1] === T.Road) out.push(i - 1);
-    if (x < GRID_W - 1 && this.kind[i + 1] === T.Road) out.push(i + 1);
-    if (y > 0 && this.kind[i - GRID_W] === T.Road) out.push(i - GRID_W);
-    if (y < GRID_H - 1 && this.kind[i + GRID_W] === T.Road) out.push(i + GRID_W);
+    // Autobahnen haben keine Zufahrt zu Gebäuden: Wer lädt, hält auf einer normalen Straße
+    const ok = (n: number) => this.kind[n] === T.Road && this.roadTier[n] < 2;
+    if (x > 0 && ok(i - 1)) out.push(i - 1);
+    if (x < GRID_W - 1 && ok(i + 1)) out.push(i + 1);
+    if (y > 0 && ok(i - GRID_W)) out.push(i - GRID_W);
+    if (y < GRID_H - 1 && ok(i + GRID_W)) out.push(i + GRID_W);
     return out;
   }
 
@@ -1229,8 +1251,17 @@ export class Sim {
         if (k !== T.Yard && k !== T.Reefer) reason = 'Der Portalkran steht auf einer Lagerfläche';
         else if (this.rtgAt(x, y)) reason = 'Hier steht schon ein Portalkran';
         break;
+      case 'road2':
+      case 'hwy': {
+        const want = tool === 'road2' ? 1 : 2;
+        if (k === T.Road) {
+          if (this.roadTier[i] >= want) reason = this.roadTier[i] === want ? 'Hier ist die Straße schon so ausgebaut' : 'Hier liegt schon eine bessere Straße';
+        } else if (k !== T.Land) reason = k === T.Water ? 'Nicht auf dem Wasser' : 'Das Feld ist belegt';
+        break;
+      }
       case 'truck':
         if (k !== T.Road) reason = 'Truck braucht eine Straße';
+        else if (this.roadTier[i] === 2) reason = 'Auf der Autobahn kann kein Truck starten';
         break;
       case 'dredge':
         if (k !== T.Water || qOfWater(x, y) < 0) reason = 'Baggern nur im Wasser direkt vor der Küste';
@@ -1271,6 +1302,12 @@ export class Sim {
       case 'kai':
       case 'road':
         this.kind[i] = TILE_OF[tool]!;
+        this.roadTier[i] = 0;
+        return undefined;
+      case 'road2':
+      case 'hwy':
+        this.kind[i] = T.Road;
+        this.roadTier[i] = tool === 'road2' ? 1 : 2;
         return undefined;
       case 'yard':
       case 'reefer':
@@ -1355,6 +1392,8 @@ export class Sim {
     if (!chk.ok) return chk;
     this.money -= chk.cost;
     this.today.building += chk.cost;
+    const pi = this.idx(x, y);
+    const prev = (tool === 'road2' || tool === 'hwy') && this.kind[pi] === T.Road ? { tier: this.roadTier[pi], ow: this.oneway[pi] } : undefined;
     const truckId = this.place(tool, x, y);
     // Kran oder Truck: Kaufpreis merken, gebraucht mit niedrigerem Höchstzustand
     const dev = tool === 'truck' ? this.trucks.find((t) => t.id === truckId) : tool === 'crane' || tool === 'lcrane' ? this.craneAt(x, y) : undefined;
@@ -1372,7 +1411,7 @@ export class Sim {
       if (e) e.build = e.buildMax = bt;
     }
     this.touch();
-    return { ...chk, truckId };
+    return { ...chk, truckId, prev };
   }
 
   canDemolish(x: number, y: number): BuildCheck {
@@ -1468,7 +1507,9 @@ export class Sim {
         for (const tr of [...this.trucks]) {
           if (tr.tile === i || tr.next === i) this.takeTruck(tr, factor, out);
         }
-        out.push({ tool: 'road', x, y, refund: this.give(this.costOf('road'), factor) });
+        out.push({ tool: 'road', x, y, refund: this.give(this.costOf(this.roadTier[i] === 2 ? 'hwy' : this.roadTier[i] === 1 ? 'road2' : 'road'), factor), tier: this.roadTier[i], ow: this.oneway[i] });
+        this.roadTier[i] = 0;
+        this.oneway[i] = -1;
         break;
       case T.Yard:
       case T.Reefer:
@@ -1526,7 +1567,7 @@ export class Sim {
   }
 
   /** Macht einen Bau rückgängig. Die Baukosten werden voll erstattet. */
-  undoBuild(a: { tool: BuildTool; x: number; y: number; truckId?: number }): DemolishResult {
+  undoBuild(a: { tool: BuildTool; x: number; y: number; truckId?: number; prev?: { tier: number; ow: number } }): DemolishResult {
     const fail = (reason: string): DemolishResult => ({ ok: false, reason, cost: 0, removed: [] });
     const removed: Removed[] = [];
     if (a.tool === 'truck') {
@@ -1537,6 +1578,12 @@ export class Sim {
       const c = this.craneAt(a.x, a.y);
       if (!c) return fail('Der Kran existiert nicht mehr');
       this.takeCrane(c, 1, removed);
+    } else if ((a.tool === 'road2' || a.tool === 'hwy') && a.prev) {
+      const i = this.idx(a.x, a.y);
+      if (this.kind[i] !== T.Road) return fail('Das Feld wurde inzwischen geändert');
+      this.roadTier[i] = a.prev.tier;
+      this.oneway[i] = a.prev.ow;
+      removed.push({ tool: a.tool, x: a.x, y: a.y, refund: this.give(this.costOf(a.tool), 1) });
     } else if (a.tool === 'rtg') {
       const r = this.rtgAt(a.x, a.y);
       if (!r) return fail('Der Portalkran existiert nicht mehr');
@@ -1614,6 +1661,9 @@ export class Sim {
           c.cap = r.cap ?? 1;
           c.wear = r.wear ?? 0;
         }
+      } else if (r.tool === 'road') {
+        this.roadTier[i] = r.tier ?? 0;
+        this.oneway[i] = r.ow ?? -1;
       } else if (r.tool === 'truck') {
         const t = this.trucks.find((t) => t.id === id);
         if (t) {
@@ -2295,7 +2345,7 @@ export class Sim {
 
   /** Wie viele Trucks gleichzeitig in diese Richtung über das Feld fahren können */
   laneCap(tile: number, dir: number): number {
-    return this.oneway[tile] === dir ? 2 : 1;
+    return ROAD_LANES[this.roadTier[tile]] + (this.oneway[tile] === dir ? 1 : 0);
   }
 
   private stepTruck(t: Truck, dt: number) {
@@ -2354,7 +2404,7 @@ export class Sim {
       t.stuck = 0;
     }
 
-    t.prog += (t.agv ? AGV_SPEED : TRUCK_SPEED) * (t.agv ? 1 : this.eff('driver')) * (1 + 0.08 * this.tech.engine) * (t.role === 'auto' ? 1 : ROUTINE_SPEED) * (1 - WEAR_SLOWDOWN * t.wear) * dt;
+    t.prog += (t.agv ? AGV_SPEED : TRUCK_SPEED) * ROAD_SPEED[this.roadTier[t.next]] * (t.agv ? 1 : this.eff('driver')) * (1 + 0.08 * this.tech.engine) * (t.role === 'auto' ? 1 : ROUTINE_SPEED) * (1 - WEAR_SLOWDOWN * t.wear) * dt;
     if (this.level >= 2) {
       this.addWear(t, WEAR_TRUCK_PER_GM * this.wearMul * (this.tech.diesel ? 1.3 : 1) * dt);
       if (t.wear >= 1) this.noteBroken('Ein Truck');
@@ -3594,6 +3644,7 @@ export class Sim {
     const R = RUN_COST_PER_DAY;
     let cost = 0;
     for (const c of this.cranes) cost += CRANE_MODELS[c.model].run;
+    for (let i = 0; i < this.roadTier.length; i++) cost += ROAD_RUN[this.roadTier[i]] * (this.kind[i] === T.Road ? 1 : 0);
     for (const t of this.trucks) cost += (t.agv ? R.agv : R.truck) * (this.tech.diesel ? 0.6 : 1);
     cost += this.gates.length * R.gate + this.rails.length * R.rail + this.plants.length * R.plant + this.shops.length * R.shop;
     cost += this.yardTiles.length * R.yardTile + this.reeferTiles.length * R.reeferTile + this.hazTiles.length * R.hazTile + this.emptyTiles.length * R.emptyTile;
@@ -3735,6 +3786,7 @@ export class Sim {
         trucks: this.trucks.map((t) => t.zone),
       },
       oneway: Array.from(this.oneway),
+      roadTier: Array.from(this.roadTier),
       owned: Array.from(this.owned),
       plotsBought: this.plotsBought,
       map: this.map,
@@ -3792,6 +3844,7 @@ export class Sim {
     const s = new Sim(d.seed, d.diff ?? 'normal', d.map ?? 'coast');
     s.kind.set(d.kind);
     if (d.oneway) s.oneway.set(d.oneway);
+    if (d.roadTier) s.roadTier.set(d.roadTier);
     if (d.owned) s.owned.set(d.owned);
     s.plotsBought = d.plotsBought ?? 0;
     if (d.rivalRate) s.rivalRate = d.rivalRate;

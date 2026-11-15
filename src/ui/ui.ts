@@ -56,6 +56,8 @@ const ICONS: Record<string, string> = {
   view: svg('<path d="M7 3.5l11 7-4.6 1.4 2.8 5.6-2.6 1.3-2.8-5.6L5.8 16z"/>'),
   kai: svg('<rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M3 9h18M7 9v4M12 9v4M17 9v4"/>'),
   crane: svg('<path d="M6 21V6M3 21h6M6 6h14M17 6v6"/><rect x="15" y="12" width="4" height="3" rx=".6"/><path d="M6 6l6-3"/>'),
+  road2: svg('<path d="M8 3v18M16 3v18"/><path d="M12 5v3M12 11v3M12 17v3" stroke-dasharray="1 2"/>'),
+  hwy: svg('<path d="M6 3v18M18 3v18"/><path d="M10 8l-2-2-2 2M14 16l2 2 2-2"/><path d="M12 4v16" stroke-dasharray="2 3"/>'),
   hazard: svg('<path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18v.5"/>'),
   emptyyard: svg('<rect x="4" y="6" width="16" height="12" rx="1.5"/><path d="M8 6v12M12 6v12M16 6v12"/>'),
   fill: svg('<path d="M3 10l9-6 9 6v10H3z"/><path d="M9 20v-6h6v6"/><path d="M12 2v4"/>'),
@@ -116,6 +118,8 @@ const TOOLS: ToolDef[] = [
   { cat: 'gear', tool: 'lcrane', label: 'Leichtkran', sub: '40k', color: '#e0a526' },
   { cat: 'gear', tool: 'crane', label: 'Mobilkran', sub: '80k', color: '#e2582c' },
   { cat: 'land', tool: 'road', label: 'Straße', sub: '500 €', color: '#59606a' },
+  { cat: 'land', tool: 'road2', label: 'Doppelspur', sub: '1,8k', color: '#4a5560' },
+  { cat: 'land', tool: 'hwy', label: 'Autobahn', sub: '4k × 2', color: '#2f6db0' },
   { cat: 'store', tool: 'yard', label: 'Stapel', sub: '1k', color: '#c9b88a' },
   { cat: 'build', tool: 'gate', label: 'Gate', sub: '20k · 2×1', color: '#d9534f' },
   { cat: 'gear', tool: 'assign', label: 'Aufgaben', sub: 'Rahmen', color: '#2a6fdb' },
@@ -218,6 +222,8 @@ export class UI {
   private achModal!: HTMLElement;
   private zonePick!: HTMLElement;
   private rotPick!: HTMLElement;
+  private ghostBar!: HTMLElement;
+  private ghostKey = '';
   private usedPick!: HTMLElement;
   private techModal!: HTMLElement;
   private techBody!: HTMLElement;
@@ -486,6 +492,13 @@ export class UI {
       row.appendChild(b);
     }
 
+    // Leiste für die Vorschau: Platzieren, Drehen, Abbrechen
+    this.ghostBar = el('div', 'ghostbar hidden');
+    this.ghostBar.innerHTML = `<div class="ghosttext"></div><div class="ghostbtns"><button class="primary gok"></button><button class="secondary grot">${ICONS.rotate}</button><button class="secondary gno" aria-label="Abbrechen">${ICONS.close}</button></div>`;
+    this.ghostBar.querySelector('.gok')!.addEventListener('click', () => this.game.confirmGhost());
+    this.ghostBar.querySelector('.grot')!.addEventListener('click', () => this.game.rotate());
+    this.ghostBar.querySelector('.gno')!.addEventListener('click', () => this.game.cancelGhost());
+
     this.toasts = el('div', 'toasts');
 
     // Menü: Hauptmenü, Pause, Neues Spiel, Spielstände, Einstellungen
@@ -589,7 +602,7 @@ export class UI {
       this.game.setSpeed(this.speedBeforeModal);
     });
 
-    root.append(top, left, side, this.sheet, bar, this.toasts, this.menu, this.deals, this.techModal, this.staffModal, this.finCard, this.endModal, this.decision, this.levelUp, this.buildAchModal());
+    root.append(top, left, side, this.sheet, bar, this.ghostBar, this.toasts, this.menu, this.deals, this.techModal, this.staffModal, this.finCard, this.endModal, this.decision, this.levelUp, this.buildAchModal());
     this.refreshSpeed();
     this.refreshTools();
     this.refreshOverlay();
@@ -935,6 +948,7 @@ export class UI {
     const c = this.game.sim.costOf(tool);
     const p = c >= 1000 ? `${Math.round(c / 1000)}k` : `${c} €`;
     const [w, h] = sizeOf(tool);
+    if (tool === 'hwy') return `${p} × 2`;
     return w * h > 1 ? `${p} · ${w}×${h}` : p;
   }
 
@@ -959,6 +973,10 @@ export class UI {
       }
     }
     this.rotPick.firstElementChild!.innerHTML = `${ICONS.rotate} Drehen (R) · ${dimsOf(this.game.tool, this.game.sim.rot).join(' × ')} Felder`;
+    if (this.game.tool === 'hwy') {
+      this.rotPick.classList.remove('hidden');
+      this.rotPick.firstElementChild!.innerHTML = `${ICONS.rotate} Drehen (R) · Fahrbahnen ${this.game.sim.rot ? 'senkrecht' : 'waagerecht'}. Beim Ziehen passt es sich an.`;
+    }
     for (const b of this.zonePick.querySelectorAll<HTMLElement>('button')) b.classList.toggle('on', Number(b.dataset.zone) === this.game.zonePick);
     for (const b of this.rolePick.querySelectorAll<HTMLElement>('button')) b.classList.toggle('on', b.dataset.role === this.game.assignRole);
     for (const [t, v] of this.toolBtns) {
@@ -984,6 +1002,26 @@ export class UI {
   }
 
   // ───────────────────────── Aktualisieren ─────────────────────────
+
+  private renderGhostBar(sim: Sim) {
+    const gh = this.game.ghost;
+    this.ghostBar.classList.toggle('hidden', !gh);
+    if (!gh) return;
+    const tool = this.game.tool as BuildTool;
+    const chk = sim.canBuild(tool, gh.x, gh.y);
+    const [w, h] = this.game.ghostSize();
+    const key = `${gh.x},${gh.y},${chk.ok},${chk.cost},${chk.reason},${sim.rot},${this.game.sim.used}`;
+    if (key === this.ghostKey) return;
+    this.ghostKey = key;
+    const label = tool === 'truck' || tool === 'crane' || tool === 'lcrane' ? `${this.game.sim.used ? 'Gebraucht' : 'Neu'} ` : '';
+    this.ghostBar.querySelector('.ghosttext')!.innerHTML = chk.ok
+      ? `<b>${w > 1 || h > 1 ? `${w}×${h} Felder` : 'Vorschau'}</b> · Ziehen zum Verschieben, nochmal tippen zum Bauen`
+      : `<span class="neg">${chk.reason ?? 'Hier geht es nicht'}</span> · Ziehen zum Verschieben`;
+    const ok = this.ghostBar.querySelector<HTMLButtonElement>('.gok')!;
+    ok.textContent = `${label}Platzieren · ${eur(chk.cost)}`;
+    ok.disabled = !chk.ok;
+    this.ghostBar.querySelector('.grot')!.classList.toggle('hidden', sizeOf(tool)[0] === sizeOf(tool)[1]);
+  }
 
   private renderZones(sim: Sim) {
     const on = this.game.tool === 'zone';
@@ -1018,6 +1056,7 @@ export class UI {
     this.acc = 0;
     const sim = this.game.sim;
     this.renderZones(sim);
+    this.renderGhostBar(sim);
 
     this.moneyEl.textContent = eur(sim.money);
     this.moneyEl.classList.toggle('neg', sim.money < 0);

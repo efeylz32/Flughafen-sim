@@ -24,7 +24,9 @@ interface Ptr {
 /** Zeigerbedienung für Maus und Touch: Tippen, Malen, Ziehen, Zoomen. */
 export function setupInput(game: Game, el: HTMLElement) {
   const ptrs = new Map<number, Ptr>();
-  let mode: 'none' | 'paint' | 'pan' | 'tap' | 'pinch' | 'rect' = 'none';
+  let mode: 'none' | 'paint' | 'pan' | 'tap' | 'pinch' | 'rect' | 'ghostdrag' = 'none';
+  let grab = { x: 0, y: 0 };
+  let ghostMoved = false;
   let last: { x: number; y: number } | null = null;
   let failReason: string | null = null;
   let okCount = 0;
@@ -37,6 +39,8 @@ export function setupInput(game: Game, el: HTMLElement) {
   const tileOf = (p: { x: number; y: number }) => game.renderer.screenToTile(p.x, p.y);
 
   function paintLine(a: { x: number; y: number }, b: { x: number; y: number }, skipFirst = false) {
+    // Autobahn: Die Zugrichtung bestimmt, ob die Fahrbahnen waagerecht oder senkrecht liegen
+    if (game.tool === 'hwy' && (a.x !== b.x || a.y !== b.y)) game.sim.rot = Math.abs(b.y - a.y) > Math.abs(b.x - a.x);
     // Bresenham über Felder
     let x0 = a.x;
     let y0 = a.y;
@@ -106,9 +110,16 @@ export function setupInput(game: Game, el: HTMLElement) {
       paintLine(last, last);
       game.hover = { ...last, ok: game.previewOk(last.x, last.y) };
     } else {
-      mode = 'tap';
       const t = tileOf(p);
-      if (e.pointerType !== 'mouse' && game.tool !== 'view') game.hover = { ...t, ok: game.previewOk(t.x, t.y) };
+      if (game.needsConfirm() && game.ghost && game.inGhost(t.x, t.y)) {
+        // Die festgesetzte Vorschau lässt sich anfassen und verschieben
+        mode = 'ghostdrag';
+        ghostMoved = false;
+        grab = { x: t.x - game.ghost.x, y: t.y - game.ghost.y };
+      } else {
+        mode = 'tap';
+        if (e.pointerType !== 'mouse' && game.tool !== 'view' && !game.ghost) game.hover = { ...t, ok: game.previewOk(t.x, t.y) };
+      }
     }
   });
 
@@ -116,7 +127,7 @@ export function setupInput(game: Game, el: HTMLElement) {
     const p = rel(e);
     const ptr = ptrs.get(e.pointerId);
     if (!ptr) {
-      if (e.pointerType === 'mouse' && game.tool !== 'view') {
+      if (e.pointerType === 'mouse' && game.tool !== 'view' && !game.ghost) {
         const t = tileOf(p);
         game.hover = { ...t, ok: game.previewOk(t.x, t.y) };
       }
@@ -133,6 +144,14 @@ export function setupInput(game: Game, el: HTMLElement) {
       if (pinchDist > 0) game.renderer.zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, d / pinchDist);
       pinchDist = d;
       game.renderer.panBy(dx / 2, dy / 2);
+      return;
+    }
+    if (mode === 'ghostdrag') {
+      if (Math.hypot(p.x - ptr.sx, p.y - ptr.sy) > 6) ghostMoved = true;
+      if (ghostMoved) {
+        const t = tileOf(p);
+        game.setGhost(t.x - grab.x, t.y - grab.y);
+      }
       return;
     }
     if (mode === 'rect' && game.rect) {
@@ -165,10 +184,15 @@ export function setupInput(game: Game, el: HTMLElement) {
       if (game.tool === 'view') {
         const w = game.renderer.screenToWorld(ptr.x, ptr.y);
         game.pick(w.x, w.y);
+      } else if (game.needsConfirm()) {
+        // Erst die Vorschau setzen oder verschieben, gebaut wird mit dem zweiten Klick
+        game.setGhost(t.x, t.y);
       } else {
         const r = game.applyTool(t.x, t.y);
         if (r) game.fail(r);
       }
+    } else if (mode === 'ghostdrag') {
+      if (!ghostMoved) game.confirmGhost();
     } else if (mode === 'paint') {
       finishPaint();
     } else if (mode === 'rect' && game.rect) {
@@ -219,6 +243,8 @@ export function setupInput(game: Game, el: HTMLElement) {
     else if (k === 'o') game.toggleOverlay();
     else if (k === 'm') game.toggleSound();
     else if (k === 'r') game.rotate();
+    else if (k === 'enter' && game.ghost) game.confirmGhost();
+    else if (k === 'escape' && game.ghost) game.cancelGhost();
     else if (k === 'escape') {
       game.setTool('view');
       game.selected = null;

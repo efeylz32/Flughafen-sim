@@ -2,7 +2,7 @@ import { Sound } from './audio/sound';
 import { Renderer, View } from './render/renderer';
 import { BuildTool, DiffId, GRID_H, GRID_W, MapId, ProductId, Role, ROLE_NAMES, T, TICKS_PER_SEC, TILE, Tool, TruckRole } from './sim/data';
 import { Progress } from './achievements';
-import { CRANE_MODELS, DIFFS, MAPS, movesPerHour, sizeOf, TechId } from './sim/data';
+import { CRANE_MODELS, DIFFS, dimsOf, MAPS, movesPerHour, sizeOf, TechId } from './sim/data';
 import { buildDemo } from './sim/demo';
 import { setupScenario } from './sim/scenario-setup';
 import { SCENARIOS } from './sim/scenarios';
@@ -10,14 +10,14 @@ import { GameEvent, Removed, Sim } from './sim/sim';
 import type { UI } from './ui/ui';
 
 import { latestSlot, loadSettings, readSlot, saveSettings, Settings, Slot, writeSlot } from './saves';
-export const PAINT_TOOLS: Tool[] = ['kai', 'road', 'yard', 'reefer', 'hazard', 'emptyyard', 'dredge', 'zone', 'demolish'];
+export const PAINT_TOOLS: Tool[] = ['kai', 'road', 'road2', 'hwy', 'yard', 'reefer', 'hazard', 'emptyyard', 'dredge', 'zone', 'demolish'];
 
 /** So lange (in Spielminuten) lässt sich eine Bauaktion rückgängig machen. */
 const UNDO_WINDOW_GM = 240;
 const UNDO_MAX = 60;
 
 type UndoAction =
-  | { kind: 'build'; tool: BuildTool; x: number; y: number; truckId?: number }
+  | { kind: 'build'; tool: BuildTool; x: number; y: number; truckId?: number; prev?: { tier: number; ow: number } }
   | { kind: 'demolish'; removed: Removed[] }
   | { kind: 'upgrade'; what: 'crane' | 'truck'; id: number; x: number; y: number };
 interface UndoGroup {
@@ -40,6 +40,8 @@ export class Game {
   overlay = false;
   selected: View['selected'] = null;
   hover: View['hover'] = null;
+  /** Festgesetzte Vorschau: erst ein zweiter Klick baut wirklich */
+  ghost: { x: number; y: number } | null = null;
   /** Aufgabe, die die Sammelzuweisung vergibt */
   assignRole: TruckRole = 'crane';
   /** Zone, die das Zonen-Werkzeug vergibt (0 = entfernen) */
@@ -80,10 +82,12 @@ export class Game {
     this.flushPending(dtSec);
     this.pruneUndo();
 
+    if (this.ghost) this.hover = { ...this.ghost, ok: this.previewOk(this.ghost.x, this.ghost.y) };
     this.renderer.draw(this.sim, {
       overlay: this.overlay,
       tool: this.tool,
       hover: this.hover,
+      ghost: !!this.ghost,
       selected: this.selected,
       alpha: this.speed > 0 ? this.acc : 1,
       time: this.time,
@@ -222,6 +226,7 @@ export class Game {
   }
   setTool(t: Tool) {
     this.tool = t;
+    this.ghost = null;
     this.hover = null;
     this.ui.refreshTools();
   }
@@ -241,7 +246,7 @@ export class Game {
   /** Dreht das nächste Gebäude (Breite und Höhe tauschen) */
   rotate() {
     const [w, h] = sizeOf(this.tool);
-    if (w === h) return;
+    if (w === h && this.tool !== 'hwy') return;
     this.sim.rot = !this.sim.rot;
     this.hover = null;
     this.ui.refreshTools();
@@ -394,12 +399,67 @@ export class Game {
       return null;
     }
     const tool = this.tool as BuildTool;
+    if (tool === 'hwy') return this.buildHighway(x, y);
     const res = this.sim.build(tool, x, y);
     if (!res.ok) return res.reason ?? 'Nicht möglich';
-    this.record({ kind: 'build', tool, x, y, truckId: res.truckId });
+    this.record({ kind: 'build', tool, x, y, truckId: res.truckId, prev: res.prev });
     this.sound.play(tool === 'crane' || tool === 'gate' ? 'buildBig' : tool === 'truck' ? 'truck' : 'build');
     this.renderer.addPop(x, y, 'build');
     return null;
+  }
+
+  /** Autobahn: zwei Fahrbahnen nebeneinander mit fester Richtung (Rechtsverkehr). Gedreht (R) liegen sie senkrecht. */
+  private buildHighway(x: number, y: number): string | null {
+    const vert = this.sim.rot;
+    const b = vert ? { x: x + 1, y } : { x, y: y + 1 };
+    const ca = this.sim.canBuild('hwy', x, y);
+    const cb = this.sim.canBuild('hwy', b.x, b.y);
+    if (!ca.ok) return ca.reason ?? 'Nicht möglich';
+    if (!cb.ok) return cb.reason ?? 'Nicht möglich';
+    if (this.sim.money < ca.cost + cb.cost) return 'Zu wenig Geld';
+    // Waagerecht: obere Spur nach Westen, untere nach Osten. Senkrecht: linke Spur nach Süden, rechte nach Norden.
+    for (const [t, dir] of [[{ x, y }, vert ? 1 : 2], [b, vert ? 3 : 0]] as const) {
+      const res = this.sim.build('hwy', t.x, t.y);
+      if (!res.ok) return res.reason ?? 'Nicht möglich';
+      this.sim.setOneway(t.x, t.y, dir);
+      this.record({ kind: 'build', tool: 'hwy', x: t.x, y: t.y, prev: res.prev });
+      this.renderer.addPop(t.x, t.y, 'build');
+    }
+    this.sound.play('build');
+    return null;
+  }
+
+  // ───────────────────────── Vorschau mit Bestätigung ─────────────────────────
+
+  /** Große Bauten werden erst als Vorschau gesetzt, verschoben und mit einem zweiten Klick gebaut. */
+  needsConfirm(tool: Tool = this.tool): boolean {
+    return ['crane', 'lcrane', 'gate', 'unpack', 'pack', 'cold', 'fill', 'workshop', 'rtg', 'rail', 'truck'].includes(tool);
+  }
+  /** Größe der Vorschau in Feldern */
+  ghostSize(): [number, number] {
+    return dimsOf(this.tool, this.sim.rot);
+  }
+  inGhost(x: number, y: number): boolean {
+    const g = this.ghost;
+    if (!g) return false;
+    const [w, h] = this.ghostSize();
+    return x >= g.x && x < g.x + w && y >= g.y && y < g.y + h;
+  }
+  setGhost(x: number, y: number) {
+    this.ghost = { x, y };
+    this.hover = { x, y, ok: this.previewOk(x, y) };
+  }
+  confirmGhost() {
+    const g = this.ghost;
+    if (!g) return;
+    const r = this.applyTool(g.x, g.y);
+    if (r) return this.fail(r);
+    this.ghost = null;
+    this.hover = null;
+  }
+  cancelGhost() {
+    this.ghost = null;
+    this.hover = null;
   }
 
   /** Rüstet den ausgewählten Kran oder Truck auf. */
@@ -556,6 +616,10 @@ export class Game {
     if (this.tool === 'oneway') return this.sim.kind[this.sim.idx(x, y)] === T.Road;
     if (this.tool === 'buyland') return x >= 0 && x < GRID_W && !this.sim.owned[x];
     if (this.tool === 'demolish') return this.sim.canDemolish(x, y).ok;
+    if (this.tool === 'hwy') {
+      const b = this.sim.rot ? { x: x + 1, y } : { x, y: y + 1 };
+      return this.sim.canBuild('hwy', x, y).ok && this.sim.canBuild('hwy', b.x, b.y).ok;
+    }
     return this.sim.canBuild(this.tool as BuildTool, x, y).ok;
   }
 

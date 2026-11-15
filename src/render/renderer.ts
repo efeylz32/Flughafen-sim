@@ -9,6 +9,8 @@ export interface View {
   overlay: boolean;
   tool: string;
   hover: { x: number; y: number; ok: boolean } | null;
+  /** Die Vorschau ist festgesetzt und wartet auf den zweiten Klick */
+  ghost: boolean;
   selected: { kind: 'ship' | 'crane' | 'gate' | 'yard' | 'reefer' | 'hazmat' | 'emptyyard' | 'rail' | 'plant' | 'shop' | 'truck'; id: number } | null;
   /** Anteil zwischen letztem und nächstem Tick (0..1) für weiche Bewegung. */
   alpha: number;
@@ -671,6 +673,31 @@ export class Renderer {
                 .fill(C.grassA);
               g.moveTo(ox, oy + dy * 12.5).quadraticCurveTo(ox + dx * 1.5, oy + dy * 1.5, ox + dx * 12.5, oy).stroke({ width: 1.3, color: C.roadEdge, alpha: 0.85 });
             }
+            // Ausbaustufen: Doppelspur mit gelber Doppellinie, Autobahn dunkel mit weißen Randlinien
+            const tier = sim.roadTier[y * GRID_W + x];
+            if (tier === 1) {
+              g.rect(px, py, TILE, TILE).fill({ color: 0x7d8895, alpha: 0.2 });
+              if ((w || e) && !(n || s)) {
+                g.rect(px, cy - 3, TILE, 1.4).fill(0xf2c230);
+                g.rect(px, cy + 1.6, TILE, 1.4).fill(0xf2c230);
+              } else if ((n || s) && !(w || e)) {
+                g.rect(cx - 3, py, 1.4, TILE).fill(0xf2c230);
+                g.rect(cx + 1.6, py, 1.4, TILE).fill(0xf2c230);
+              }
+            } else if (tier === 2) {
+              g.rect(px, py, TILE, TILE).fill({ color: 0x0f2540, alpha: 0.38 });
+              const lw = { color: 0xffffff, alpha: 0.85 };
+              if (!(n && s) || (w || e)) {
+                if (w || e) {
+                  g.rect(px, py + 2.5, TILE, 1.6).fill(lw);
+                  g.rect(px, py + TILE - 4.1, TILE, 1.6).fill(lw);
+                }
+              }
+              if (n || s) {
+                g.rect(px + 2.5, py, 1.6, TILE).fill(lw);
+                g.rect(px + TILE - 4.1, py, 1.6, TILE).fill(lw);
+              }
+            }
             break;
           }
           case T.Yard: {
@@ -790,8 +817,11 @@ export class Renderer {
       const c = Math.cos(ang);
       const s = Math.sin(ang);
       const P = (lx: number, ly: number) => [cx + lx * c - ly * s, cy + lx * s + ly * c];
-      g.rect(cx - 7, cy - 7, 14, 14).fill(C.road);
-      g.poly([...P(-8, -2.2), ...P(2, -2.2), ...P(2, -6.5), ...P(9, 0), ...P(2, 6.5), ...P(2, 2.2), ...P(-8, 2.2)]).fill(0xffffff);
+      // Auf der Autobahn nur jedes zweite Feld und etwas dezenter
+      const hw = sim.roadTier[i] === 2;
+      if (hw && ((i % GRID_W) + ((i / GRID_W) | 0)) % 2 === 1) continue;
+      if (!hw) g.rect(cx - 7, cy - 7, 14, 14).fill(C.road);
+      g.poly([...P(-8, -2.2), ...P(2, -2.2), ...P(2, -6.5), ...P(9, 0), ...P(2, 6.5), ...P(2, 2.2), ...P(-8, 2.2)]).fill(hw ? { color: 0xffffff, alpha: 0.55 } : 0xffffff);
     }
 
     // Land, das dir noch nicht gehört: abgedunkelt mit Grenzlinie
@@ -1846,9 +1876,20 @@ export class Renderer {
       const { x, y, ok } = view.hover;
       if (x >= 0 && y >= 0 && x < GRID_W && y < GRID_H) {
         const col = view.tool === 'demolish' || !ok ? C.bad : C.good;
-        const [fw, fh] = dimsOf(view.tool, sim.rot);
-        g.roundRect(x * TILE, y * TILE, fw * TILE, fh * TILE, 3).fill({ color: col, alpha: 0.38 });
-        g.roundRect(x * TILE + 1, y * TILE + 1, fw * TILE - 2, fh * TILE - 2, 3).stroke({ width: 2, color: 0xffffff, alpha: 0.9 });
+        const [fw, fh] = view.tool === 'hwy' ? (sim.rot ? [2, 1] : [1, 2]) : dimsOf(view.tool, sim.rot);
+        // Festgesetzte Vorschau pulsiert und hat einen dicken Rahmen mit Eckmarken
+        const pulse = view.ghost ? 0.5 + 0.25 * Math.sin(view.time * 6) : 0.38;
+        g.roundRect(x * TILE, y * TILE, fw * TILE, fh * TILE, 3).fill({ color: col, alpha: pulse });
+        g.roundRect(x * TILE + 1, y * TILE + 1, fw * TILE - 2, fh * TILE - 2, 3).stroke({ width: view.ghost ? 3 : 2, color: 0xffffff, alpha: 0.95 });
+        if (view.ghost) {
+          for (const [cx, cy] of [[x, y], [x + fw, y], [x, y + fh], [x + fw, y + fh]]) g.circle(cx * TILE, cy * TILE, 4.5).fill(0xffffff).stroke({ width: 1.5, color: ok ? C.good : C.bad });
+        }
+        // Autobahn: Fahrtrichtung der beiden Spuren andeuten
+        if (view.tool === 'hwy') {
+          const ar = (ax: number, ay: number, dx: number, dy: number) => g.poly([ax + dx * 7, ay + dy * 7, ax - dx * 3 - dy * 5, ay - dy * 3 + dx * 5, ax - dx * 3 + dy * 5, ay - dy * 3 - dx * 5]).fill({ color: 0xffffff, alpha: 0.9 });
+          if (sim.rot) { ar((x + 0.5) * TILE, (y + 0.5) * TILE, 0, 1); ar((x + 1.5) * TILE, (y + 0.5) * TILE, 0, -1); }
+          else { ar((x + 0.5) * TILE, (y + 0.5) * TILE, -1, 0); ar((x + 0.5) * TILE, (y + 1.5) * TILE, 1, 0); }
+        }
         if (view.tool === 'crane' && ok) {
           g.roundRect(x * TILE + 11.5, y * TILE - 60, 9, 82, 1.5).fill({ color: 0xffffff, alpha: 0.35 });
         }

@@ -30,7 +30,7 @@ export enum T {
   Empty = 12,
 }
 
-export type Tool = 'view' | 'kai' | 'crane' | 'lcrane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'rtg' | 'hazard' | 'emptyyard' | 'fill' | 'assign' | 'zone' | 'oneway' | 'buyland' | 'demolish';
+export type Tool = 'view' | 'kai' | 'crane' | 'lcrane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'road2' | 'hwy' | 'rtg' | 'hazard' | 'emptyyard' | 'fill' | 'assign' | 'zone' | 'oneway' | 'buyland' | 'demolish';
 export type BuildTool = Exclude<Tool, 'view' | 'demolish' | 'assign' | 'zone' | 'oneway' | 'buyland'>;
 
 export const COST: Record<BuildTool, number> = {
@@ -49,6 +49,8 @@ export const COST: Record<BuildTool, number> = {
   cold: 80_000,
   workshop: 40_000,
   rtg: 60_000,
+  road2: 1_800,
+  hwy: 4_000,
   hazard: 12_000,
   emptyyard: 2_000,
   fill: 110_000,
@@ -70,6 +72,8 @@ export const UNLOCK: Record<BuildTool, number> = {
   cold: 3,
   workshop: 2,
   rtg: 3,
+  road2: 2,
+  hwy: 3,
   hazard: 3,
   emptyyard: 2,
   fill: 3,
@@ -446,3 +450,12 @@ export const HAZ_DIST = 2;
 /** Ladungen Ware, die ein Zug bringt */
 export const RAIL_GOODS = 12;
 export const RAIL_GOODS_MAX = 24;
+
+/** Straßenarten: 0 Straße, 1 Doppelspur, 2 Autobahn */
+export const ROAD_NAMES = ['Straße', 'Doppelspur', 'Autobahn'];
+/** Truck-Tempo auf dem Feld */
+export const ROAD_SPEED = [1, 1, 1.7];
+/** Fahrzeuge je Richtung und Feld (Einbahn gibt +1) */
+export const ROAD_LANES = [1, 2, 2];
+/** Betrieb pro Feld und Tag */
+export const ROAD_RUN = [0, 6, 20];

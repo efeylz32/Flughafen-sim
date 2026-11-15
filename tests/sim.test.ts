@@ -1305,3 +1305,57 @@ describe('Gefahrgut, Leerlager und Befüllkette', () => {
     expect(copy.plants.some((p) => p.kind === 'fill')).toBe(true);
   });
 });
+
+describe('Straßenausbau: Doppelspur und Autobahn', () => {
+  it('Doppelspur lässt je Richtung zwei Trucks durch, Ausbau und Rückgängig stimmen', () => {
+    const sim = new Sim();
+    sim.level = 3;
+    sim.build('road', 8, k + 1);
+    const i = sim.idx(8, k + 1);
+    expect(sim.laneCap(i, 0)).toBe(1);
+    const before = sim.money;
+    const r = sim.build('road2', 8, k + 1);
+    expect(r.ok).toBe(true);
+    expect(r.prev).toEqual({ tier: 0, ow: -1 });
+    expect(before - sim.money).toBe(sim.costOf('road2'));
+    expect(sim.laneCap(i, 0)).toBe(2);
+    expect(sim.canBuild('road2', 8, k + 1).ok).toBe(false); // schon ausgebaut
+    expect(sim.undoBuild({ tool: 'road2', x: 8, y: k + 1, prev: r.prev }).ok).toBe(true);
+    expect(sim.roadTier[i]).toBe(0);
+    expect(sim.money).toBe(before);
+    expect(sim.kind[i]).toBe(T.Road);
+    // Abriss und Rückgängig behalten die Stufe
+    sim.build('hwy', 8, k + 1);
+    sim.setOneway(8, k + 1, 0);
+    const d = sim.demolish(8, k + 1);
+    expect(sim.kind[i]).toBe(T.Land);
+    sim.undoDemolish(d.removed);
+    expect(sim.roadTier[i]).toBe(2);
+    expect(sim.oneway[i]).toBe(0);
+    const copy = Sim.deserialize(JSON.parse(JSON.stringify(sim.serialize())));
+    expect(copy.roadTier[i]).toBe(2);
+  });
+
+  it('Autobahn hat feste Richtung und keine Zufahrt zu Gebäuden', () => {
+    const sim = new Sim();
+    sim.level = 3;
+    for (let x = 4; x <= 14; x++) sim.build('hwy', x, k + 1);
+    sim.build('yard', 8, k + 2);
+    expect(sim.adjRoad(sim.idx(8, k + 2))).toEqual([]);
+    expect(sim.toggleOneway(8, k + 1).ok).toBe(false);
+    expect(sim.canBuild('truck', 8, k + 1).ok).toBe(false);
+    sim.build('road', 8, k + 3);
+    expect(sim.adjRoad(sim.idx(8, k + 2))).toEqual([sim.idx(8, k + 3)]);
+  });
+
+  it('Betriebskosten steigen mit der Straßenart', () => {
+    const a = new Sim();
+    const b = new Sim();
+    a.level = b.level = 3;
+    for (let x = 4; x < 14; x++) {
+      a.build('road', x, k + 1);
+      b.build('hwy', x, k + 1);
+    }
+    expect(b.runningCost()).toBeGreaterThan(a.runningCost());
+  });
+});

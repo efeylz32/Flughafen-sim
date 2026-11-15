@@ -4,7 +4,7 @@ import { BuildTool, COAST_ROW, GRID_H, GRID_W, RTG_CAP, T } from '../src/sim/dat
 import { buildDemo } from '../src/sim/demo';
 import { Sim } from '../src/sim/sim';
 
-const TOOLS: BuildTool[] = ['road', 'road', 'road', 'yard', 'reefer', 'gate', 'truck', 'truck', 'crane', 'kai', 'unpack', 'pack', 'cold', 'workshop', 'rail', 'dredge', 'rtg', 'hazard', 'emptyyard', 'fill', 'emptyyard', 'hazard'];
+const TOOLS: BuildTool[] = ['road', 'road', 'road', 'yard', 'reefer', 'gate', 'truck', 'truck', 'crane', 'kai', 'unpack', 'pack', 'cold', 'workshop', 'rail', 'dredge', 'rtg', 'hazard', 'emptyyard', 'fill', 'emptyyard', 'hazard', 'road2', 'hwy', 'hwy'];
 
 function check(s: Sim, step: number) {
   const where = `Schritt ${step}`;
