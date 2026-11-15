@@ -135,7 +135,7 @@ import { MISSIONS } from './missions';
 import { SCENARIOS } from './scenarios';
 
 /** Import, Kühlfracht (Import) oder Export */
-export type Cargo = 'imp' | 'reef' | 'haz' | 'empty' | 'exp' | 'ware' | 'prem' | 'food';
+export type Cargo = 'imp' | 'rimp' | 'reef' | 'haz' | 'empty' | 'exp' | 'ware' | 'prem' | 'food';
 
 export interface Shop {
   id: number;
@@ -211,6 +211,9 @@ export interface Crane {
   /** Entladene Container am Kran, die auf einen Truck warten */
   buffer: number;
   bufReef: number;
+  /** Davon mit Ziel Bahn (Teil von buffer) */
+  bufRail: number;
+  resOutRail: number;
   bufHaz: number;
   resOutHaz: number;
   resOut: number;
@@ -480,6 +483,8 @@ export interface Removed {
   refund: number;
   stock?: number;
   stockExp?: number;
+  stockRail?: number;
+  use?: number;
   served?: number;
   platform?: number;
   value?: number;
@@ -505,6 +510,8 @@ export interface SaveData {
   kind: number[];
   stock: number[];
   stockExp?: number[];
+  stockRail?: number[];
+  yardUse?: number[];
   depth?: number[];
   cranes: { x: number; y: number; big?: boolean; model?: CraneModel; wear?: number }[];
   shops?: { x: number; y: number }[];
@@ -610,6 +617,11 @@ export class Sim {
   private resIn = new Int16Array(GRID_W * GRID_H);
   private resOut = new Int16Array(GRID_W * GRID_H);
   private resOutExp = new Int16Array(GRID_W * GRID_H);
+  /** Import-Container mit Ziel Bahn (Teil von stock) und ihre Abholreservierungen */
+  stockRail = new Uint16Array(GRID_W * GRID_H);
+  private resOutRail = new Int16Array(GRID_W * GRID_H);
+  /** Zweck eines Stapelfelds: 0 gemischt, 1 Straße, 2 Bahn, 3 Export */
+  yardUse = new Uint8Array(GRID_W * GRID_H);
   /** Ankunftszeiten der Kühlcontainer je Kühlplatz (älteste zuerst) */
   private reefTimes = new Map<number, number[]>();
   /** Zone je Lagerfeld (0 = keine) */
@@ -711,6 +723,8 @@ export class Sim {
   nextInspect = 12;
   /** Sandbox: frei bauen, keine Frist, keine Pleite */
   sandbox = false;
+  /** Wie oft umgestapelt werden musste (Leitstand) */
+  restacks = 0;
   /** Zwei Besonderheiten dieses Hafens */
   traits: TraitId[] = [];
   /** Laufendes Weltereignis */
@@ -1052,6 +1066,26 @@ export class Sim {
   }
 
   /** Abstandskarte (in Feldern) über das Straßennetz zum Zielfeld. -1 = nicht erreichbar. */
+  /** Anteil der Import-Container, die mit der Bahn weiter sollen */
+  get railShare(): number {
+    return this.rails.some((r) => !r.build) ? 0.35 : 0;
+  }
+  /** Lagerzweck setzen (0 gemischt, 1 Straße, 2 Bahn, 3 Export) */
+  setYardUse(x: number, y: number, use: number): BuildCheck {
+    if (!this.inBounds(x, y) || this.kind[this.idx(x, y)] !== T.Yard) return { ok: false, reason: 'Lagerzweck gibt es nur auf Stapelplätzen', cost: 0 };
+    this.yardUse[this.idx(x, y)] = use;
+    this.version++;
+    return { ok: true, cost: 0 };
+  }
+  /** Container auf einem Feld, die beim Abholen von `cargo` im Weg stehen */
+  private othersOn(tile: number, cargo: Cargo): number {
+    const imp = this.stock[tile] - this.stockRail[tile];
+    if (cargo === 'imp') return this.stockRail[tile] + this.stockExp[tile];
+    if (cargo === 'rimp') return imp + this.stockExp[tile];
+    if (cargo === 'exp') return this.stock[tile];
+    return 0;
+  }
+
   /** Kosten, ein Feld zu befahren, in Zehnteln einer Normalstraße: Autobahnen sind schneller. */
   stepCost(tile: number): number {
     return Math.round(DIST_UNIT / ROAD_SPEED[this.roadTier[tile]]);
@@ -1420,6 +1454,9 @@ export class Sim {
         this.kind[i] = TILE_OF[tool]!;
         this.stock[i] = 0;
         this.stockExp[i] = 0;
+        this.stockRail[i] = 0;
+        this.resOutRail[i] = 0;
+        this.yardUse[i] = 0;
         this.resIn[i] = 0;
         this.resOut[i] = 0;
         this.resOutExp[i] = 0;
@@ -1439,6 +1476,8 @@ export class Sim {
           paid: COST[tool],
           buffer: 0,
           bufReef: 0,
+          bufRail: 0,
+          resOutRail: 0,
           bufHaz: 0,
           resOutHaz: 0,
           resOut: 0,
@@ -1622,9 +1661,12 @@ export class Sim {
         const rt = this.rtgAt(x, y);
         if (rt) this.takeRtg(rt, factor, out);
         const tool: BuildTool = this.kind[i] === T.Yard ? 'yard' : this.kind[i] === T.Reefer ? 'reefer' : this.kind[i] === T.Hazmat ? 'hazard' : 'emptyyard';
-        out.push({ tool, x, y, refund: this.give(this.costOf(tool), factor), stock: this.stock[i], stockExp: this.stockExp[i] });
+        out.push({ tool, x, y, refund: this.give(this.costOf(tool), factor), stock: this.stock[i], stockExp: this.stockExp[i], stockRail: this.stockRail[i], use: this.yardUse[i] });
         this.stock[i] = 0;
         this.stockExp[i] = 0;
+        this.stockRail[i] = 0;
+        this.resOutRail[i] = 0;
+        this.yardUse[i] = 0;
         this.resIn[i] = 0;
         this.resOut[i] = 0;
         this.resOutExp[i] = 0;
@@ -1753,6 +1795,8 @@ export class Sim {
       if (r.tool === 'yard' || r.tool === 'reefer' || r.tool === 'hazard' || r.tool === 'emptyyard') {
         this.stock[i] = r.stock ?? 0;
         this.stockExp[i] = r.stockExp ?? 0;
+        this.stockRail[i] = r.stockRail ?? 0;
+        this.yardUse[i] = r.use ?? 0;
         if (r.tool === 'reefer' && r.stock) this.reefTimes.set(i, new Array(r.stock).fill(this.gm));
       } else if (r.tool === 'gate') {
         const g = this.gateAt(r.x, r.y);
@@ -1969,10 +2013,19 @@ export class Sim {
   }
 
   /** Nächstgelegenes Lagerfeld mit freiem Platz ab Straßenfeld `from`. */
-  private findSlot(kind: T, from: number, zone: number): { tile: number; access: number; d: number; free: number } | null {
+  private findSlot(kind: T, from: number, zone: number, cargo?: Cargo): { tile: number; access: number; d: number; free: number } | null {
+    // Stapelplatz: zuerst Felder mit passendem Zweck, dann gemischte. Felder mit anderem Zweck bleiben frei.
+    if (kind === T.Yard && cargo) {
+      const want = cargo === 'rimp' ? 2 : cargo === 'exp' ? 3 : 1;
+      return this.findSlotUse(from, zone, want) ?? this.findSlotUse(from, zone, 0);
+    }
+    return this.findSlotUse(from, zone, -1, kind);
+  }
+  private findSlotUse(from: number, zone: number, use: number, kind: T = T.Yard): { tile: number; access: number; d: number; free: number } | null {
     let best: { tile: number; access: number; d: number; free: number } | null = null;
     for (const y of this.tilesOf(kind)) {
       if (this.zone[y] !== zone) continue;
+      if (use >= 0 && this.yardUse[y] !== use) continue;
       const free = this.freeAt(y);
       if (free <= 0) continue;
       for (const a of this.adjRoad(y)) {
@@ -1988,7 +2041,14 @@ export class Sim {
     let best: { tile: number; access: number; d: number; avail: number } | null = null;
     for (const y of this.tilesOf(kind)) {
       if (this.zone[y] !== zone) continue;
-      const avail = cargo === 'exp' ? this.stockExp[y] - this.resOutExp[y] : this.stock[y] - this.resOut[y];
+      const avail =
+        cargo === 'exp'
+          ? this.stockExp[y] - this.resOutExp[y]
+          : cargo === 'rimp'
+            ? this.stockRail[y] - this.resOutRail[y]
+            : cargo === 'imp' && kind === T.Yard
+              ? this.stock[y] - this.stockRail[y] - this.resOut[y]
+              : this.stock[y] - this.resOut[y];
       if (avail <= 0) continue;
       for (const a of this.adjRoad(y)) {
         const d = this.distMap(a)[from];
@@ -2013,10 +2073,12 @@ export class Sim {
       const c = this.cranes.find((c) => c.id === j.src);
       if (!c) return;
       if (j.cargo === 'reef') c.resOutReef = Math.max(0, c.resOutReef + d);
+      else if (j.cargo === 'rimp') c.resOutRail = Math.max(0, c.resOutRail + d);
       else if (j.cargo === 'haz') c.resOutHaz = Math.max(0, c.resOutHaz + d);
       else c.resOut = Math.max(0, c.resOut + d);
     } else if (j.srcKind === 'store') {
       if (j.cargo === 'exp') this.resOutExp[j.src] = Math.max(0, this.resOutExp[j.src] + d);
+      else if (j.cargo === 'rimp') this.resOutRail[j.src] = Math.max(0, this.resOutRail[j.src] + d);
       else this.resOut[j.src] = Math.max(0, this.resOut[j.src] + d);
     } else if (j.srcKind === 'plant') {
       const p = this.plants.find((p) => p.id === j.src);
@@ -2113,14 +2175,14 @@ export class Sim {
       // 1. Entladene Container vom Kran wegfahren
       const more = ship !== undefined && ship.containers + ship.reefers + ship.haz > 0;
       const full = c.buffer + c.bufReef + c.bufHaz >= this.bufCap(c);
-      for (const cargo of ['imp', 'reef', 'haz'] as const) {
-        const avail = cargo === 'imp' ? c.buffer - c.resOut : cargo === 'reef' ? c.bufReef - c.resOutReef : c.bufHaz - c.resOutHaz;
+      for (const cargo of ['imp', 'rimp', 'reef', 'haz'] as const) {
+        const avail = cargo === 'imp' ? c.buffer - c.bufRail - c.resOut : cargo === 'rimp' ? c.bufRail - c.resOutRail : cargo === 'reef' ? c.bufReef - c.resOutReef : c.bufHaz - c.resOutHaz;
         if (avail <= 0) continue;
         // Volle Fahrt abwarten, außer der Kran liefert nichts mehr nach
         if (avail < TRUCK_CAP && more && !full) continue;
         const acc = this.nearestAccess(ci, t.tile);
         if (!acc) continue;
-        const slot = this.findSlot(Sim.storeOf(cargo), acc.access, c.zone);
+        const slot = this.findSlot(Sim.storeOf(cargo), acc.access, c.zone, cargo);
         if (!slot) continue;
         offer('crane', full ? 3 : 2, acc.d + slot.d, {
           cargo,
@@ -2164,7 +2226,8 @@ export class Sim {
       const room = GATE_APRON_CAP - g.apron.length - g.resIn;
       if (room > 0) {
         const starving = g.apron.length + g.resIn === 0;
-        for (const cargo of ['imp', 'reef', 'haz'] as const) {
+        const gateCargo: Cargo[] = this.railShare > 0 ? ['imp', 'reef', 'haz'] : ['imp', 'rimp', 'reef', 'haz'];
+        for (const cargo of gateCargo) {
           const src = this.findSource(Sim.storeOf(cargo), cargo, t.tile, g.zone);
           const acc = src ? this.nearestAccess(g, src.access) : null;
           if (!src || !acc) continue;
@@ -2192,7 +2255,7 @@ export class Sim {
       const waiting = g.inApron - g.resOut;
       if (waiting > 0) {
         const acc = this.nearestAccess(g, t.tile);
-        const slot = acc ? this.findSlot(T.Yard, acc.access, g.zone) : null;
+        const slot = acc ? this.findSlot(T.Yard, acc.access, g.zone, 'exp') : null;
         if (acc && slot) {
           offer('export', waiting >= TRUCK_CAP ? 1.8 : 1.3, acc.d + slot.d, {
             cargo: 'exp',
@@ -2294,7 +2357,7 @@ export class Sim {
         const made = p.outBuf - p.resOut;
         if (made > 0) {
           const a1 = this.nearestAccess(p, t.tile);
-          const slot = a1 ? this.findSlot(T.Yard, a1.access, p.zone) : null;
+          const slot = a1 ? this.findSlot(T.Yard, a1.access, p.zone, 'exp') : null;
           if (a1 && slot) offer('plant out', 2, a1.d + slot.d, { cargo: 'exp', stage: 0, srcKind: 'plant', src: p.id, dstKind: 'store', dst: slot.tile, tgt: [a1.access, slot.access], n: Math.min(TRUCK_CAP, made, slot.free) });
         }
         continue;
@@ -2337,7 +2400,9 @@ export class Sim {
       if (!zOk(r.zone) || r.build) continue;
       const room = RAIL_CAP - r.platform - r.resIn;
       if (room <= 0) continue;
-      for (const cargo of ['imp', 'reef', 'haz'] as const) {
+      // Die Bahn nimmt, was für die Bahn bestimmt ist. Gibt es kein Gate, auch normale Importe.
+      const railCargo: Cargo[] = this.gates.length ? ['rimp', 'reef', 'haz'] : ['rimp', 'imp', 'reef', 'haz'];
+      for (const cargo of railCargo) {
         const src = this.findSource(Sim.storeOf(cargo), cargo, t.tile, r.zone);
         const acc = src ? this.nearestAccess(r, src.access) : null;
         if (!src || !acc) continue;
@@ -2372,16 +2437,24 @@ export class Sim {
       } else if (j.cargo === 'haz') {
         if (c.bufHaz < j.n) return false;
         c.bufHaz -= j.n;
+      } else if (j.cargo === 'rimp') {
+        if (c.bufRail < j.n) return false;
+        c.bufRail -= j.n;
+        c.buffer -= j.n;
       } else {
-        if (c.buffer < j.n) return false;
+        if (c.buffer - c.bufRail < j.n) return false;
         c.buffer -= j.n;
       }
     } else if (j.srcKind === 'store') {
       if (j.cargo === 'exp') {
         if (this.stockExp[j.src] < j.n) return false;
         this.stockExp[j.src] -= j.n;
+      } else if (j.cargo === 'rimp') {
+        if (this.stockRail[j.src] < j.n) return false;
+        this.stockRail[j.src] -= j.n;
+        this.stock[j.src] -= j.n;
       } else {
-        if (this.stock[j.src] < j.n) return false;
+        if (this.stock[j.src] - (j.cargo === 'imp' ? this.stockRail[j.src] : 0) < j.n) return false;
         this.stock[j.src] -= j.n;
         if (j.cargo === 'reef') this.reefTimes.get(j.src)?.splice(0, j.n);
       }
@@ -2422,7 +2495,10 @@ export class Sim {
     }
     if (j.dstKind === 'store') {
       if (j.cargo === 'exp') this.stockExp[j.dst] += j.n;
-      else {
+      else if (j.cargo === 'rimp') {
+        this.stock[j.dst] += j.n;
+        this.stockRail[j.dst] += j.n;
+      } else {
         this.stock[j.dst] += j.n;
         if (j.cargo === 'reef') {
           const q = this.reefTimes.get(j.dst) ?? [];
@@ -2469,7 +2545,13 @@ export class Sim {
       const storeTile = j.stage === 0 ? (j.srcKind === 'store' ? j.src : -1) : j.dstKind === 'store' ? j.dst : -1;
       if (storeTile >= 0 && this.rtgCovers(storeTile)) t.wait *= RTG_HANDLE;
       // Hohe Stapel: Wer unten steht, muss erst freigeräumt werden (Abholen vom Lager)
-      else if (storeTile >= 0 && j.stage === 0) t.wait *= 1 + 0.6 * Math.min(1, (this.stock[storeTile] + this.stockExp[storeTile]) / this.capAt(storeTile));
+      // Umstapeln: Container anderer Art liegen im Weg (gemischte Felder), hohe Stapel dauern etwas länger
+      else if (storeTile >= 0 && j.stage === 0) {
+        const others = this.othersOn(storeTile, j.cargo);
+        const fill = (this.stock[storeTile] + this.stockExp[storeTile]) / this.capAt(storeTile);
+        t.wait *= 1 + 0.35 * Math.min(4, others) + 0.2 * Math.min(1, fill);
+        if (others > 0) this.restacks++;
+      }
       const ok = j.stage === 0 ? this.pickUp(t, j) : this.dropOff(t, j);
       if (!ok) this.cancelJob(t);
       return;
@@ -3358,6 +3440,8 @@ export class Sim {
           } else if (ship.containers > 0) {
             ship.containers--;
             c.buffer++;
+            // Ziel festlegen: Ein Teil der Container soll mit der Bahn weiter
+            if (this.railShare > 0 && this.rnd() < this.railShare) c.bufRail++;
           } else if (ship.reefers > 0) {
             ship.reefers--;
             c.bufReef++;
@@ -4095,6 +4179,8 @@ export class Sim {
       kind: Array.from(this.kind),
       stock: Array.from(this.stock),
       stockExp: Array.from(this.stockExp),
+      stockRail: Array.from(this.stockRail),
+      yardUse: Array.from(this.yardUse),
       depth: Array.from(this.depth),
       cranes: this.cranes.map((c) => ({ x: c.x, y: c.y, big: c.big, model: c.model, wear: c.wear })),
       shops: this.shops.map((s) => ({ x: s.x, y: s.y })),
@@ -4196,6 +4282,8 @@ export class Sim {
     s.pending = d.pending ?? null;
     s.stock.set(d.stock);
     if (d.stockExp) s.stockExp.set(d.stockExp);
+    if (d.stockRail) s.stockRail.set(d.stockRail);
+    if (d.yardUse) s.yardUse.set(d.yardUse);
     if (d.depth) s.depth.set(d.depth);
     for (const c of d.cranes) {
       s.place('crane', c.x, c.y);

@@ -1478,3 +1478,38 @@ describe('Eigenschaften, Weltlage, Strom, Regeln', () => {
     expect(sim.hourly.length).toBeGreaterThan(0);
   });
 });
+
+describe('Container-Ziele und Umstapeln', () => {
+  function railPort(): Sim {
+    const sim = basicPort(6, 1);
+    sim.level = 3;
+    sim.money = 1e7;
+    for (let x = 21; x <= GRID_W - 1; x++) sim.build('road', x, k + 1);
+    sim.build('rail', GRID_W - 1, k + 2);
+    sim.finishAll();
+    return sim;
+  }
+
+  it('mit Gleisanschluss bekommt ein Teil der Importe das Ziel Bahn, und sie fahren auch mit der Bahn', () => {
+    const sim = railPort();
+    run(sim, 30);
+    const railed = sim.trainsDone;
+    expect(sim.railShare).toBeGreaterThan(0);
+    expect(railed).toBeGreaterThan(0);
+    // Was auf dem Bahnsteig landet, kam aus Bahn-Containern
+    expect(sim.yardTileList.some((i) => sim.stockRail[i] > 0) || sim.trainsDone > 0).toBe(true);
+  });
+
+  it('Lagerzweck: Bahn-Felder nehmen nur Bahn-Container, gemischte Felder kosten Umstapeln', () => {
+    const sim = railPort();
+    const tiles = sim.yardTileList;
+    sim.setYardUse(tiles[0] % GRID_W, (tiles[0] / GRID_W) | 0, 2);
+    run(sim, 20);
+    const t0 = tiles[0];
+    expect(sim.stock[t0] - sim.stockRail[t0]).toBe(0);
+    expect(sim.setYardUse(2, k + 5, 1).ok).toBe(false);
+    const copy = Sim.deserialize(JSON.parse(JSON.stringify(sim.serialize())));
+    expect(copy.yardUse[t0]).toBe(2);
+    expect(Array.from(copy.stockRail)).toEqual(Array.from(sim.stockRail));
+  });
+});

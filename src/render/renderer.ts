@@ -1,5 +1,5 @@
 import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture, TilingSprite } from 'pixi.js';
-import { CRANE_MODELS, DIFFS, SHIP_PATIENCE_GM, TRUCK_PATIENCE_GM, ZONES, COAST_ROW, CRANE_EXP_BUFFER, GRID_H, GRID_W, MapId, MIN_PER_DAY, PLOT_W, RAIL_CAP, RAIL_TRAVEL_GM, dimsOf, T, TICK_GM, TILE, YARD_CAP_PER_TILE, RTG_CAP } from '../sim/data';
+import { CRANE_MODELS, YARD_USES, DIFFS, SHIP_PATIENCE_GM, TRUCK_PATIENCE_GM, ZONES, COAST_ROW, CRANE_EXP_BUFFER, GRID_H, GRID_W, MapId, MIN_PER_DAY, PLOT_W, RAIL_CAP, RAIL_TRAVEL_GM, dimsOf, T, TICK_GM, TILE, YARD_CAP_PER_TILE, RTG_CAP } from '../sim/data';
 import type { Crane, Rail, Ship, Sim, Truck } from '../sim/sim';
 import { N as QN, S as QS_, W as QW, qOf, qOfWater, qTile, sideOf, OUT, Q_MAX } from '../sim/quay';
 /** Drehung der Kai-Grafik: Wasser liegt im Norden, Süden, Westen oder Osten */
@@ -73,6 +73,8 @@ const CAB = [0xf2b632, 0xe8542f, 0x2f7fd0, 0xf4f5f7];
 const EXPORT_BOX = 0x4a607c;
 const REEFER_BOX = 0xf4f9fd;
 const HAZ_BOX = 0xe8602c;
+/** Import-Container mit Ziel Bahn: braun */
+const RAIL_BOX = 0x8a5a33;
 const EMPTY_BOX = 0x9aa8b6;
 /** Ausgepackte Ware ist braun (Kisten), Fertigware gold. */
 const WARE_BOX = 0xb98a52;
@@ -816,6 +818,14 @@ export class Renderer {
     }
     this.drawBuildings(g, sim);
 
+    // Lagerzweck: farbiges Band unten am Stapelfeld
+    for (let i = 0; i < sim.yardUse.length; i++) {
+      const u = sim.yardUse[i];
+      if (!u || sim.kind[i] !== T.Yard) continue;
+      const px = (i % GRID_W) * TILE;
+      const py = ((i / GRID_W) | 0) * TILE;
+      g.rect(px + 2, py + TILE - 5, TILE - 4, 3).fill(YARD_USES[u].color);
+    }
     // Zonen: Lagerfelder mit farbigem Rand, Gebäude mit farbiger Ecke
     for (let i = 0; i < sim.zone.length; i++) {
       const z = sim.zone[i];
@@ -1088,8 +1098,9 @@ export class Renderer {
     for (const [i, y] of this.yard) {
       const imp = sim.stock[i];
       const exp = sim.stockExp[i];
+      const rail = sim.stockRail[i];
       const cap = sim.capAt(i);
-      const key = imp * 16 + exp + cap * 256;
+      const key = imp * 16 + exp + cap * 256 + rail * 65536;
       if (key === y.key) continue;
       y.key = key;
       if (y.type === 'empty') {
@@ -1111,7 +1122,7 @@ export class Renderer {
       for (let k = 0; k < y.sprites.length; k++) {
         const sp = y.sprites[k];
         sp.visible = k < imp + exp;
-        sp.tint = k < imp ? (y.type === 'reefer' ? REEFER_BOX : y.type === 'haz' ? HAZ_BOX : BOX[hash(i, k) % BOX.length]) : EXPORT_BOX;
+        sp.tint = k < imp ? (y.type === 'reefer' ? REEFER_BOX : y.type === 'haz' ? HAZ_BOX : k >= imp - rail ? RAIL_BOX : BOX[hash(i, k) % BOX.length]) : EXPORT_BOX;
       }
     }
   }

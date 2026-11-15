@@ -33,7 +33,7 @@ function loadBp(): Blueprint | null {
   }
 }
 
-export const PAINT_TOOLS: Tool[] = ['kai', 'road', 'road2', 'hwy', 'yard', 'reefer', 'hazard', 'emptyyard', 'dredge', 'zone', 'demolish'];
+export const PAINT_TOOLS: Tool[] = ['yarduse', 'kai', 'road', 'road2', 'hwy', 'yard', 'reefer', 'hazard', 'emptyyard', 'dredge', 'zone', 'demolish'];
 
 /** So lange (in Spielminuten) lässt sich eine Bauaktion rückgängig machen. */
 const UNDO_WINDOW_GM = 240;
@@ -71,6 +71,8 @@ export class Game {
   assignRole: TruckRole = 'crane';
   /** Zone, die das Zonen-Werkzeug vergibt (0 = entfernen) */
   zonePick = 1;
+  /** Lagerzweck, den das Werkzeug malt (0 gemischt, 1 Straße, 2 Bahn, 3 Export) */
+  usePick = 1;
   rect: View['rect'] = null;
 
   private acc = 0;
@@ -464,6 +466,11 @@ export class Game {
       this.sound.play('click');
       return null;
     }
+    if (this.tool === 'yarduse') {
+      const r = this.sim.setYardUse(x, y, this.usePick);
+      if (!r.ok) return r.reason ?? 'Nicht möglich';
+      return null;
+    }
     if (this.tool === 'oneway') {
       const r = this.sim.toggleOneway(x, y);
       if (!r.ok) return r.reason ?? 'Nicht möglich';
@@ -781,6 +788,7 @@ export class Game {
       return k === T.Yard || k === T.Reefer || k === T.Hazmat || k === T.Empty || !!(this.sim.craneAt(x, y) ?? this.sim.gateAt(x, y) ?? this.sim.plantAt(x, y) ?? this.sim.railAt(x, y) ?? this.sim.truckAtTile(i));
     }
     if (this.tool === 'oneway') return this.sim.kind[this.sim.idx(x, y)] === T.Road;
+    if (this.tool === 'yarduse') return this.sim.kind[this.sim.idx(x, y)] === T.Yard;
     if (this.tool === 'buyland') return x >= 0 && x < GRID_W && !this.sim.owned[x];
     if (this.tool === 'demolish') return this.sim.canDemolish(x, y).ok;
     if (this.tool === 'paste') return !!this.blueprint && x >= 0 && y >= 0 && x + this.blueprint.w <= GRID_W && y + this.blueprint.h <= GRID_H;

@@ -32,19 +32,24 @@ function check(s: Sim, step: number) {
   expect(Number.isFinite(s.money)).toBe(true);
 
   // Reservierungen müssen genau zu den laufenden Fahrten passen, sonst blockieren Plätze für immer
-  const priv = s as unknown as { resIn: Int16Array; resOut: Int16Array; resOutExp: Int16Array };
+  const priv = s as unknown as { resIn: Int16Array; resOut: Int16Array; resOutExp: Int16Array; resOutRail: Int16Array };
   const wantIn = new Map<number, number>();
   const wantOut = new Map<number, number>();
   for (const t of s.trucks) {
     const j = t.job;
     if (!j) continue;
     if (j.dstKind === 'store') wantIn.set(j.dst, (wantIn.get(j.dst) ?? 0) + j.n);
-    if (j.stage === 0 && j.srcKind === 'store') wantOut.set(j.src * 2 + (j.cargo === 'exp' ? 1 : 0), (wantOut.get(j.src * 2 + (j.cargo === 'exp' ? 1 : 0)) ?? 0) + j.n);
+    if (j.stage === 0 && j.srcKind === 'store') {
+      const key = j.src * 3 + (j.cargo === 'exp' ? 1 : j.cargo === 'rimp' ? 2 : 0);
+      wantOut.set(key, (wantOut.get(key) ?? 0) + j.n);
+    }
   }
   for (const i of [...s.yardTileList, ...s.reeferTileList, ...s.hazTileList, ...s.emptyTileList]) {
     expect(priv.resIn[i], `${where}: Platzreservierung auf Feld ${i}`).toBe(wantIn.get(i) ?? 0);
-    expect(priv.resOut[i], `${where}: Abholreservierung auf Feld ${i}`).toBe(wantOut.get(i * 2) ?? 0);
-    expect(priv.resOutExp[i], `${where}: Export-Reservierung auf Feld ${i}`).toBe(wantOut.get(i * 2 + 1) ?? 0);
+    expect(priv.resOut[i], `${where}: Abholreservierung auf Feld ${i}`).toBe(wantOut.get(i * 3) ?? 0);
+    expect(priv.resOutExp[i], `${where}: Export-Reservierung auf Feld ${i}`).toBe(wantOut.get(i * 3 + 1) ?? 0);
+    expect(priv.resOutRail[i], `${where}: Bahn-Reservierung auf Feld ${i}`).toBe(wantOut.get(i * 3 + 2) ?? 0);
+    expect(s.stockRail[i]).toBeLessThanOrEqual(s.stock[i]);
   }
   // Anlagen: Reservierungen für Leergut, Ware und Gefahrgut müssen zu den Fahrten passen
   const sum = (f: (j: NonNullable<(typeof s.trucks)[number]['job']>) => boolean) => s.trucks.reduce((a, t) => a + (t.job && f(t.job) ? t.job.n : 0), 0);
@@ -58,6 +63,8 @@ function check(s: Sim, step: number) {
   for (const r of s.rails) expect(r.resOutG, `${where}: Zugware`).toBe(sum((j) => j.stage === 0 && j.srcKind === 'rail' && j.src === r.id));
   for (const c of s.cranes) {
     expect(c.resOutHaz, `${where}: Kran Gefahrgut`).toBe(sum((j) => j.stage === 0 && j.srcKind === 'crane' && j.src === c.id && j.cargo === 'haz'));
+    expect(c.resOutRail, `${where}: Kran Bahn`).toBe(sum((j) => j.stage === 0 && j.srcKind === 'crane' && j.src === c.id && j.cargo === 'rimp'));
+    expect(c.bufRail).toBeLessThanOrEqual(c.buffer);
     expect(c.resOutReef, `${where}: Kran Kühl`).toBe(sum((j) => j.stage === 0 && j.srcKind === 'crane' && j.src === c.id && j.cargo === 'reef'));
   }
   for (const g of s.gates) {
@@ -88,7 +95,8 @@ it.each([1, 2, 3, 4, 5, 6, 7])('Zufallsfolge %i bleibt stabil', (seed) => {
     } else if (roll < 0.8 && s.trucks.length) {
       const t = s.trucks[Math.floor(rnd() * s.trucks.length)];
       s.setRole(t.id, (['auto', 'crane', 'out', 'export', 'plant'] as const)[Math.floor(rnd() * 5)]);
-    } else if (roll < 0.83) s.toggleOneway(x, y);
+    } else if (roll < 0.82) s.toggleOneway(x, y);
+    else if (roll < 0.83) s.setYardUse(x, y, Math.floor(rnd() * 4));
     else if (roll < 0.85 && s.trucks.length) s.trucks[Math.floor(rnd() * s.trucks.length)].wear = 1;
     for (let i = 0; i < 6; i++) s.tick();
     if (s.pending) s.resolveDecision(Math.floor(rnd() * 2));

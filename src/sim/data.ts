@@ -32,8 +32,8 @@ export enum T {
   Battery = 14,
 }
 
-export type Tool = 'view' | 'kai' | 'crane' | 'lcrane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'road2' | 'hwy' | 'solar' | 'battery' | 'rtg' | 'hazard' | 'emptyyard' | 'fill' | 'assign' | 'copy' | 'paste' | 'zone' | 'oneway' | 'buyland' | 'demolish';
-export type BuildTool = Exclude<Tool, 'view' | 'demolish' | 'assign' | 'copy' | 'paste' | 'zone' | 'oneway' | 'buyland'>;
+export type Tool = 'view' | 'kai' | 'crane' | 'lcrane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'road2' | 'hwy' | 'solar' | 'battery' | 'rtg' | 'hazard' | 'emptyyard' | 'fill' | 'assign' | 'copy' | 'paste' | 'yarduse' | 'zone' | 'oneway' | 'buyland' | 'demolish';
+export type BuildTool = Exclude<Tool, 'view' | 'demolish' | 'assign' | 'copy' | 'paste' | 'yarduse' | 'zone' | 'oneway' | 'buyland'>;
 
 export const COST: Record<BuildTool, number> = {
   kai: 5_000,
@@ -523,3 +523,11 @@ export const RULE_ACTS: Record<RuleAct, string> = {
   'shift:off': 'Nachtschicht ausschalten',
 };
 export const MAX_RULES = 6;
+
+/** Lagerzwecke für Stapelfelder */
+export const YARD_USES = [
+  { name: 'Gemischt', color: 0x9aa5b1 },
+  { name: 'Straße', color: 0x2f9e6b },
+  { name: 'Bahn', color: 0x9c6b3c },
+  { name: 'Export', color: 0x2f6db0 },
+];

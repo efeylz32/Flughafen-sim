@@ -29,6 +29,7 @@ import {
   sizeOf,
   SHIP_PATIENCE_GM,
   GOAL_LEVEL,
+  YARD_USES,
   TRAITS,
   WORLD,
   RULE_CONDS,
@@ -62,6 +63,7 @@ const ICONS: Record<string, string> = {
   view: svg('<path d="M7 3.5l11 7-4.6 1.4 2.8 5.6-2.6 1.3-2.8-5.6L5.8 16z"/>'),
   kai: svg('<rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M3 9h18M7 9v4M12 9v4M17 9v4"/>'),
   crane: svg('<path d="M6 21V6M3 21h6M6 6h14M17 6v6"/><rect x="15" y="12" width="4" height="3" rx=".6"/><path d="M6 6l6-3"/>'),
+  yarduse: svg('<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><path d="M14 16.5h5M16.5 14v5"/>'),
   solar: svg('<rect x="3" y="6" width="18" height="12" rx="1"/><path d="M3 12h18M9 6v12M15 6v12"/>'),
   battery: svg('<rect x="3" y="7" width="16" height="10" rx="2"/><path d="M21 10v4M7 10v4M11 10v4"/>'),
   monitor: svg('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4M6 12l3-3 3 2 5-5"/>'),
@@ -140,6 +142,7 @@ const TOOLS: ToolDef[] = [
   { cat: 'gear', tool: 'truck', label: 'Truck', sub: '25k', color: '#e0a030' },
   { cat: 'build', tool: 'unpack', label: 'Packhalle', sub: '60k · 3×2', color: '#c98a3c' },
   { cat: 'build', tool: 'pack', label: 'Veredeln', sub: '90k · 3×3', color: '#7a5cc7' },
+  { cat: 'store', tool: 'yarduse', label: 'Lagerzweck', sub: 'Malen', color: '#9c6b3c' },
   { cat: 'store', tool: 'rtg', label: 'Portalkran', sub: '60k', color: '#f2a030' },
   { cat: 'store', tool: 'reefer', label: 'Kühlplatz', sub: '4k', color: '#3b9bd6' },
   { cat: 'store', tool: 'hazard', label: 'Gefahrgut', sub: '12k', color: '#e8602c' },
@@ -181,7 +184,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''):
 function jobText(j: Job | null): string {
   if (!j) return 'Wartet auf einen Auftrag';
   const store = j.cargo === 'reef' ? 'Kühlplatz' : j.cargo === 'haz' ? 'Gefahrgutfläche' : j.cargo === 'empty' ? 'Leerlager' : 'Stapelplatz';
-  const cargo = { imp: 'Container', reef: 'Kühlcontainer', haz: 'Gefahrgut', empty: 'Leercontainer', exp: 'Export-Container', ware: 'ausgepackte Ware', prem: 'Fertigware', food: 'Lebensmittel' }[j.cargo];
+  const cargo = { imp: 'Container', rimp: 'Bahn-Container', reef: 'Kühlcontainer', haz: 'Gefahrgut', empty: 'Leercontainer', exp: 'Export-Container', ware: 'ausgepackte Ware', prem: 'Fertigware', food: 'Lebensmittel' }[j.cargo];
   if (j.stage === 0) return `Fährt zu: ${j.srcKind === 'crane' ? 'Kran' : j.srcKind === 'gate' ? 'Gate' : j.srcKind === 'plant' ? 'Verarbeitung' : j.srcKind === 'rail' ? 'Gleisanschluss' : store}`;
   const dst = j.dstKind === 'store' ? store : j.dstKind === 'gate' ? 'Gate' : j.dstKind === 'rail' ? 'Gleisanschluss' : j.dstKind === 'plant' ? 'Verarbeitung' : 'Kran';
   return `Bringt ${cargo} zu: ${dst}`;
@@ -237,6 +240,7 @@ export class UI {
   private achModal!: HTMLElement;
   private zonePick!: HTMLElement;
   private rotPick!: HTMLElement;
+  private usePick!: HTMLElement;
   private ctlModal!: HTMLElement;
   private ctlBody!: HTMLElement;
   private ctlTab: 'overview' | 'devices' | 'rules' | 'power' = 'overview';
@@ -500,7 +504,18 @@ export class UI {
       });
       this.usedPick.appendChild(b);
     }
-    bar.append(this.rolePick, this.zonePick, this.rotPick, this.usedPick, tabs, row);
+    this.usePick = el('div', 'rolepick zonepick hidden');
+    YARD_USES.forEach((u, i) => {
+      const b = el('button', '', `<span class="zdot" style="background:${hex(u.color)}"></span>${u.name}`);
+      b.dataset.use = String(i);
+      b.addEventListener('click', () => {
+        this.game.usePick = i;
+        this.refreshTools();
+        click();
+      });
+      this.usePick.appendChild(b);
+    });
+    bar.append(this.usePick, this.rolePick, this.zonePick, this.rotPick, this.usedPick, tabs, row);
     for (const t of TOOLS) {
       const b = el('button', 'tool');
       b.innerHTML = `<span class="ico" style="--c:${t.color}">${ICONS[t.tool]}<span class="lk">${ICONS.lock}</span></span><b>${t.label}</b><small>${t.sub}</small>`;
@@ -1041,6 +1056,8 @@ export class UI {
     for (const [id, b] of this.catBtns) b.classList.toggle('on', id === this.cat);
     this.rolePick.classList.toggle('hidden', this.game.tool !== 'assign');
     this.zonePick.classList.toggle('hidden', this.game.tool !== 'zone');
+    this.usePick.classList.toggle('hidden', this.game.tool !== 'yarduse');
+    for (const b of this.usePick.querySelectorAll<HTMLElement>('button')) b.classList.toggle('on', Number(b.dataset.use) === this.game.usePick);
     const [sw, sh] = sizeOf(this.game.tool);
     this.rotPick.classList.toggle('hidden', sw === sh);
     const usable = this.game.tool === 'crane' || this.game.tool === 'lcrane' || this.game.tool === 'truck';
@@ -1598,8 +1615,11 @@ export class UI {
         <div class="meta">Wartend nach draußen: ${g.apron.length} von ${GATE_APRON_CAP}${sim.level >= 2 ? ` · Export wartet auf Truck: ${g.inApron}` : ''}</div>
         <div class="meta">Abgefertigt: ${num(g.served)}</div>`;
     } else if (sel.kind === 'yard') {
+      const kinds = [sim.stock[sel.id] - sim.stockRail[sel.id], sim.stockRail[sel.id], sim.stockExp[sel.id]].filter((n) => n > 0).length;
       html = `<h3>Stapelplatz <span class="tag">${sim.capAt(sel.id)} Container pro Feld${sim.rtgCovers(sel.id) ? ' mit Portalkran' : ''}</span></h3>
-        <div class="meta">Dieses Feld: ${sim.stock[sel.id]} Import, ${sim.stockExp[sel.id]} Export</div>
+        <div class="meta"><span class="zdot" style="background:${hex(YARD_USES[sim.yardUse[sel.id]].color)}"></span>Zweck: ${YARD_USES[sim.yardUse[sel.id]].name}</div>
+        <div class="meta">Dieses Feld: ${sim.stock[sel.id] - sim.stockRail[sel.id]} für die Straße, ${sim.stockRail[sel.id]} für die Bahn, ${sim.stockExp[sel.id]} Export</div>
+        ${kinds > 1 ? '<div class="meta neg">Gemischt: Beim Abholen muss umgestapelt werden, das kostet Zeit. Mit „Lagerzweck“ sortieren.</div>' : ''}
         <div class="meta">Gesamt: ${sim.yardStock} von ${sim.yardCapacity}</div>`;
     } else if (sel.kind === 'hazmat') {
       html = `<h3>Gefahrgutfläche <span class="tag">${sim.capAt(sel.id)} Container pro Feld</span></h3>
