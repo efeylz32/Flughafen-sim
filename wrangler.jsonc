@@ -1,0 +1,11 @@
+{
+  // Cloudflare Workers: liefert nur die fertig gebaute Seite aus dist/ aus (kein Server-Code).
+  // Die Cache-Regeln stehen in public/_headers und landen beim Bauen in dist/.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "flughafen-sim",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}

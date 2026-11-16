@@ -94,6 +94,10 @@ Alle Werte stehen in `src/sim/data.ts`. Das Balancing ist grob und noch nicht du
 
 Das Spiel ist eine installierbare Web-App (PWA): Nach dem ersten Öffnen ist alles im Browser gespeichert und läuft auch offline. Im Hauptmenü zeigt „Als App installieren“, wie es geht (Android: Menü, „App installieren“; iPhone/iPad: Teilen, „Zum Home-Bildschirm“; PC: Installieren-Symbol in der Adressleiste).
 
+### Hosting mit Cloudflare Workers (Git-Anbindung)
+
+Wenn das Projekt in Cloudflare als **Worker** angelegt ist (Deploy-Befehl `npx wrangler deploy`): Build-Befehl `npm run build`, Deploy-Befehl `npx wrangler deploy`. Die Datei `wrangler.jsonc` sagt Wrangler, dass nur der Ordner `dist` als statische Seite ausgeliefert wird.
+
 ### Hosting mit Cloudflare Pages
 
 1. Im Cloudflare-Dashboard: Workers & Pages, Erstellen, Pages, „Mit Git verbinden“ und dieses GitHub-Repository wählen.
