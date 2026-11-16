@@ -443,3 +443,18 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .statecard .wide { grid-column: 1 / -1; }
 .ctl .ctltabs { flex: none; }
 .ctl .ctltabs button { min-height: 40px; font-size: 14px; white-space: nowrap; }
+
+/* Kein Seitenzoom und kein Zurückfedern: Nur das Spiel selbst wird gezoomt */
+html, body { touch-action: none; overscroll-behavior: none; }
+.modal, .dialog, .sheet, .toolbar, .tools, .rolepick, .tabs { touch-action: pan-x pan-y; }
+
+.fleet { display: flex; flex-direction: column; gap: 8px; }
+.fleetrow { background: #f3f6fa; border-radius: 12px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.fleetrow.bad { background: #fdeceb; }
+.fleetrow .fh { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.fleetrow .fh b { flex: 1; }
+.fleetrow .chip { border: 0; border-radius: 999px; padding: 6px 10px; font-weight: 800; font-size: 12.5px; background: var(--accent); color: #fff; }
+.fleetrow .fb { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12.5px; color: #34455a; }
+.fleetrow .fb span { flex: 1 1 100%; }
+.fleetrow .fb button { border: 0; border-radius: 9px; padding: 7px 9px; font-weight: 700; font-size: 12.5px; background: #e3e8ef; }
+.ghostbtns .primary.danger { background: var(--bad); }

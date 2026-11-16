@@ -302,7 +302,7 @@ export const SHIP_MAX_STAY_GM = 1440;
 export type ShipTypeId = 'coaster' | 'feeder' | 'panamax' | 'mega';
 export const SHIP_TYPES: Record<ShipTypeId, { name: string; len: number; containers: number; deep: boolean; berthFee: number; dwell: number }> = {
   /** Freie Schiffe ohne Vertrag: klein, selten, bringen wenig */
-  coaster: { name: 'Küstenfrachter', len: 4, containers: 60, deep: false, berthFee: 800, dwell: 300 },
+  coaster: { name: 'Küstenfrachter', len: 4, containers: 45, deep: false, berthFee: 400, dwell: 300 },
   feeder: { name: 'Feeder', len: 4, containers: 120, deep: false, berthFee: 2_500, dwell: 480 },
   panamax: { name: 'Panamax', len: 6, containers: 300, deep: true, berthFee: 8_000, dwell: 720 },
   /** Ab Stufe 5: braucht 8 Kai-Felder, ausgebaggert */
@@ -362,7 +362,7 @@ export const EXPORT_FEE = 250;
 // Hafenstufen: `need` ist die Zahl der insgesamt umgeschlagenen Container
 export const LEVELS = [
   { name: 'Anleger', need: 0, bonus: 0, contracts: 0 },
-  { name: 'Regionalhafen', need: 1_500, bonus: 40_000, contracts: 2 },
+  { name: 'Regionalhafen', need: 1_000, bonus: 40_000, contracts: 2 },
   { name: 'Handelshafen', need: 7_000, bonus: 100_000, contracts: 3 },
   { name: 'Seehafen', need: 17_000, bonus: 180_000, contracts: 4 },
   { name: 'Weltklasse-Hafen', need: 36_000, bonus: 300_000, contracts: 5 },

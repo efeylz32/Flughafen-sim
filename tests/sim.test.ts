@@ -100,8 +100,8 @@ describe('Container-Fluss', () => {
     const onCranes = sim.cranes.reduce((n, c) => n + c.buffer, 0);
     const onTrucks = sim.trucks.reduce((n, t) => n + t.load, 0);
     const onGates = sim.gates.reduce((n, g) => n + g.apron.length + (g.proc > 0 ? 1 : 0), 0);
-    // Ohne Vertrag kommen nur Küstenfrachter mit 60 Containern
-    const total = 60 * (sim.shipsDone + sim.ships.filter((s) => s.state !== 'leaving').length);
+    // Ohne Vertrag kommen nur Küstenfrachter mit 45 Containern
+    const total = 45 * (sim.shipsDone + sim.ships.filter((s) => s.state !== 'leaving').length);
     expect(onShips + onCranes + onTrucks + sim.yardStock + onGates + sim.containersDone).toBe(total);
   });
 });
@@ -488,9 +488,11 @@ describe('Verarbeitung und Aufgaben', () => {
   });
 
   it('feste Aufgaben sind schneller als die Automatik', () => {
-    const auto = bigPort(1, 6);
-    const fixed = bigPort(1, 6);
-    fixed.trucks.forEach((t, i) => fixed.setRole(t.id, i < 3 ? 'crane' : 'out'));
+    // Mit wenigen Trucks und vielen Schiffen sind die Trucks der Engpass
+    const auto = bigPort(1, 4);
+    const fixed = bigPort(1, 4);
+    for (const s of [auto, fixed]) s.nextShipIn = 0;
+    fixed.trucks.forEach((t, i) => fixed.setRole(t.id, i % 2 ? 'out' : 'crane'));
     run(auto, 48);
     run(fixed, 48);
     expect(fixed.containersDone).toBeGreaterThan(auto.containersDone);

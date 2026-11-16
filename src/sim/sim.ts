@@ -2595,6 +2595,8 @@ export class Sim {
     let fee = j.cargo === 'reef' ? REEFER_FEE : j.cargo === 'haz' ? HAZ_FEE : j.cargo === 'empty' ? EMPTY_FEE : FEE_PER_CONTAINER;
     if (j.cargo === 'prem') fee = this.price(this.plants.find((p) => p.id === j.src)?.product ?? 'elec');
     if (j.cargo === 'food') fee = this.price('food');
+    // Auf Stufe 1 zahlen Spediteure einem kleinen Anleger weniger
+    if (this.level < 2 && (j.cargo === 'imp' || j.cargo === 'rimp' || j.cargo === 'reef' || j.cargo === 'haz')) fee *= 0.6;
     fee = Math.round(fee * (1 + 0.05 * this.tech.sales) * (this.traits.includes('freezone') ? 1.1 : 1) * (this.world ? WORLD[this.world.id].fee : 1) * CYCLES[this.cycle.kind].fee * (j.cargo === 'reef' && this.spec === 'cold' ? 1.25 : 1));
     if (j.dstKind === 'gate' || j.dstKind === 'rail') {
       if (j.cargo === 'prem') this.premiumDone += j.n;
@@ -2799,6 +2801,45 @@ export class Sim {
     for (const o of this.ships) if (o !== s && o.state === 'queued') o.queuedFor += 45;
     this.emit(`${s.name} wird vorgezogen (Lotsengebühr ${eur(cost)}). Die anderen Wartenden werden ungeduldiger.`, 'info');
     return { ok: true, cost };
+  }
+
+  /** Truck gegen einen neuen tauschen: Der alte wird in Zahlung gegeben (je nach Zustand) */
+  replaceCost(id: number): number {
+    const t = this.trucks.find((x) => x.id === id);
+    if (!t) return 0;
+    return Math.max(0, this.costOf('truck') - Math.round(t.paid * 0.35 * t.cap * (1 - t.wear * 0.5)));
+  }
+  replaceTruck(id: number): BuildCheck {
+    const t = this.trucks.find((x) => x.id === id);
+    const cost = this.replaceCost(id);
+    if (!t) return { ok: false, reason: 'Der Truck existiert nicht mehr', cost };
+    if (t.job) return { ok: false, reason: 'Der Truck ist gerade unterwegs', cost };
+    if (this.money < cost) return { ok: false, reason: 'Zu wenig Geld', cost };
+    this.money -= cost;
+    this.today.building += cost;
+    t.cap = 1;
+    t.wear = 0;
+    t.agv = false;
+    t.build = 0;
+    t.paid = this.costOf('truck');
+    this.version++;
+    return { ok: true, cost };
+  }
+
+  /** Was der Hafen pro Tag schaffen könnte, wenn genug Schiffe kommen (grobe Schätzung je Stufe) */
+  potential(): { crane: number; out: number; trucks: number; best: number; limit: string; fee: number } {
+    const crane = Math.round(this.cranes.filter((c) => !c.build).reduce((n, c) => n + (60 / this.moveTime({ ...c, wear: Math.min(c.wear, 1 - c.cap) })) * 24, 0));
+    const gates = this.gates.filter((g) => !g.build).reduce((n, g) => n + (60 / (GATE_PROCESS_GM / (1 + 0.2 * this.tech.scanner) / this.hinterlandMul(g))) * 24, 0);
+    const rails = this.rails.filter((r) => !r.build && this.railLinked(r)).length * RAIL_CAP * (1440 / (RAIL_INTERVAL_GM * (this.traits.includes('railhub') ? 0.67 : 1)));
+    const out = Math.round(gates + rails);
+    // Ein Truck schafft je Fahrt 2 Container, eine Fahrt dauert grob 10 Spielminuten
+    const trucks = Math.round(this.trucks.filter((t) => t.staffed && t.wear < 1).length * TRUCK_CAP * (1440 / 10) / 2);
+    const best = Math.min(crane, out, trucks);
+    const limit = best === crane ? 'Kräne' : best === out ? 'Gates und Bahn' : 'Trucks';
+    const hist = this.history.slice(-7);
+    const handled = hist.reduce((n, h) => n + h.handled, 0);
+    const fees = hist.reduce((n, h) => n + h.fees + h.rail + h.exportFees, 0);
+    return { crane, out, trucks, best, limit, fee: handled ? fees / handled : FEE_PER_CONTAINER };
   }
 
   /** Weiterbildung: Die Belegschaft einer Rolle wird erfahrener, einer fehlt dafür ein paar Tage */
@@ -3275,7 +3316,7 @@ export class Sim {
     // Ist die Konkurrenz pünktlicher als du, kommen weniger freie Schiffe
     const mine = this.myRate;
     const rival = this.level >= 2 && mine !== null ? 1 + Math.max(0, this.rivalRate - mine) : 1;
-    const base = (Math.min(300, Math.max(120, 300 - this.rep * 1.5)) + this.contracts.length * 90) * (this.level >= 2 ? MAPS[this.map].ships : 1) * rival * CYCLES[this.cycle.kind].ships * (this.world ? WORLD[this.world.id].ships : 1);
+    const base = (Math.min(300, Math.max(120, 300 - this.rep * 1.5)) + this.contracts.length * 90) * (this.level >= 2 ? MAPS[this.map].ships : 1.3) * rival * CYCLES[this.cycle.kind].ships * (this.world ? WORLD[this.world.id].ships : 1);
     this.nextShipIn = base * (0.8 + this.rnd() * 0.4);
   }
 

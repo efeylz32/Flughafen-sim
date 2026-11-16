@@ -111,12 +111,14 @@ const ICONS: Record<string, string> = {
   trophy: svg('<path d="M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M7 6H4v1.5A3.5 3.5 0 0 0 7.5 11M17 6h3v1.5a3.5 3.5 0 0 1-3.5 3.5M12 14v4M8 20h8"/>'),
 };
 
-type Cat = 'always' | 'land' | 'store' | 'build' | 'gear';
+type Cat = 'always' | 'land' | 'ways' | 'store' | 'build' | 'gear' | 'plan';
 const CATS: { id: Exclude<Cat, 'always'>; name: string }[] = [
   { id: 'land', name: 'Gelände' },
+  { id: 'ways', name: 'Wege' },
   { id: 'store', name: 'Lager' },
   { id: 'build', name: 'Gebäude' },
   { id: 'gear', name: 'Geräte' },
+  { id: 'plan', name: 'Planung' },
 ];
 
 interface ToolDef {
@@ -131,19 +133,19 @@ const TOOLS: ToolDef[] = [
   { cat: 'land', tool: 'kai', label: 'Kai', sub: '5k', color: '#b8b2a3' },
   { cat: 'gear', tool: 'lcrane', label: 'Leichtkran', sub: '40k', color: '#e0a526' },
   { cat: 'gear', tool: 'crane', label: 'Mobilkran', sub: '80k', color: '#e2582c' },
-  { cat: 'land', tool: 'road', label: 'Straße', sub: '500 €', color: '#59606a' },
-  { cat: 'land', tool: 'road2', label: 'Doppelspur', sub: '1,8k', color: '#4a5560' },
-  { cat: 'land', tool: 'hwy', label: 'Autobahn', sub: '4k × 2', color: '#2f6db0' },
+  { cat: 'ways', tool: 'road', label: 'Straße', sub: '500 €', color: '#59606a' },
+  { cat: 'ways', tool: 'road2', label: 'Doppelspur', sub: '1,8k', color: '#4a5560' },
+  { cat: 'ways', tool: 'hwy', label: 'Autobahn', sub: '4k × 2', color: '#2f6db0' },
   { cat: 'store', tool: 'yard', label: 'Stapel', sub: '1k', color: '#c9b88a' },
   { cat: 'build', tool: 'gate', label: 'Gate', sub: '20k · 2×1', color: '#d9534f' },
-  { cat: 'gear', tool: 'assign', label: 'Aufgaben', sub: 'Rahmen', color: '#2a6fdb' },
-  { cat: 'gear', tool: 'copy', label: 'Kopieren', sub: 'Rahmen', color: '#2a9d8f' },
-  { cat: 'gear', tool: 'paste', label: 'Einfügen', sub: 'Plan', color: '#2a9d8f' },
-  { cat: 'gear', tool: 'zone', label: 'Zonen', sub: 'Farbe', color: '#f0b429' },
+  { cat: 'plan', tool: 'assign', label: 'Aufgaben', sub: 'Rahmen', color: '#2a6fdb' },
+  { cat: 'plan', tool: 'copy', label: 'Kopieren', sub: 'Rahmen', color: '#2a9d8f' },
+  { cat: 'plan', tool: 'paste', label: 'Einfügen', sub: 'Plan', color: '#2a9d8f' },
+  { cat: 'plan', tool: 'zone', label: 'Zonen', sub: 'Farbe', color: '#f0b429' },
   { cat: 'gear', tool: 'truck', label: 'Truck', sub: '25k', color: '#e0a030' },
   { cat: 'build', tool: 'unpack', label: 'Packhalle', sub: '60k · 3×2', color: '#c98a3c' },
   { cat: 'build', tool: 'pack', label: 'Veredeln', sub: '90k · 3×3', color: '#7a5cc7' },
-  { cat: 'store', tool: 'yarduse', label: 'Lagerzweck', sub: 'Malen', color: '#9c6b3c' },
+  { cat: 'plan', tool: 'yarduse', label: 'Zweck', sub: 'Lager', color: '#9c6b3c' },
   { cat: 'store', tool: 'rtg', label: 'Portalkran', sub: '60k', color: '#f2a030' },
   { cat: 'store', tool: 'reefer', label: 'Kühlplatz', sub: '4k', color: '#3b9bd6' },
   { cat: 'store', tool: 'hazard', label: 'Gefahrgut', sub: '12k', color: '#e8602c' },
@@ -153,9 +155,9 @@ const TOOLS: ToolDef[] = [
   { cat: 'build', tool: 'solar', label: 'Solar', sub: '15k', color: '#f2c230' },
   { cat: 'build', tool: 'battery', label: 'Batterie', sub: '40k', color: '#2f9e6b' },
   { cat: 'build', tool: 'workshop', label: 'Werkstatt', sub: '40k · 2×2', color: '#5b6b82' },
-  { cat: 'build', tool: 'rail', label: 'Bahnhof', sub: '150k', color: '#5f6f82' },
-  { cat: 'build', tool: 'track', label: 'Gleis', sub: '3k', color: '#8f7a5b' },
-  { cat: 'land', tool: 'oneway', label: 'Einbahn', sub: 'Gratis', color: '#4b525c' },
+  { cat: 'ways', tool: 'rail', label: 'Bahnhof', sub: '150k', color: '#5f6f82' },
+  { cat: 'ways', tool: 'track', label: 'Gleis', sub: '3k', color: '#8f7a5b' },
+  { cat: 'ways', tool: 'oneway', label: 'Einbahn', sub: 'Gratis', color: '#4b525c' },
   { cat: 'land', tool: 'buyland', label: 'Land kaufen', sub: '60k', color: '#6aa953' },
   { cat: 'land', tool: 'dredge', label: 'Baggern', sub: '15k', color: '#1f5f95' },
   { cat: 'always', tool: 'demolish', label: 'Abriss', sub: '50 %', color: '#8a8f98' },
@@ -246,7 +248,7 @@ export class UI {
   private usePick!: HTMLElement;
   private ctlModal!: HTMLElement;
   private ctlBody!: HTMLElement;
-  private ctlTab: 'overview' | 'devices' | 'rules' | 'power' = 'overview';
+  private ctlTab: 'overview' | 'devices' | 'fleet' | 'rules' | 'power' = 'overview';
   private ctlKey = '';
   private newRule: { cond: RuleCond; act: RuleAct } = { cond: 'yardHigh', act: 'role:out' };
   private ghostBar!: HTMLElement;
@@ -539,7 +541,7 @@ export class UI {
     // Leiste für die Vorschau: Platzieren, Drehen, Abbrechen
     this.ghostBar = el('div', 'ghostbar hidden');
     this.ghostBar.innerHTML = `<div class="ghosttext"></div><div class="ghostbtns"><button class="primary gok"></button><button class="secondary grot">${ICONS.rotate}</button><button class="secondary gno" aria-label="Abbrechen">${ICONS.close}</button></div>`;
-    this.ghostBar.querySelector('.gok')!.addEventListener('click', () => this.game.confirmGhost());
+    this.ghostBar.querySelector('.gok')!.addEventListener('click', () => (this.game.demolishAsk ? this.game.confirmDemolish() : this.game.confirmGhost()));
     this.ghostBar.querySelector('.grot')!.addEventListener('click', () => this.game.rotate());
     this.ghostBar.querySelector('.gno')!.addEventListener('click', () => this.game.cancelGhost());
 
@@ -580,6 +582,7 @@ export class UI {
     this.ctlModal.innerHTML = `<div class="dialog deals ctl"><div class="dhead"><h2>Leitstand</h2><button class="x" aria-label="Schließen">${ICONS.close}</button></div><div class="tabs ctltabs">${[
       ['overview', 'Verlauf'],
       ['devices', 'Anlagen'],
+      ['fleet', 'Flotte'],
       ['rules', 'Regeln'],
       ['power', 'Strom'],
     ]
@@ -590,9 +593,29 @@ export class UI {
     this.ctlModal.addEventListener('click', (e) => {
       const t = e.target as HTMLElement;
       if (t === this.ctlModal) return this.ctlModal.classList.add('hidden');
+      // Auswahllisten nicht neu zeichnen, sonst klappen sie sofort wieder zu
+      if (t.closest('select, option, label')) return;
       const tab = t.closest<HTMLElement>('[data-tab]');
       if (tab) this.ctlTab = tab.dataset.tab as typeof this.ctlTab;
       const sim = this.game.sim;
+      const fl = t.closest<HTMLElement>('[data-fl]');
+      if (fl) {
+        const [what, idS] = fl.dataset.fl!.split(':');
+        const id = Number(idS);
+        const tr = sim.trucks.find((x) => x.id === id);
+        if (tr && what === 'role') {
+          const roles = (Object.keys(ROLE_NAMES) as TruckRole[]).filter((r) => (r !== 'plant' && r !== 'export') || sim.level >= 2);
+          sim.setRole(id, roles[(roles.indexOf(tr.role) + 1) % roles.length]);
+        } else if (tr) {
+          const r = what === 'agv' ? sim.upgrade('truck', id) : what === 'over' ? sim.overhaul('truck', id) : what === 'new' ? sim.replaceTruck(id) : null;
+          if (r && !r.ok) this.game.fail(r.reason ?? 'Nicht möglich');
+          else if (r) this.game.sound.play('upgrade');
+        }
+        if (what === 'show' && tr) {
+          this.game.selected = { kind: 'truck', id };
+          this.ctlModal.classList.add('hidden');
+        }
+      }
       const ra = t.closest<HTMLElement>('[data-rule]');
       if (ra) {
         const [what, idx] = ra.dataset.rule!.split(':');
@@ -1136,6 +1159,21 @@ export class UI {
   // ───────────────────────── Aktualisieren ─────────────────────────
 
   private renderGhostBar(sim: Sim) {
+    const ask = this.game.demolishAsk;
+    if (ask) {
+      this.ghostBar.classList.remove('hidden');
+      const key = `del${ask.key}`;
+      if (key === this.ghostKey) return;
+      this.ghostKey = key;
+      this.ghostBar.querySelector('.ghosttext')!.innerHTML = `<b>${ask.label} abreißen?</b> · Du bekommst etwa ${eur(ask.refund)} zurück. Nochmal tippen oder bestätigen.`;
+      const okb = this.ghostBar.querySelector<HTMLButtonElement>('.gok')!;
+      okb.textContent = 'Abreißen';
+      okb.disabled = false;
+      okb.classList.add('danger');
+      this.ghostBar.querySelector('.grot')!.classList.add('hidden');
+      return;
+    }
+    this.ghostBar.querySelector('.gok')!.classList.remove('danger');
     const gh = this.game.ghost;
     this.ghostBar.classList.toggle('hidden', !gh);
     if (!gh) return;
@@ -1302,6 +1340,24 @@ export class UI {
           }</span></div>`
         : `<div class="goal"><b>${sim.status === 'won' ? 'Gewonnen' : sim.status === 'lost' ? 'Verloren' : 'Freies Spiel'}</b><span>${sim.endReason || 'Ohne Ziel und ohne Pleite.'}</span></div>`;
 
+    // Durchschnitt der letzten Tage und was möglich wäre
+    const hist = sim.history.slice(-7);
+    const avg = (f: (b: typeof d) => number) => (hist.length ? hist.reduce((n, b) => n + f(b), 0) / hist.length : 0);
+    const pot = sim.potential();
+    const avgHtml = hist.length
+      ? `<h3>Durchschnitt (letzte ${hist.length} ${hist.length === 1 ? 'Tag' : 'Tage'})</h3>
+        <div class="fl sub"><span>Einnahmen pro Tag</span><span>${eur(avg(income))}</span></div>
+        <div class="fl sub"><span>Ausgaben pro Tag</span><span>${eur(avg(costs))}</span></div>
+        <div class="fl sub"><span>Ergebnis pro Tag</span><span class="${avg(income) - avg(costs) >= 0 ? 'pos' : 'neg'}">${eur(avg(income) - avg(costs))}</span></div>
+        <div class="fl sub"><span>Container pro Tag</span><span>${num(Math.round(avg((b) => b.handled)))}</span></div>`
+      : '';
+    const potHtml = `<h3>Potenzial pro Tag</h3>
+        <div class="fl sub"><span>Kräne schaffen</span><span>${num(pot.crane)} Container</span></div>
+        <div class="fl sub"><span>Gates und Bahn schaffen</span><span>${num(pot.out)} Container</span></div>
+        <div class="fl sub"><span>Trucks schaffen etwa</span><span>${num(pot.trucks)} Container</span></div>
+        <div class="fl"><b>Möglich bei genug Schiffen</b><b>${num(pot.best)} Container · ${eur(pot.best * pot.fee)}</b></div>
+        <p class="sub">Grenze: ${pot.limit}. Schätzung aus Tempo und Anzahl, ohne Staus und Pausen.${hist.length ? ` Genutzt: ${Math.round((avg((b) => b.handled) / Math.max(1, pot.best)) * 100)} %.` : ''}</p>`;
+
     // Verlauf der letzten Tage: Ergebnis und umgeschlagene Container
     const days = [...sim.history.slice(-7), d];
     const res = days.map((b) => income(b) - costs(b));
@@ -1330,6 +1386,7 @@ export class UI {
       <div class="fl total"><b>Ergebnis heute</b><b class="${inc - exp >= 0 ? 'pos' : 'neg'}">${eur(inc - exp)}</b></div>
       <div class="fl sub"><span>Laufend pro Tag: Wartung / Löhne</span><span>${eur(sim.runningCost())} / ${eur((Object.keys(ROLES) as Role[]).reduce((n, r) => n + sim.staff[r] * sim.wagePerHour(r) * 24, 0))}</span></div>
       ${sim.level >= 2 ? `<h3>Konkurrenz</h3><div class="fl sub"><span>${RIVAL_NAME}: pünktlich</span><span>${Math.round(sim.rivalRate * 100)} %</span></div><div class="fl sub"><span>Du gestern</span><span class="${sim.myRate !== null && sim.myRate < sim.rivalRate - 0.1 ? 'neg' : ''}">${sim.myRate === null ? '–' : `${Math.round(sim.myRate * 100)} %`}</span></div><p class="sub">Liegst du mehr als 10 Punkte darunter, wechseln Reedereien und es kommen weniger freie Schiffe.${sim.lostToRival ? ` Bisher verloren: ${sim.lostToRival} Verträge.` : ''}</p>` : ''}
+      ${avgHtml}${potHtml}
       <h3>Lage</h3>
       <div class="fl sub"><span>Weltlage</span><span class="${sim.world ? 'neg' : ''}">${sim.world ? `${WORLD[sim.world.id].name}${sim.world.product ? ` (${PRODUCTS[sim.world.product].name})` : ''}, noch ${sim.world.left} Tage` : 'ruhig'}</span></div>
       ${sim.traits.length ? `<div class="fl sub"><span>Hafen</span><span>${sim.traits.map((t) => TRAITS[t].name).join(', ')}</span></div>` : ''}
@@ -1473,7 +1530,9 @@ export class UI {
 
   private renderCtl(force: boolean) {
     const sim = this.game.sim;
-    const key = `${this.ctlTab}|${sim.hourly.length}|${sim.tickCount >> 6}|${sim.rules.map((r) => `${r.cond}${r.act}${r.on}`).join()}`;
+    const fleetKey = this.ctlTab === 'fleet' ? sim.trucks.map((t) => `${t.id}${t.role}${t.agv}${Math.round(t.wear * 10)}${Math.round(t.cap * 10)}${t.build ? 1 : 0}${t.job ? 1 : 0}`).join() + Math.floor(sim.money / 10000) : '';
+    const live = this.ctlTab === 'rules' || this.ctlTab === 'fleet' ? fleetKey : sim.tickCount >> 6;
+    const key = `${this.ctlTab}|${this.ctlTab === 'rules' ? 0 : sim.hourly.length}|${live}|${sim.rules.map((r) => `${r.cond}${r.act}${r.on}`).join()}`;
     if (!force && key === this.ctlKey) return;
     this.ctlKey = key;
     for (const b of this.ctlModal.querySelectorAll<HTMLElement>('[data-tab]')) b.classList.toggle('on', b.dataset.tab === this.ctlTab);
@@ -1506,6 +1565,25 @@ export class UI {
         <h3>Hallen</h3><table class="ctltab"><tr><th>Halle</th><th>Eingang</th><th>Ausgang</th><th>Gesamt</th></tr>${sim.plants
           .map((p) => `<tr><td>${PLANTS[p.kind].name}</td><td>${p.inBuf}</td><td>${p.outBuf}</td><td>${num(p.made)}</td></tr>`)
           .join('') || '<tr><td colspan="4">Keine</td></tr>'}</table>`;
+    } else if (this.ctlTab === 'fleet') {
+      const status = (t: (typeof sim.trucks)[number]) => (t.build ? 'Überholung' : t.wear >= 1 ? 'ausgefallen' : !t.staffed ? 'ohne Fahrer' : t.stuck > 0 ? 'im Stau' : t.job ? 'unterwegs' : 'frei');
+      html = `<p class="sub">Alle Trucks auf einen Blick. Rolle antippen wechselt sie. ${sim.trucks.length} Trucks, davon ${sim.trucks.filter((t) => t.agv).length} fahrerlos.</p>
+        <div class="fleet">${sim.trucks
+          .map((t, i) => {
+            const w = Math.round((1 - t.wear) * 100);
+            const cap = Math.round(t.cap * 100);
+            const up = sim.upgradeInfo('truck', t.id);
+            return `<div class="fleetrow ${t.wear >= 1 ? 'bad' : ''}">
+              <div class="fh"><b>${i + 1}. ${t.agv ? 'Fahrerlos' : 'Truck'}</b><span class="tag">${status(t)}</span><button class="chip" data-fl="role:${t.id}">${ROLE_NAMES[t.role].name}</button></div>
+              <div class="progress cap"><span style="width:${w}%"></span><i style="left:${cap}%"></i></div>
+              <div class="fb"><span>Zustand ${w} % · Höchstwert ${cap} %</span>
+                <button data-fl="show:${t.id}">Zeigen</button>
+                ${!t.agv && up && sim.level >= up.level ? `<button data-fl="agv:${t.id}">Fahrerlos ${eur(up.cost)}</button>` : ''}
+                ${t.cap < 0.9 ? `<button data-fl="over:${t.id}">Überholen ${eur(sim.overhaulCost('truck', t.id))}</button>` : ''}
+                ${t.cap < 0.8 || t.wear > 0.6 ? `<button data-fl="new:${t.id}">Neu tauschen ${eur(sim.replaceCost(t.id))}</button>` : ''}
+              </div></div>`;
+          })
+          .join('')}</div>`;
     } else if (this.ctlTab === 'rules') {
       const opt = <K extends string>(rec: Record<K, string>, sel: K) =>
         (Object.keys(rec) as K[]).map((k) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${rec[k]}</option>`).join('');

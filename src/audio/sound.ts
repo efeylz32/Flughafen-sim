@@ -68,9 +68,9 @@ export class Sound {
   unlock() {
     if (!this.enabled) return;
     try {
-      // iPhone: Ton auch bei stummgeschaltetem Klingelschalter abspielen (ab iOS 17)
+      // Mit anderer Musik mischen (Spotify läuft weiter): Spielton ist nur Atmosphäre
       const session = (navigator as unknown as { audioSession?: { type: string } }).audioSession;
-      if (session && session.type !== 'playback') session.type = 'playback';
+      if (session && session.type !== 'ambient') session.type = 'ambient';
       if (!this.ctx) {
         const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
         if (!AC) return;

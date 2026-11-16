@@ -26,6 +26,8 @@ export function setupInput(game: Game, el: HTMLElement) {
   const ptrs = new Map<number, Ptr>();
   let mode: 'none' | 'paint' | 'pan' | 'tap' | 'pinch' | 'rect' | 'ghostdrag' = 'none';
   let grab = { x: 0, y: 0 };
+  let pendingPaint: { x: number; y: number } | null = null;
+  let paintStart = 0;
   let ghostMoved = false;
   let last: { x: number; y: number } | null = null;
   let failReason: string | null = null;
@@ -80,12 +82,34 @@ export function setupInput(game: Game, el: HTMLElement) {
 
   el.addEventListener('contextmenu', (e) => e.preventDefault());
 
+  /** Alles vergessen, was noch gedrückt sein könnte (App gewechselt, Anruf, Benachrichtigung) */
+  function resetPointers() {
+    if (mode === 'paint') finishPaint();
+    ptrs.clear();
+    mode = 'none';
+    last = null;
+    pendingPaint = null;
+    game.rect = null;
+  }
+  document.addEventListener('visibilitychange', resetPointers);
+  window.addEventListener('blur', resetPointers);
+  // iPhone: Seitenzoom per Geste und Doppeltippen verhindern
+  for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
+  document.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
+
   el.addEventListener('pointerdown', (e) => {
+    // Ein neuer erster Finger: hängengebliebene Zeiger von vorher verwerfen
+    if (e.isPrimary && ptrs.size > 0) resetPointers();
     el.setPointerCapture(e.pointerId);
     const p = rel(e);
     ptrs.set(e.pointerId, { x: p.x, y: p.y, sx: p.x, sy: p.y });
     if (ptrs.size === 2) {
-      if (mode === 'paint') finishPaint();
+      // Zweiter Finger kurz nach dem ersten: Das war ein Zoom, nichts bauen
+      pendingPaint = null;
+      if (mode === 'paint') {
+        if (performance.now() - paintStart < 350) game.abortStroke();
+        else finishPaint();
+      }
       game.rect = null;
       mode = 'pinch';
       game.hover = null;
@@ -107,7 +131,10 @@ export function setupInput(game: Game, el: HTMLElement) {
       mode = 'paint';
       game.beginStroke();
       last = tileOf(p);
-      paintLine(last, last);
+      paintStart = performance.now();
+      // Am Handy erst bauen, wenn klar ist, dass kein zweiter Finger (Zoom) kommt
+      if (e.pointerType === 'touch') pendingPaint = { ...last };
+      else paintLine(last, last);
       game.hover = { ...last, ok: game.previewOk(last.x, last.y) };
     } else {
       const t = tileOf(p);
@@ -161,6 +188,11 @@ export function setupInput(game: Game, el: HTMLElement) {
     }
     if (mode === 'paint') {
       const t = tileOf(p);
+      if (pendingPaint && (performance.now() - paintStart > 120 || t.x !== pendingPaint.x || t.y !== pendingPaint.y)) {
+        paintLine(pendingPaint, pendingPaint);
+        pendingPaint = null;
+      }
+      if (pendingPaint) return;
       if (last && (t.x !== last.x || t.y !== last.y)) {
         paintLine(last, t, true);
         last = t;
@@ -194,6 +226,10 @@ export function setupInput(game: Game, el: HTMLElement) {
     } else if (mode === 'ghostdrag') {
       if (!ghostMoved) game.confirmGhost();
     } else if (mode === 'paint') {
+      if (pendingPaint) {
+        paintLine(pendingPaint, pendingPaint);
+        pendingPaint = null;
+      }
       finishPaint();
     } else if (mode === 'rect' && game.rect) {
       if (game.tool === 'copy') game.copyRect(game.rect);

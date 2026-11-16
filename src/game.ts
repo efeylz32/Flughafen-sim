@@ -2,7 +2,7 @@ import { Sound } from './audio/sound';
 import { Renderer, View } from './render/renderer';
 import { BuildTool, DiffId, GRID_H, GRID_W, MapId, ProductId, Role, ROLE_NAMES, T, TICKS_PER_SEC, TILE, Tool, TruckRole } from './sim/data';
 import { Progress } from './achievements';
-import { CRANE_MODELS, TRAITS, DIFFS, dimsOf, MAPS, movesPerHour, sizeOf, TechId } from './sim/data';
+import { CRANE_MODELS, PLANTS, TRAITS, DIFFS, dimsOf, MAPS, movesPerHour, sizeOf, TechId } from './sim/data';
 import { buildDemo, buildShowcase } from './sim/demo';
 import { setupScenario } from './sim/scenario-setup';
 import { SCENARIOS } from './sim/scenarios';
@@ -65,6 +65,8 @@ export class Game {
   hover: View['hover'] = null;
   /** Festgesetzte Vorschau: erst ein zweiter Klick baut wirklich */
   ghost: { x: number; y: number } | null = null;
+  /** Abriss eines großen Gebäudes wartet auf Bestätigung */
+  demolishAsk: { x: number; y: number; key: string; label: string; refund: number } | null = null;
   /** Kopierter Bauplan (bleibt im Browser gespeichert) */
   blueprint: Blueprint | null = loadBp();
   /** Aufgabe, die die Sammelzuweisung vergibt */
@@ -266,6 +268,7 @@ export class Game {
   setTool(t: Tool) {
     this.tool = t;
     this.ghost = null;
+    this.demolishAsk = null;
     this.hover = null;
     this.ui.refreshTools();
   }
@@ -437,6 +440,14 @@ export class Game {
   beginStroke() {
     this.stroke = { gm: this.sim.gm, actions: [] };
   }
+  /** Bricht den laufenden Malzug ab und nimmt zurück, was er schon gebaut hat (z. B. wenn es ein Zoom war) */
+  abortStroke() {
+    const s = this.stroke;
+    this.stroke = null;
+    if (!s || !s.actions.length) return;
+    this.pushUndo(s);
+    this.undo(true);
+  }
   endStroke() {
     if (this.stroke && this.stroke.actions.length) this.pushUndo(this.stroke);
     this.stroke = null;
@@ -485,6 +496,19 @@ export class Game {
       return null;
     }
     if (this.tool === 'demolish') {
+      // Große Gebäude und Kräne erst nach Bestätigung abreißen
+      const sim = this.sim;
+      const g = sim.gateAt(x, y);
+      const p = sim.plantAt(x, y);
+      const sh = sim.shopAt(x, y);
+      const r = sim.railAt(x, y);
+      const c = sim.craneAt(x, y);
+      const big = g ? { key: `g${g.id}`, label: 'Gate', cost: sim.costOf('gate') } : p ? { key: `p${p.id}`, label: PLANTS[p.kind].name, cost: sim.costOf(p.kind) } : sh ? { key: `s${sh.id}`, label: 'Werkstatt', cost: sim.costOf('workshop') } : r ? { key: `r${r.id}`, label: 'Bahnhof', cost: sim.costOf('rail') } : c && !sim.truckAtTile(sim.idx(x, y)) ? { key: `c${c.id}`, label: CRANE_MODELS[c.model].name, cost: c.paid } : null;
+      if (big && this.demolishAsk?.key !== big.key) {
+        this.demolishAsk = { x, y, key: big.key, label: big.label, refund: Math.round(big.cost * 0.5) };
+        return null;
+      }
+      this.demolishAsk = null;
       const res = this.sim.demolish(x, y);
       if (!res.ok) return res.reason ?? 'Nicht möglich';
       if (res.removed.length) this.record({ kind: 'demolish', removed: res.removed });
@@ -631,7 +655,15 @@ export class Game {
     this.ghost = null;
     this.hover = null;
   }
+  confirmDemolish() {
+    const a = this.demolishAsk;
+    if (!a) return;
+    const r = this.applyTool(a.x, a.y);
+    if (r) this.fail(r);
+    this.demolishAsk = null;
+  }
   cancelGhost() {
+    this.demolishAsk = null;
     this.ghost = null;
     this.hover = null;
   }
@@ -731,8 +763,8 @@ export class Game {
   }
 
   /** Nimmt den letzten Bauschritt zurück. Baukosten werden voll erstattet. */
-  undo() {
-    this.endStroke();
+  undo(silent = false) {
+    if (!silent) this.endStroke();
     const group = this.undoStack.pop();
     if (!group) {
       this.fail('Nichts zum Rückgängigmachen');
@@ -775,6 +807,7 @@ export class Game {
     }
     const diff = Math.round(this.sim.money - before);
     const money = diff === 0 ? '' : ` (${diff > 0 ? '+' : '−'}${Math.abs(diff).toLocaleString('de-DE')} €)`;
+    if (silent) return;
     this.ui.toast(`Rückgängig gemacht${money}`, 'info');
     this.sound.play('undo');
     this.selected = null;
