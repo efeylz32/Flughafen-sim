@@ -90,6 +90,19 @@ Alle Werte stehen in `src/sim/data.ts`. Das Balancing ist grob und noch nicht du
 - **Spielstände:** 3 Speicherplätze und ein Autosave (alle 30 Sekunden, jeden Tag, beim Verlassen des Tabs und beim Zurück zum Hauptmenü). Alles liegt nur im Browser (localStorage).
 - **Einstellungen:** Ton, Autosave, Tagesbericht, alle Spielstände löschen.
 
+## Online spielen und als App installieren
+
+Das Spiel ist eine installierbare Web-App (PWA): Nach dem ersten Öffnen ist alles im Browser gespeichert und läuft auch offline. Im Hauptmenü zeigt „Als App installieren“, wie es geht (Android: Menü, „App installieren“; iPhone/iPad: Teilen, „Zum Home-Bildschirm“; PC: Installieren-Symbol in der Adressleiste).
+
+### Hosting mit Cloudflare Pages
+
+1. Im Cloudflare-Dashboard: Workers & Pages, Erstellen, Pages, „Mit Git verbinden“ und dieses GitHub-Repository wählen.
+2. Produktions-Branch: der Branch, auf dem das Spiel liegt (z. B. `main`).
+3. Build-Einstellungen: Framework „Keins“ (oder Vite), Build-Befehl `npm run build`, Ausgabeordner `dist`.
+4. Node-Version kommt aus `.nvmrc` (22). Speichern und bereitstellen.
+
+Jeder Push baut die Seite neu. `public/_headers` sorgt dafür, dass `sw.js` und `index.html` nicht zwischengespeichert werden, damit Updates ankommen. Beim nächsten Öffnen mit Netz lädt die App die neue Version im Hintergrund, beim übernächsten Start ist sie aktiv.
+
 ## Starten
 
 ```bash

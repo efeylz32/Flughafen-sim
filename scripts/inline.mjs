@@ -13,7 +13,8 @@ if (js.length !== 1) throw new Error(`Erwartet genau ein JS-Bundle, gefunden: ${
 const style = css.map((f) => readFileSync(join(assets, f), 'utf8')).join('\n');
 const script = readFileSync(join(assets, js[0]), 'utf8').replace(/<\/script/gi, '<\\/script');
 
-const html = `<title>Hafen-Imperium</title>
+const html = `<script>window.__SINGLE_FILE__ = true</script>
+<title>Hafen-Imperium</title>
 <meta name="description" content="Baue einen Containerhafen und beseitige die Engpässe.">
 <style>${style}</style>
 <div id="app"><div id="game"></div><div id="hud"></div></div>

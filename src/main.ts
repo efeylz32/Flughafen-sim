@@ -24,6 +24,20 @@ async function boot() {
   document.addEventListener('visibilitychange', () => document.hidden && flush());
   window.addEventListener('pagehide', flush);
 
+  // Als App installierbar und offline spielbar: Service Worker (nicht in der Einzeldatei-Version)
+  const single = (window as unknown as { __SINGLE_FILE__?: boolean }).__SINGLE_FILE__;
+  if ('serviceWorker' in navigator && import.meta.env.PROD && !single && location.protocol !== 'file:') {
+    navigator.serviceWorker.register('./sw.js').catch(() => {
+      /* ohne Service Worker läuft das Spiel trotzdem, nur nicht offline */
+    });
+  }
+  // Der Browser bietet die Installation an: Knopf im Hauptmenü zeigen
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    game.ui.setInstallPrompt(e as unknown as { prompt(): Promise<void> });
+  });
+  window.addEventListener('appinstalled', () => game.ui.setInstallPrompt(null));
+
   // Zuerst das Hauptmenü: Weiterspielen, Neues Spiel, Laden
   game.ui.showMenu('main');
 

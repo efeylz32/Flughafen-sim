@@ -171,7 +171,7 @@ const STAGES: { key: 'crane' | 'trucks' | 'yard' | 'gate'; label: string; hint: 
 /** Farben der Truck-Aufgaben, wie auf der Karte */
 const ROLE_DOT: Partial<Record<TruckRole, string>> = { crane: '#e2582c', out: '#2f9e6b', export: '#2f6db0', plant: '#7a5cc7' };
 
-type MenuView = 'main' | 'pause' | 'new' | 'saves' | 'settings' | 'help';
+type MenuView = 'main' | 'pause' | 'new' | 'saves' | 'settings' | 'help' | 'install';
 
 const utilClass = (u: number) => (u < 0.6 ? 'ok' : u < 0.85 ? 'mid' : 'hi');
 const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
@@ -223,6 +223,7 @@ export class UI {
   private dealBadge!: HTMLElement;
   private menu!: HTMLElement;
   private menuView: MenuView = 'main';
+  private installPrompt: { prompt(): Promise<void> } | null = null;
   private menuConfirm = '';
   private menuNote = '';
   private deals!: HTMLElement;
@@ -706,6 +707,15 @@ export class UI {
     this.game.setSpeed(0);
     if (this.menuView === 'main' && !this.game.showcase) this.enterShowcase();
   }
+  /** Der Browser erlaubt die Installation als App */
+  setInstallPrompt(p: { prompt(): Promise<void> } | null) {
+    this.installPrompt = p;
+    if (!this.menu.classList.contains('hidden')) this.renderMenu();
+  }
+  private get standalone(): boolean {
+    return window.matchMedia?.('(display-mode: standalone)').matches || window.matchMedia?.('(display-mode: fullscreen)').matches || (navigator as unknown as { standalone?: boolean }).standalone === true;
+  }
+
   private enterShowcase() {
     this.game.startShowcase();
     this.root.classList.add('showcase');
@@ -753,6 +763,12 @@ export class UI {
         return this.hideMenu();
       case 'achv':
         return this.showAchievements();
+      case 'install':
+        if (this.installPrompt) {
+          void this.installPrompt.prompt();
+          this.installPrompt = null;
+        } else this.menuView = 'install';
+        break;
       case 'main':
         // Beim Verlassen wird gespeichert, damit „Weiterspielen“ hier weitermacht
         g.save();
@@ -846,7 +862,22 @@ export class UI {
           <button class="secondary" data-act="view" data-arg="saves">Spielstand laden</button>
           <button class="secondary" data-act="achv">Erfolge und Bestenliste</button>
           <button class="secondary" data-act="view" data-arg="settings">Einstellungen</button>
-          <button class="secondary" data-act="view" data-arg="help">Bedienung und Hilfe</button>`;
+          <button class="secondary" data-act="view" data-arg="help">Bedienung und Hilfe</button>
+          ${this.standalone ? '' : `<button class="secondary" data-act="install">Als App installieren</button>`}`;
+        break;
+      }
+      case 'install': {
+        const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        body = `
+          <h1>Als App installieren</h1>
+          <p class="sub">Hafen-Imperium läuft als App ohne Store. Nach dem ersten Öffnen ist alles gespeichert, danach geht es auch offline.</p>
+          ${
+            ios
+              ? '<div class="setrow"><div><b>iPhone und iPad (Safari)</b><span>Unten auf „Teilen“ tippen (Quadrat mit Pfeil), dann „Zum Home-Bildschirm“.</span></div></div>'
+              : '<div class="setrow"><div><b>Android (Chrome)</b><span>Menü oben rechts (drei Punkte), dann „App installieren“ oder „Zum Startbildschirm hinzufügen“.</span></div></div><div class="setrow"><div><b>PC (Chrome oder Edge)</b><span>Rechts in der Adressleiste auf das Installieren-Symbol klicken.</span></div></div>'
+          }
+          <p class="sub">Spielstände liegen im Browser bzw. in der App auf diesem Gerät.</p>
+          ${back('main')}`;
         break;
       }
       case 'pause': {

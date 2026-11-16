@@ -4,7 +4,7 @@ export default defineConfig({
   base: './',
   build: {
     target: 'es2022',
-    chunkSizeWarningLimit: 800,
+    chunkSizeWarningLimit: 1500,
     // Ein einziges JS-Bundle, damit sich das Spiel als eine einzelne HTML-Datei ausliefern lässt.
     rollupOptions: { output: { inlineDynamicImports: true } },
   },
