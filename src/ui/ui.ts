@@ -29,6 +29,7 @@ import {
   sizeOf,
   SHIP_PATIENCE_GM,
   GOAL_LEVEL,
+  GRID_W,
   YARD_USES,
   TRAITS,
   WORLD,
@@ -47,6 +48,7 @@ import {
   TechId,
 } from '../sim/data';
 import { ACHIEVEMENTS } from '../achievements';
+import { qOf } from '../sim/quay';
 import { latestSlot, metaOfSlot, removeSlot, Slot, SLOTS } from '../saves';
 import { MISSIONS } from '../sim/missions';
 import { SCENARIOS } from '../sim/scenarios';
@@ -64,6 +66,8 @@ const ICONS: Record<string, string> = {
   kai: svg('<rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M3 9h18M7 9v4M12 9v4M17 9v4"/>'),
   crane: svg('<path d="M6 21V6M3 21h6M6 6h14M17 6v6"/><rect x="15" y="12" width="4" height="3" rx=".6"/><path d="M6 6l6-3"/>'),
   yarduse: svg('<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><path d="M14 16.5h5M16.5 14v5"/>'),
+  berth: svg('<path d="M3 15h18M5 15v5M19 15v5"/><path d="M4 11c2-2 4-2 6 0s4 2 6 0 4-2 4 0"/><path d="M8 15V9h8v6"/>'),
+  parking: svg('<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M10 17V7h3.5a3 3 0 0 1 0 6H10"/>'),
   track: svg('<path d="M8 3l-2 18M16 3l2 18M5 7h14M5 12h14M4.5 17h15"/>'),
   solar: svg('<rect x="3" y="6" width="18" height="12" rx="1"/><path d="M3 12h18M9 6v12M15 6v12"/>'),
   battery: svg('<rect x="3" y="7" width="16" height="10" rx="2"/><path d="M21 10v4M7 10v4M11 10v4"/>'),
@@ -130,6 +134,7 @@ interface ToolDef {
 }
 const TOOLS: ToolDef[] = [
   { cat: 'always', tool: 'view', label: 'Ansehen', sub: 'Info', color: '#5b6b82' },
+  { cat: 'land', tool: 'berth', label: 'Liegeplatz', sub: '4 Kai', color: '#9b9385' },
   { cat: 'land', tool: 'kai', label: 'Kai', sub: '5k', color: '#b8b2a3' },
   { cat: 'gear', tool: 'lcrane', label: 'Leichtkran', sub: '40k', color: '#e0a526' },
   { cat: 'gear', tool: 'crane', label: 'Mobilkran', sub: '80k', color: '#e2582c' },
@@ -157,6 +162,7 @@ const TOOLS: ToolDef[] = [
   { cat: 'build', tool: 'workshop', label: 'Werkstatt', sub: '40k · 2×2', color: '#5b6b82' },
   { cat: 'ways', tool: 'rail', label: 'Bahnhof', sub: '150k', color: '#5f6f82' },
   { cat: 'ways', tool: 'track', label: 'Gleis', sub: '3k', color: '#8f7a5b' },
+  { cat: 'ways', tool: 'parking', label: 'Stellplatz', sub: '2k', color: '#2f6db0' },
   { cat: 'ways', tool: 'oneway', label: 'Einbahn', sub: 'Gratis', color: '#4b525c' },
   { cat: 'land', tool: 'buyland', label: 'Land kaufen', sub: '60k', color: '#6aa953' },
   { cat: 'land', tool: 'dredge', label: 'Baggern', sub: '15k', color: '#1f5f95' },
@@ -246,6 +252,7 @@ export class UI {
   private zonePick!: HTMLElement;
   private rotPick!: HTMLElement;
   private usePick!: HTMLElement;
+  private rtgPick!: HTMLElement;
   private ctlModal!: HTMLElement;
   private ctlBody!: HTMLElement;
   private ctlTab: 'overview' | 'devices' | 'fleet' | 'rules' | 'power' = 'overview';
@@ -445,6 +452,7 @@ export class UI {
       if (role) this.game.setTruckRole(role.dataset.role as TruckRole);
       else if (t.closest('[data-upgrade]')) this.game.upgradeSelected();
       else if (t.closest('[data-overhaul]')) this.game.overhaulSelected();
+      else if (t.closest('[data-berth]') && this.game.selected?.kind === 'kai') this.game.toggleBerth(this.game.selected.id % GRID_W, (this.game.selected.id / GRID_W) | 0);
       else if (t.closest('[data-vip]') && this.game.selected?.kind === 'ship') this.game.prioritizeShip(this.game.selected.id);
       const prod = t.closest<HTMLElement>('[data-product]');
       if (prod && this.game.selected?.kind === 'plant') this.game.setProduct(this.game.selected.id, prod.dataset.product as ProductId);
@@ -520,7 +528,14 @@ export class UI {
       });
       this.usePick.appendChild(b);
     });
-    bar.append(this.usePick, this.rolePick, this.zonePick, this.rotPick, this.usedPick, tabs, row);
+    this.rtgPick = el('div', 'rolepick rtgpick hidden');
+    const ab = el('button', '', '');
+    ab.addEventListener('click', () => {
+      this.game.autoRtg();
+      this.refreshTools();
+    });
+    this.rtgPick.appendChild(ab);
+    bar.append(this.rtgPick, this.usePick, this.rolePick, this.zonePick, this.rotPick, this.usedPick, tabs, row);
     for (const t of TOOLS) {
       const b = el('button', 'tool');
       b.innerHTML = `<span class="ico" style="--c:${t.color}">${ICONS[t.tool]}<span class="lk">${ICONS.lock}</span></span><b>${t.label}</b><small>${t.sub}</small>`;
@@ -1113,6 +1128,11 @@ export class UI {
     this.rolePick.classList.toggle('hidden', this.game.tool !== 'assign');
     this.zonePick.classList.toggle('hidden', this.game.tool !== 'zone');
     this.usePick.classList.toggle('hidden', this.game.tool !== 'yarduse');
+    this.rtgPick.classList.toggle('hidden', this.game.tool !== 'rtg');
+    if (this.game.tool === 'rtg') {
+      const n = this.game.sim.rtgPlan().length;
+      this.rtgPick.firstElementChild!.textContent = n ? `Automatisch füllen: ${n} Portalkräne · ${eur(n * this.game.sim.costOf('rtg'))}` : 'Keine freie 3 × 3 Lagerfläche';
+    }
     for (const b of this.usePick.querySelectorAll<HTMLElement>('button')) b.classList.toggle('on', Number(b.dataset.use) === this.game.usePick);
     const [sw, sh] = sizeOf(this.game.tool);
     this.rotPick.classList.toggle('hidden', sw === sh);
@@ -1733,6 +1753,14 @@ export class UI {
         <div class="meta">Dieses Feld: ${sim.stock[sel.id] - sim.stockRail[sel.id]} für die Straße, ${sim.stockRail[sel.id]} für die Bahn, ${sim.stockExp[sel.id]} Export</div>
         ${kinds > 1 ? '<div class="meta neg">Gemischt: Beim Abholen muss umgestapelt werden, das kostet Zeit. Mit „Lagerzweck“ sortieren.</div>' : ''}
         <div class="meta">Gesamt: ${sim.yardStock} von ${sim.yardCapacity}</div>`;
+    } else if (sel.kind === 'kai') {
+      const kx = sel.id % GRID_W;
+      const ky = (sel.id / GRID_W) | 0;
+      const q = qOf(kx, ky);
+      const closed = q >= 0 && sim.closedQ[q];
+      html = `<h3>Kaimauer <span class="tag">${closed ? 'gesperrt' : 'offen'}</span></h3>
+        <div class="meta">${closed ? 'Hier legt kein neues Schiff an. Schiffe, die schon liegen, werden fertig abgefertigt.' : 'Schiffe legen hier an, wenn mindestens 4 Kai-Felder in einer Reihe frei sind.'}</div>`;
+      actions = `<button class="${closed ? 'primary' : 'secondary'}" data-berth="1">${closed ? 'Liegeplatz öffnen' : 'Liegeplatz sperren'}</button>`;
     } else if (sel.kind === 'hazmat') {
       html = `<h3>Gefahrgutfläche <span class="tag">${sim.capAt(sel.id)} Container pro Feld</span></h3>
         <div class="meta">Dieses Feld: ${sim.stock[sel.id]} · Gesamt: ${sim.hazStock} von ${sim.hazCapacity}</div>

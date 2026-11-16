@@ -4,6 +4,7 @@ import { BuildTool, DiffId, GRID_H, GRID_W, MapId, ProductId, Role, ROLE_NAMES, 
 import { Progress } from './achievements';
 import { CRANE_MODELS, PLANTS, TRAITS, DIFFS, dimsOf, MAPS, movesPerHour, sizeOf, TechId } from './sim/data';
 import { buildDemo, buildShowcase } from './sim/demo';
+import { isVertical, qOf, qTile, sideOf } from './sim/quay';
 import { setupScenario } from './sim/scenario-setup';
 import { SCENARIOS } from './sim/scenarios';
 import { GameEvent, Removed, Sim } from './sim/sim';
@@ -128,6 +129,7 @@ export class Game {
       ghost: !!this.ghost,
       calm: this.showcase,
       bp: this.tool === 'paste' ? this.blueprint : null,
+      size: this.tool === 'berth' && this.hover ? (isVertical(sideOf(qOf(this.hover.x, this.hover.y))) ? [1, 4] : [4, 1]) : undefined,
       selected: this.selected,
       alpha: this.speed > 0 ? this.acc : 1,
       time: this.time,
@@ -471,6 +473,7 @@ export class Game {
   applyTool(x: number, y: number): string | null {
     if (this.tool === 'view' || this.tool === 'assign' || this.tool === 'copy') return null;
     if (this.tool === 'paste') return this.pasteAt(x, y);
+    if (this.tool === 'berth') return this.buildBerth(x, y);
     if (this.tool === 'zone') {
       const r = this.sim.setZone(x, y, this.zonePick);
       if (!r.ok) return r.reason ?? 'Nicht möglich';
@@ -524,6 +527,62 @@ export class Game {
     this.sound.play(tool === 'crane' || tool === 'gate' ? 'buildBig' : tool === 'truck' ? 'truck' : 'build');
     this.renderer.addPop(x, y, 'build');
     return null;
+  }
+
+  /** Liegeplatz: 4 Kai-Felder auf einmal entlang der Küste */
+  berthCheck(x: number, y: number): { ok: boolean; reason?: string; cost: number; tiles: [number, number][] } {
+    const q = qOf(x, y);
+    const tiles: [number, number][] = [];
+    if (q < 0) return { ok: false, reason: 'Ein Liegeplatz geht nur direkt an der Küste', cost: 0, tiles };
+    let cost = 0;
+    for (let k = 0; k < 4; k++) {
+      const t = qTile(q + k);
+      if (!t) return { ok: false, reason: 'Hier ist nicht genug Küste für 4 Felder', cost, tiles };
+      const i = this.sim.idx(t[0], t[1]);
+      if (this.sim.kind[i] === T.Kai) continue;
+      const c = this.sim.canBuild('kai', t[0], t[1]);
+      if (!c.ok && c.reason !== 'Zu wenig Geld') return { ok: false, reason: c.reason, cost, tiles };
+      cost += c.cost;
+      tiles.push(t);
+    }
+    if (!tiles.length) return { ok: false, reason: 'Hier ist schon ein Liegeplatz', cost, tiles };
+    if (this.sim.money < cost) return { ok: false, reason: 'Zu wenig Geld', cost, tiles };
+    return { ok: true, cost, tiles };
+  }
+  private buildBerth(x: number, y: number): string | null {
+    const chk = this.berthCheck(x, y);
+    if (!chk.ok) return chk.reason ?? 'Nicht möglich';
+    this.beginStroke();
+    for (const [tx, ty] of chk.tiles) {
+      const res = this.sim.build('kai', tx, ty);
+      if (res.ok) this.record({ kind: 'build', tool: 'kai', x: tx, y: ty });
+    }
+    this.endStroke();
+    this.sound.play('buildBig');
+    this.renderer.addPop(x, y, 'build');
+    return null;
+  }
+  /** Füllt alle großen Lagerflächen automatisch mit Portalkränen */
+  autoRtg() {
+    const plan = this.sim.rtgPlan();
+    if (!plan.length) return this.fail('Keine freie 3 × 3 Lagerfläche gefunden');
+    this.beginStroke();
+    let n = 0;
+    for (const p of plan) {
+      const r = this.sim.build('rtg', p.x, p.y);
+      if (!r.ok) break;
+      this.record({ kind: 'build', tool: 'rtg', x: p.x, y: p.y });
+      n++;
+    }
+    this.endStroke();
+    if (!n) return this.fail('Zu wenig Geld');
+    this.ui.toast(`${n} Portalkräne gesetzt${n < plan.length ? ` (für ${plan.length - n} weitere fehlt Geld)` : ''}`, 'good');
+    this.sound.play('buildBig');
+  }
+  toggleBerth(x: number, y: number) {
+    const r = this.sim.toggleBerthClosed(x, y);
+    if (!r.ok) this.fail(r.reason ?? 'Nicht möglich');
+    else this.sound.play('click');
   }
 
   /** Autobahn: zwei Fahrbahnen nebeneinander mit fester Richtung (Rechtsverkehr). Gedreht (R) liegen sie senkrecht. */
@@ -630,16 +689,19 @@ export class Game {
 
   /** Große Bauten werden erst als Vorschau gesetzt, verschoben und mit einem zweiten Klick gebaut. */
   needsConfirm(tool: Tool = this.tool): boolean {
-    return ['paste', 'crane', 'lcrane', 'gate', 'unpack', 'pack', 'cold', 'fill', 'workshop', 'rtg', 'rail', 'truck'].includes(tool);
+    return ['berth', 'paste', 'crane', 'lcrane', 'gate', 'unpack', 'pack', 'cold', 'fill', 'workshop', 'rtg', 'rail', 'truck'].includes(tool);
   }
   /** Größe der Vorschau in Feldern */
   ghostSize(): [number, number] {
+    if (this.tool === 'berth') return this.ghost && isVertical(sideOf(qOf(this.ghost.x, this.ghost.y))) ? [1, 4] : [4, 1];
     if (this.tool === 'paste') return this.blueprint ? [this.blueprint.w, this.blueprint.h] : [1, 1];
     return dimsOf(this.tool, this.sim.rot);
   }
   inGhost(x: number, y: number): boolean {
     const g = this.ghost;
     if (!g) return false;
+    // Portalkran: Die Vorschau sitzt mittig auf dem angetippten Feld
+    if (this.tool === 'rtg') return Math.abs(x - g.x) <= 1 && Math.abs(y - g.y) <= 1;
     const [w, h] = this.ghostSize();
     return x >= g.x && x < g.x + w && y >= g.y && y < g.y + h;
   }
@@ -824,6 +886,7 @@ export class Game {
     if (this.tool === 'yarduse') return this.sim.kind[this.sim.idx(x, y)] === T.Yard;
     if (this.tool === 'buyland') return x >= 0 && x < GRID_W && !this.sim.owned[x];
     if (this.tool === 'demolish') return this.sim.canDemolish(x, y).ok;
+    if (this.tool === 'berth') return this.berthCheck(x, y).ok;
     if (this.tool === 'paste') return !!this.blueprint && x >= 0 && y >= 0 && x + this.blueprint.w <= GRID_W && y + this.blueprint.h <= GRID_H;
     if (this.tool === 'hwy') {
       const b = this.sim.rot ? { x: x + 1, y } : { x, y: y + 1 };
@@ -868,6 +931,7 @@ export class Game {
       else if (k === T.Shop) this.selected = { kind: 'shop', id: sim.shopAt(tx, ty)!.id };
       else if (k === T.Yard) this.selected = { kind: 'yard', id: sim.idx(tx, ty) };
       else if (k === T.Reefer) this.selected = { kind: 'reefer', id: sim.idx(tx, ty) };
+      else if (k === T.Kai) this.selected = { kind: 'kai', id: sim.idx(tx, ty) };
       else if (k === T.Hazmat) this.selected = { kind: 'hazmat', id: sim.idx(tx, ty) };
       else if (k === T.Empty) this.selected = { kind: 'emptyyard', id: sim.idx(tx, ty) };
     }

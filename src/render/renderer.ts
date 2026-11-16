@@ -11,11 +11,13 @@ export interface View {
   hover: { x: number; y: number; ok: boolean } | null;
   /** Die Vorschau ist festgesetzt und wartet auf den zweiten Klick */
   ghost: boolean;
+  /** Größe der Vorschau, wenn sie vom Werkzeug abweicht (Liegeplatz) */
+  size?: [number, number];
   /** Hauptmenü-Hintergrund: keine Warnzeichen, Staumarkierungen und Balken */
   calm?: boolean;
   /** Blaupause, die gerade eingefügt werden soll (für die Vorschau) */
   bp?: { w: number; h: number; items: { dx: number; dy: number; tool: string; rot?: boolean }[] } | null;
-  selected: { kind: 'ship' | 'crane' | 'gate' | 'yard' | 'reefer' | 'hazmat' | 'emptyyard' | 'rail' | 'plant' | 'shop' | 'truck'; id: number } | null;
+  selected: { kind: 'ship' | 'crane' | 'gate' | 'yard' | 'reefer' | 'hazmat' | 'emptyyard' | 'kai' | 'rail' | 'plant' | 'shop' | 'truck'; id: number } | null;
   /** Anteil zwischen letztem und nächstem Tick (0..1) für weiche Bewegung. */
   alpha: number;
   /** Laufzeit in Sekunden (Echtzeit) für Animationen. */
@@ -624,6 +626,8 @@ export class Renderer {
             g.roundRect(lx + 13, ly - 8, 6, 6, 2.5).fill(0x20252c);
             if (!same(-ax, -ay)) g.rect(lx, ly - 6, 2, TILE + 6).fill(C.kaiWall);
             if (!same(ax, ay)) g.rect(lx + TILE - 2, ly - 6, 2, TILE + 6).fill(C.kaiWall);
+            // Gesperrter Liegeplatz: rot-weiße Absperrung an der Kante
+            if (q >= 0 && sim.closedQ[q]) for (let k = 0; k < 4; k++) g.rect(lx + k * 8, ly - 3, 8, 3).fill(k % 2 ? 0xffffff : 0xd9473f);
             g.restore();
             g.resetTransform();
             break;
@@ -761,6 +765,17 @@ export class Renderer {
             if (!same(0, 1)) g.rect(px, py + TILE - 2, TILE, 2).fill(0x3b9bd6);
             if (!same(-1, 0)) g.rect(px, py, 2, TILE).fill(0x3b9bd6);
             if (!same(1, 0)) g.rect(px + TILE - 2, py, 2, TILE).fill(0x3b9bd6);
+            break;
+          }
+          case T.Parking: {
+            // Stellplatz: Asphalt, vier Buchten, P-Schild
+            g.rect(px, py, TILE, TILE).fill(0x6b737c);
+            for (let k = 0; k <= 4; k++) g.rect(px + 1.5 + k * 7.3, py + 9, 1.2, 21).fill({ color: 0xffffff, alpha: 0.85 });
+            g.roundRect(px + 2, py + 1.5, 9, 7, 1.5).fill(0x2f6db0);
+            g.rect(px + 5, py + 2.8, 1.4, 4.6).fill(0xffffff);
+            g.rect(px + 5, py + 2.8, 3, 1.3).fill(0xffffff);
+            g.rect(px + 5, py + 4.8, 3, 1.3).fill(0xffffff);
+            g.rect(px + 7.6, py + 2.8, 1.3, 3.3).fill(0xffffff);
             break;
           }
           case T.Track: {
@@ -1338,6 +1353,15 @@ export class Renderer {
   }
 
   private syncTrucks(sim: Sim, a: number, view: View) {
+    // Buchten auf den Stellplätzen verteilen
+    const parkedSlot = new Map<number, number>();
+    const perLot = new Map<number, number>();
+    for (const t of sim.trucks) {
+      if (!t.parked || t.parkAt === undefined || t.parkAt < 0) continue;
+      const n = perLot.get(t.parkAt) ?? 0;
+      parkedSlot.set(t.id, n);
+      perLot.set(t.parkAt, n + 1);
+    }
     const seen = new Set<number>();
     for (const t of sim.trucks) {
       seen.add(t.id);
@@ -1362,10 +1386,17 @@ export class Renderer {
       const ow = sim.oneway[t.tile] >= 0 || (t.next >= 0 && sim.oneway[t.next] >= 0);
       const want = idle ? 10.5 : ow ? (t.slot ? -6.5 : 6.5) : 7;
       v.lat += (want - v.lat) * Math.min(1, view.dt * 6);
-      v.root.position.set(
-        (t.px + (t.fx - t.px) * a + 0.5) * TILE - Math.sin(v.rot) * v.lat,
-        (t.py + (t.fy - t.py) * a + 0.5) * TILE + Math.cos(v.rot) * v.lat,
-      );
+      if (t.parked && t.parkAt !== undefined && t.parkAt >= 0 && t.next < 0) {
+        // Auf dem Stellplatz: in einer der vier Buchten, quer geparkt
+        const slot = parkedSlot.get(t.id) ?? 0;
+        v.rot = -Math.PI / 2;
+        v.root.rotation = v.rot;
+        v.root.position.set((t.parkAt % GRID_W) * TILE + 5 + slot * 7.3, ((t.parkAt / GRID_W) | 0) * TILE + 20);
+      } else
+        v.root.position.set(
+          (t.px + (t.fx - t.px) * a + 0.5) * TILE - Math.sin(v.rot) * v.lat,
+          (t.py + (t.fy - t.py) * a + 0.5) * TILE + Math.cos(v.rot) * v.lat,
+        );
       v.brake.visible = t.stuck > 0;
       const key = t.load + t.cargo + t.role + t.zone;
       if (key !== v.key) {
@@ -1976,10 +2007,14 @@ export class Renderer {
 
     // Bau-Vorschau
     if (view.hover && view.tool !== 'view') {
-      const { x, y, ok } = view.hover;
+      const { ok } = view.hover;
+      const x = view.tool === 'rtg' ? view.hover.x - 1 : view.hover.x;
+      const y = view.tool === 'rtg' ? view.hover.y - 1 : view.hover.y;
       if (x >= 0 && y >= 0 && x < GRID_W && y < GRID_H) {
         const col = view.tool === 'demolish' || !ok ? C.bad : C.good;
-        const [fw, fh] = view.tool === 'paste' && view.bp ? [view.bp.w, view.bp.h] : view.tool === 'hwy' ? (sim.rot ? [2, 1] : [1, 2]) : dimsOf(view.tool, sim.rot);
+        // Portalkran: 3 × 3 Felder um das angetippte Feld
+        const rtg = view.tool === 'rtg';
+        const [fw, fh] = rtg ? [3, 3] : view.size ? view.size : view.tool === 'paste' && view.bp ? [view.bp.w, view.bp.h] : view.tool === 'hwy' ? (sim.rot ? [2, 1] : [1, 2]) : dimsOf(view.tool, sim.rot);
         // Festgesetzte Vorschau pulsiert und hat einen dicken Rahmen mit Eckmarken
         const pulse = view.ghost ? 0.5 + 0.25 * Math.sin(view.time * 6) : 0.38;
         g.roundRect(x * TILE, y * TILE, fw * TILE, fh * TILE, 3).fill({ color: col, alpha: pulse });
@@ -2224,7 +2259,7 @@ export class Renderer {
       if (!r) return;
       x = r.x * TILE;
       y = r.y * TILE;
-    } else if (sel.kind === 'yard' || sel.kind === 'reefer' || sel.kind === 'hazmat' || sel.kind === 'emptyyard') {
+    } else if (sel.kind === 'yard' || sel.kind === 'reefer' || sel.kind === 'hazmat' || sel.kind === 'emptyyard' || sel.kind === 'kai') {
       x = (sel.id % GRID_W) * TILE;
       y = ((sel.id / GRID_W) | 0) * TILE;
     } else {

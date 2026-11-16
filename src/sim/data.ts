@@ -31,10 +31,11 @@ export enum T {
   Solar = 13,
   Battery = 14,
   Track = 15,
+  Parking = 16,
 }
 
-export type Tool = 'view' | 'kai' | 'crane' | 'lcrane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'road2' | 'hwy' | 'solar' | 'battery' | 'track' | 'rtg' | 'hazard' | 'emptyyard' | 'fill' | 'assign' | 'copy' | 'paste' | 'yarduse' | 'zone' | 'oneway' | 'buyland' | 'demolish';
-export type BuildTool = Exclude<Tool, 'view' | 'demolish' | 'assign' | 'copy' | 'paste' | 'yarduse' | 'zone' | 'oneway' | 'buyland'>;
+export type Tool = 'view' | 'kai' | 'crane' | 'lcrane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'road2' | 'hwy' | 'solar' | 'battery' | 'track' | 'parking' | 'rtg' | 'hazard' | 'emptyyard' | 'fill' | 'assign' | 'copy' | 'paste' | 'yarduse' | 'zone' | 'oneway' | 'buyland' | 'berth' | 'demolish';
+export type BuildTool = Exclude<Tool, 'view' | 'demolish' | 'assign' | 'copy' | 'paste' | 'yarduse' | 'zone' | 'oneway' | 'buyland' | 'berth'>;
 
 export const COST: Record<BuildTool, number> = {
   kai: 5_000,
@@ -55,6 +56,7 @@ export const COST: Record<BuildTool, number> = {
   road2: 1_800,
   solar: 15_000,
   track: 3_000,
+  parking: 2_000,
   battery: 40_000,
   hwy: 4_000,
   hazard: 12_000,
@@ -81,6 +83,7 @@ export const UNLOCK: Record<BuildTool, number> = {
   road2: 2,
   solar: 2,
   track: 3,
+  parking: 1,
   battery: 3,
   hwy: 3,
   hazard: 3,
@@ -539,3 +542,6 @@ export const YARD_USES = [
 export const EMPTY_IN_COST = 40;
 /** So viele Leercontainer bringt ein Zug höchstens */
 export const RAIL_EMPTIES = 10;
+
+/** Stellplätze pro Parkplatz-Feld */
+export const PARK_SLOTS = 4;

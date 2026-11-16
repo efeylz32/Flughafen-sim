@@ -38,6 +38,7 @@ import {
   GRID_H,
   GRID_W,
   LEVELS,
+  PARK_SLOTS,
   EMPTY_IN_COST,
   RAIL_EMPTIES,
   TRAITS,
@@ -302,6 +303,11 @@ export interface Job {
 
 export interface Truck {
   id: number;
+  /** Parkplatz-Feld, zu dem der Truck ohne Auftrag fährt (-1 keins), Zufahrt und ob er dort steht */
+  parkAt?: number;
+  parkTgt?: number;
+  parked?: boolean;
+  idleFor?: number;
   /** In der Werkstatt zur Generalüberholung (Spielminuten) */
   build?: number;
   buildMax?: number;
@@ -536,6 +542,7 @@ export interface SaveData {
   zones?: { cranes: number[]; gates: number[]; plants: number[]; rails: number[]; trucks: number[] };
   oneway?: number[];
   roadTier?: number[];
+  closedQ?: number[];
   railX?: number[];
   owned?: number[];
   plotsBought?: number;
@@ -612,7 +619,7 @@ const covers = (e: Box, x: number, y: number) => x >= e.x && y >= e.y && x < e.x
 const UNLOADING = 'Wird entladen.';
 const LOADING = 'Wird beladen.';
 const emptyBook = (): DayBook => ({ fees: 0, exportFees: 0, rail: 0, berth: 0, bonus: 0, penalty: 0, running: 0, wages: 0, interest: 0, building: 0, handled: 0, ships: 0, onTime: 0, bn: { crane: 0, trucks: 0, yard: 0, gate: 0 }, jamPeak: 0, power: 0 });
-const TILE_OF: Partial<Record<BuildTool, T>> = { kai: T.Kai, road: T.Road, yard: T.Yard, road2: T.Road, hwy: T.Road, solar: T.Solar, battery: T.Battery, track: T.Track, reefer: T.Reefer, hazard: T.Hazmat, emptyyard: T.Empty, fill: T.Plant, gate: T.Gate, rail: T.Rail, unpack: T.Plant, pack: T.Plant, cold: T.Plant, workshop: T.Shop };
+const TILE_OF: Partial<Record<BuildTool, T>> = { kai: T.Kai, road: T.Road, yard: T.Yard, road2: T.Road, hwy: T.Road, solar: T.Solar, battery: T.Battery, track: T.Track, parking: T.Parking, reefer: T.Reefer, hazard: T.Hazmat, emptyyard: T.Empty, fill: T.Plant, gate: T.Gate, rail: T.Rail, unpack: T.Plant, pack: T.Plant, cold: T.Plant, workshop: T.Shop };
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 
 const eur = (n: number) => `${Math.round(n).toLocaleString('de-DE')} €`;
@@ -1228,6 +1235,7 @@ export class Sim {
   private touch() {
     this.version++;
     this.distCache.clear();
+    this.storeAccCache = null;
     this.yardTiles = [];
     this.reeferTiles = [];
     this.hazTiles = [];
@@ -1374,7 +1382,7 @@ export class Sim {
       let ok = true;
       let deepTiles = 0;
       for (let k = 0; k < len && ok; k++) {
-        if (!this.isKai(x + k)) ok = false;
+        if (!this.isKai(x + k) || this.closedQ[x + k]) ok = false;
         else if (this.depth[x + k]) deepTiles++;
         else if (deep) ok = false;
       }
@@ -1429,6 +1437,7 @@ export class Sim {
       case 'solar':
       case 'battery':
       case 'track':
+      case 'parking':
       case 'gate':
       case 'unpack':
       case 'pack':
@@ -1444,8 +1453,9 @@ export class Sim {
         else if (x !== GRID_W - 1 && !this.trackToEdge(x + 1, y)) reason = 'Der Gleisanschluss braucht ein durchgehendes Gleis bis zum rechten Kartenrand (Werkzeug „Gleis“)';
         break;
       case 'rtg':
-        if (k !== T.Yard && k !== T.Reefer) reason = 'Der Portalkran steht auf einer Lagerfläche';
-        else if (this.rtgAt(x, y)) reason = 'Hier steht schon ein Portalkran';
+        // Der Portalkran überspannt 3 × 3 Felder: alle müssen Lager sein
+        if (!this.rtgFits(x, y)) reason = 'Der Portalkran überspannt 3 × 3 Felder, alle müssen Lagerfläche sein (keine Straße, kein Rand)';
+        else if (this.rtgs.some((r) => Math.abs(r.x - x) <= 2 && Math.abs(r.y - y) <= 2)) reason = 'Zu nah an einem anderen Portalkran';
         break;
       case 'road':
         // Straße über ein Gleis wird zum Bahnübergang
@@ -1502,6 +1512,7 @@ export class Sim {
       case 'solar':
       case 'battery':
       case 'track':
+      case 'parking':
         this.kind[i] = TILE_OF[tool]!;
         return undefined;
       case 'kai':
@@ -1750,8 +1761,9 @@ export class Sim {
       }
       case T.Solar:
       case T.Battery:
-      case T.Track: {
-        const tool: BuildTool = this.kind[i] === T.Solar ? 'solar' : this.kind[i] === T.Battery ? 'battery' : 'track';
+      case T.Track:
+      case T.Parking: {
+        const tool: BuildTool = this.kind[i] === T.Solar ? 'solar' : this.kind[i] === T.Battery ? 'battery' : this.kind[i] === T.Parking ? 'parking' : 'track';
         out.push({ tool, x, y, refund: this.give(this.costOf(tool), factor) });
         break;
       }
@@ -2103,7 +2115,7 @@ export class Sim {
       if (use >= 0 && this.yardUse[y] !== use) continue;
       const free = this.freeAt(y);
       if (free <= 0) continue;
-      for (const a of this.adjRoad(y)) {
+      for (const a of this.storeAccess(y)) {
         const d = this.distMap(a)[from];
         if (d >= 0 && (!best || d < best.d)) best = { tile: y, access: a, d, free };
       }
@@ -2125,7 +2137,7 @@ export class Sim {
               ? this.stock[y] - this.stockRail[y] - this.resOut[y]
               : this.stock[y] - this.resOut[y];
       if (avail <= 0) continue;
-      for (const a of this.adjRoad(y)) {
+      for (const a of this.storeAccess(y)) {
         const d = this.distMap(a)[from];
         if (d >= 0 && (!best || d < best.d)) best = { tile: y, access: a, d, avail };
       }
@@ -2661,15 +2673,21 @@ export class Sim {
         t.wait *= 1 + 0.35 * Math.min(4, others) + 0.2 * Math.min(1, fill);
         if (others > 0) this.restacks++;
       }
+      // Feld tief in einem großen Lagerblock: Ohne Portalkran dauert das Umsetzen länger
+      if (storeTile >= 0 && this.storeDepth[storeTile] > 0) t.wait += this.storeDepth[storeTile] * 0.3 * (this.rtgCovers(storeTile) ? 0.3 : 1);
       const ok = j.stage === 0 ? this.pickUp(t, j) : this.dropOff(t, j);
       if (!ok) this.cancelJob(t);
       return;
     }
+    if (this.driveTo(t, tgt, dt) === 'lost') this.cancelJob(t);
+  }
 
+  /** Ein Schritt Richtung Zielfeld: Weg suchen, Spur prüfen, fahren. 'lost' heißt: kein Weg. */
+  private driveTo(t: Truck, tgt: number, dt: number): 'ok' | 'lost' {
     if (t.next < 0) {
       const d = this.distMap(tgt);
       const here = d[t.tile];
-      if (here < 0) return this.cancelJob(t);
+      if (here < 0) return 'lost';
       const x = t.tile % GRID_W;
       const y = (t.tile / GRID_W) | 0;
       // Nachbarn in der Reihenfolge Ost, Süd, West, Nord (entspricht der Spurrichtung)
@@ -2687,13 +2705,13 @@ export class Sim {
           if (free) break;
         }
       }
-      if (pick < 0) return this.cancelJob(t);
+      if (pick < 0) return 'lost';
       t.angle = [0, Math.PI / 2, Math.PI, -Math.PI / 2][pickDir];
       // Die Spur im nächsten Feld ist belegt: warten. Das ist der Stau.
       if (this.lane[pick * 4 + pickDir] >= this.laneCap(pick, pickDir) && t.stuck < TRUCK_PATIENCE_GM) {
         t.stuck += dt;
         this.roadJam[t.tile] += dt;
-        return;
+        return 'ok';
       }
       // Auf Einbahnstraßen gibt es zwei Spuren: der zweite Truck nimmt die linke
       t.slot = 0;
@@ -2729,6 +2747,151 @@ export class Sim {
       t.fx = cx + (nx - cx) * t.prog;
       t.fy = cy + (ny - cy) * t.prog;
     }
+    return 'ok';
+  }
+
+  /** Ohne Auftrag: nach kurzer Zeit zum nächsten freien Stellplatz fahren und dort warten */
+  private idleTruck(t: Truck, dt: number) {
+    t.idleFor = (t.idleFor ?? 0) + dt;
+    if (t.parkAt !== undefined && t.parkAt >= 0 && this.kind[t.parkAt] !== T.Parking) {
+      t.parkAt = -1;
+      t.parked = false;
+    }
+    if (t.parked && t.next < 0) return;
+    if (t.parkAt === undefined || t.parkAt < 0) {
+      if (t.idleFor < 3 || t.next >= 0) return;
+      let best: { p: number; a: number; d: number } | null = null;
+      for (const p of this.parkTiles) {
+        const used = this.trucks.reduce((n, o) => n + (o !== t && o.parkAt === p ? 1 : 0), 0);
+        if (used >= PARK_SLOTS || this.zone[p] !== t.zone && t.zone !== 0) continue;
+        for (const a of this.adjRoad(p)) {
+          const d = this.distMap(a)[t.tile];
+          if (d >= 0 && (!best || d < best.d)) best = { p, a, d };
+        }
+      }
+      if (!best) return;
+      t.parkAt = best.p;
+      t.parkTgt = best.a;
+      t.parked = false;
+    }
+    if (t.tile === t.parkTgt && t.next < 0) {
+      t.parked = true;
+      return;
+    }
+    if (this.driveTo(t, t.parkTgt!, dt) === 'lost') t.parkAt = -1;
+  }
+  get parkTiles(): number[] {
+    const out: number[] = [];
+    for (let i = 0; i < this.kind.length; i++) if (this.kind[i] === T.Parking) out.push(i);
+    return out;
+  }
+
+  // ───────────────────────── Große Lagerblöcke ─────────────────────────
+
+  private storeAccCache: Map<number, number[]> | null = null;
+  /** Tiefe eines Lagerfelds im Block: 0 = direkt an der Straße */
+  storeDepth = new Uint8Array(GRID_W * GRID_H);
+  /** Zufahrten eines Lagerfelds: eigene Straßen, sonst die des ganzen zusammenhängenden Blocks */
+  storeAccess(i: number): number[] {
+    if (!this.storeAccCache) this.buildStoreBlocks();
+    return this.storeAccCache!.get(i) ?? this.adjRoad(i);
+  }
+  private buildStoreBlocks() {
+    const map = new Map<number, number[]>();
+    this.storeDepth.fill(0);
+    const isStore = (k: number) => k === T.Yard || k === T.Reefer || k === T.Hazmat || k === T.Empty;
+    const seen = new Uint8Array(this.kind.length);
+    for (let s0 = 0; s0 < this.kind.length; s0++) {
+      if (seen[s0] || !isStore(this.kind[s0])) continue;
+      const kind = this.kind[s0];
+      // Block sammeln (gleiche Lagerart, 4er-Nachbarschaft)
+      const block: number[] = [s0];
+      seen[s0] = 1;
+      for (let qi = 0; qi < block.length; qi++) {
+        const c = block[qi];
+        const cx = c % GRID_W;
+        const cy = (c / GRID_W) | 0;
+        for (const n of [cx > 0 ? c - 1 : -1, cx < GRID_W - 1 ? c + 1 : -1, cy > 0 ? c - GRID_W : -1, cy < GRID_H - 1 ? c + GRID_W : -1]) {
+          if (n >= 0 && !seen[n] && this.kind[n] === kind) {
+            seen[n] = 1;
+            block.push(n);
+          }
+        }
+      }
+      const acc = new Set<number>();
+      const depth = new Map<number, number>();
+      const q: number[] = [];
+      for (const c of block) {
+        const own = this.adjRoad(c);
+        for (const a of own) acc.add(a);
+        if (own.length) {
+          depth.set(c, 0);
+          q.push(c);
+          map.set(c, own);
+        }
+      }
+      for (let qi = 0; qi < q.length; qi++) {
+        const c = q[qi];
+        const cx = c % GRID_W;
+        const cy = (c / GRID_W) | 0;
+        for (const n of [cx > 0 ? c - 1 : -1, cx < GRID_W - 1 ? c + 1 : -1, cy > 0 ? c - GRID_W : -1, cy < GRID_H - 1 ? c + GRID_W : -1]) {
+          if (n >= 0 && this.kind[n] === kind && !depth.has(n)) {
+            depth.set(n, depth.get(c)! + 1);
+            q.push(n);
+          }
+        }
+      }
+      const all = [...acc];
+      for (const c of block) {
+        if (!map.has(c)) map.set(c, all);
+        this.storeDepth[c] = Math.min(255, depth.get(c) ?? 0);
+      }
+    }
+    this.storeAccCache = map;
+  }
+
+  // ───────────────────────── Portalkran ─────────────────────────
+
+  /** Liegen alle 3 × 3 Felder um (x, y) auf Lagerfläche? */
+  rtgFits(x: number, y: number): boolean {
+    for (let yy = y - 1; yy <= y + 1; yy++) {
+      for (let xx = x - 1; xx <= x + 1; xx++) {
+        if (!this.inBounds(xx, yy)) return false;
+        const k = this.kind[this.idx(xx, yy)];
+        if (k !== T.Yard && k !== T.Reefer && k !== T.Hazmat && k !== T.Empty) return false;
+      }
+    }
+    return true;
+  }
+  /** Plan: Portalkräne so verteilen, dass möglichst viel Lagerfläche abgedeckt ist */
+  rtgPlan(): { x: number; y: number }[] {
+    const taken = this.rtgs.map((r) => ({ x: r.x, y: r.y }));
+    const plan: { x: number; y: number }[] = [];
+    for (let y = 1; y < GRID_H - 1; y++) {
+      for (let x = 1; x < GRID_W - 1; x++) {
+        if (!this.rtgFits(x, y)) continue;
+        if ([...taken, ...plan].some((r) => Math.abs(r.x - x) <= 2 && Math.abs(r.y - y) <= 2)) continue;
+        plan.push({ x, y });
+      }
+    }
+    return plan;
+  }
+
+  // ───────────────────────── Liegeplätze sperren ─────────────────────────
+
+  /** Gesperrte Kaipositionen: Dort legt kein neues Schiff an */
+  closedQ = new Uint8Array(Q_MAX);
+  /** Sperrt oder öffnet die ganze zusammenhängende Kaikante an diesem Feld */
+  toggleBerthClosed(x: number, y: number): BuildCheck {
+    const q = qOf(x, y);
+    if (q < 0 || !this.isKai(q)) return { ok: false, reason: 'Nur an einer Kaimauer', cost: 0 };
+    const close = !this.closedQ[q];
+    let a = q;
+    while (this.isKai(a - 1)) a--;
+    for (let k = a; this.isKai(k); k++) this.closedQ[k] = close ? 1 : 0;
+    this.version++;
+    this.emit(close ? 'Liegeplatz gesperrt: Hier legt kein neues Schiff mehr an.' : 'Liegeplatz wieder offen.', 'info');
+    return { ok: true, cost: 0 };
   }
 
   // ───────────────────────── Tick ─────────────────────────
@@ -3612,7 +3775,7 @@ export class Sim {
     // Spuren neu belegen: Wer arbeitet oder fährt, steht in seiner Spur. Wer frei hat, parkt am Rand.
     this.lane.fill(0);
     for (const t of this.trucks) {
-      if (!t.job && t.wait <= 0) continue;
+      if (!t.job && t.wait <= 0 && t.next < 0) continue;
       if (t.dir >= 0) this.lane[t.tile * 4 + t.dir]++;
       if (t.next >= 0) {
         const d = t.next - t.tile;
@@ -3631,8 +3794,14 @@ export class Sim {
         t.stuck = 0;
         // Ohne Fahrer bleibt der Truck stehen
         if (!t.staffed) continue;
-        this.assignJob(t);
-        if (!t.job) continue;
+        if (t.next < 0) this.assignJob(t);
+        if (!t.job) {
+          this.idleTruck(t, dt);
+          continue;
+        }
+        t.parkAt = -1;
+        t.parked = false;
+        t.idleFor = 0;
         // Die Leitstelle braucht Funkzeit. Trucks mit fester Aufgabe fahren sofort los.
         if (t.role === 'auto') {
           t.wait = DISPATCH_GM * (1 - 0.3 * this.tech.radio);
@@ -4379,6 +4548,7 @@ export class Sim {
       },
       oneway: Array.from(this.oneway),
       roadTier: Array.from(this.roadTier),
+      closedQ: Array.from(this.closedQ),
       railX: Array.from(this.railX),
       owned: Array.from(this.owned),
       plotsBought: this.plotsBought,
@@ -4444,6 +4614,7 @@ export class Sim {
     s.kind.set(d.kind);
     if (d.oneway) s.oneway.set(d.oneway);
     if (d.roadTier) s.roadTier.set(d.roadTier);
+    if (d.closedQ) s.closedQ.set(d.closedQ);
     if (d.railX) s.railX.set(d.railX);
     if (d.owned) s.owned.set(d.owned);
     s.plotsBought = d.plotsBought ?? 0;

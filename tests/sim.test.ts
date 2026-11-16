@@ -772,12 +772,16 @@ describe('Große Kräne und Portalkräne', () => {
     const sim = new Sim();
     sim.level = 3;
     for (let x = 5; x <= 9; x++) sim.build('yard', x, k + 3);
+    // Eine Reihe reicht nicht: Der Portalkran überspannt 3 × 3 Lagerfelder
+    expect(sim.canBuild('rtg', 7, k + 3).ok).toBe(false);
+    for (let x = 5; x <= 9; x++) for (const y of [k + 2, k + 4]) sim.build('yard', x, y);
     const before = sim.yardCapacity;
     expect(sim.build('rtg', 7, k + 3).ok).toBe(true);
+    expect(sim.canBuild('rtg', 8, k + 3).ok).toBe(false); // überlappt
     sim.finishAll();
     expect(sim.staffNeed('crane')).toBe(1);
     run(sim, 0.1);
-    expect(sim.yardCapacity).toBe(before + 3 * 3);
+    expect(sim.yardCapacity).toBe(before + 9 * 3);
     sim.fire('crane');
     run(sim, 0.1);
     expect(sim.yardCapacity).toBe(before);
@@ -1557,5 +1561,43 @@ describe('Gleise ins Land und Außenanbindung', () => {
     run(sim, 8);
     const got = sim.emptyStock + sim.gates.reduce((n, g) => n + g.emptyIn, 0) + sim.plants.reduce((n, p) => n + p.inEmpty, 0);
     expect(got).toBeGreaterThan(0);
+  });
+});
+
+describe('Lagerblöcke, Stellplätze, Liegeplätze', () => {
+  it('ein Lagerfeld mitten im Block ist über die Zufahrten des Blocks erreichbar', () => {
+    const sim = new Sim();
+    for (let x = 4; x <= 12; x++) sim.build('road', x, k + 1);
+    for (let y = k + 2; y <= k + 5; y++) for (let x = 6; x <= 9; x++) sim.build('yard', x, y);
+    const inner = sim.idx(7, k + 4);
+    expect(sim.adjRoad(inner)).toEqual([]);
+    expect(sim.storeAccess(inner).length).toBeGreaterThan(0);
+    expect(sim.storeDepth[inner]).toBe(2);
+  });
+
+  it('Portalkräne automatisch verteilen deckt große Flächen ab', () => {
+    const sim = new Sim();
+    for (let y = k + 2; y <= k + 7; y++) for (let x = 4; x <= 9; x++) sim.build('yard', x, y);
+    expect(sim.rtgPlan().length).toBe(4);
+  });
+
+  it('Trucks ohne Auftrag fahren auf den Stellplatz', () => {
+    const sim = basicPort(3, 1);
+    sim.nextShipIn = 1e9;
+    sim.ships = [];
+    sim.build('parking', 10, k + 2);
+    run(sim, 2);
+    expect(sim.trucks.filter((t) => t.parked).length).toBeGreaterThan(0);
+    expect(sim.trucks.every((t) => !t.parked || t.parkAt === sim.idx(10, k + 2))).toBe(true);
+  });
+
+  it('ein gesperrter Liegeplatz nimmt keine Schiffe', () => {
+    const sim = basicPort(3, 1);
+    sim.toggleBerthClosed(7, k);
+    run(sim, 6);
+    expect(sim.ships.some((s) => s.state === 'unloading')).toBe(false);
+    sim.toggleBerthClosed(7, k);
+    run(sim, 3);
+    expect(sim.ships.some((s) => s.state === 'unloading' || s.state === 'sailing') || sim.shipsDone > 0).toBe(true);
   });
 });
