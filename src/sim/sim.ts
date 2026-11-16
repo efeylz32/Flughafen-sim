@@ -38,6 +38,9 @@ import {
   GRID_H,
   GRID_W,
   LEVELS,
+  HILL_COST,
+  TUNNEL_MUL,
+  BRIDGE_MUL,
   PARK_SLOTS,
   EMPTY_IN_COST,
   RAIL_EMPTIES,
@@ -542,6 +545,7 @@ export interface SaveData {
   zones?: { cranes: number[]; gates: number[]; plants: number[]; rails: number[]; trucks: number[] };
   oneway?: number[];
   roadTier?: number[];
+  roadUnder?: number[];
   closedQ?: number[];
   railX?: number[];
   owned?: number[];
@@ -666,6 +670,8 @@ export class Sim {
   roadTier = new Uint8Array(GRID_W * GRID_H);
   /** Bahnübergang: Straße über einem Gleis */
   railX = new Uint8Array(GRID_W * GRID_H);
+  /** Unter der Straße: 0 Land, 1 Hügel (Tunnel), 2 Wasser (Brücke) */
+  roadUnder = new Uint8Array(GRID_W * GRID_H);
   /** Gekaufte Spalten (1 = gehört dir) */
   owned = new Uint8Array(GRID_W).fill(1);
   plotsBought = 0;
@@ -800,6 +806,33 @@ export class Sim {
         this.kind[y * GRID_W + x] = k;
       }
     }
+    // Hügel (eigene Höhenebene): an der Küste weit hinten, am Fluss überall verteilt
+    if (map === 'coast' || map === 'river') {
+      const h = (a: number, b: number) => {
+        let v = (a * 374761393 + b * 668265263 + this.seed * 2246822519) >>> 0;
+        v = Math.imul(v ^ (v >>> 13), 1274126177) >>> 0;
+        return (v ^ (v >>> 16)) / 4294967296;
+      };
+      const count = map === 'river' ? 5 : 3;
+      for (let n = 0; n < count; n++) {
+        const cx = 3 + Math.floor(h(n, 1) * (GRID_W - 6));
+        const cy = (map === 'river' ? COAST_ROW + 5 : GRID_H - 8) + Math.floor(h(n, 2) * (map === 'river' ? GRID_H - COAST_ROW - 8 : 5));
+        const r = 1.6 + h(n, 3) * 1.6;
+        for (let y = Math.floor(cy - r); y <= cy + r; y++) {
+          for (let x = Math.floor(cx - r); x <= cx + r; x++) {
+            if (!this.inBounds(x, y) || y <= COAST_ROW + 3 || Math.hypot(x - cx, y - cy) > r) continue;
+            this.kind[y * GRID_W + x] = T.Hill;
+          }
+        }
+      }
+    }
+    // Fluss: zwei Felder breit von der See nach Süden durchs Land
+    if (map === 'river') {
+      for (let y = COAST_ROW; y < GRID_H; y++) {
+        const wob = Math.round(Math.sin(y * 0.55 + (this.seed % 7)) * 1.2);
+        for (const x of [17 + wob, 18 + wob]) this.kind[y * GRID_W + x] = T.Water;
+      }
+    }
     if (map === 'rocks') {
       // Felsbrocken in Gruppen, die erste Reihe am Wasser bleibt frei
       for (let n = 0; n < 26; n++) {
@@ -823,7 +856,7 @@ export class Sim {
       for (let x = p * PLOT_W; x < Math.min(GRID_W, (p + 1) * PLOT_W); x++) {
         for (let y = COAST_ROW; y < GRID_H; y++) {
           const k = this.kind[this.idx(x, y)];
-          if (k !== T.Land && k !== T.Water && k !== T.Rock) used = true;
+          if (k !== T.Land && k !== T.Water && k !== T.Rock && k !== T.Hill) used = true;
         }
       }
       if (used) continue;
@@ -1086,6 +1119,10 @@ export class Sim {
   }
 
   /** Abstandskarte (in Feldern) über das Straßennetz zum Zielfeld. -1 = nicht erreichbar. */
+  /** Brücken nur über Wasser im Land: nicht in der See und nicht im Fahrwasser an den Inselküsten */
+  bridgeable(x: number, y: number): boolean {
+    return this.kind[this.idx(x, y)] === T.Water && y > COAST_ROW && x >= 2 && x <= GRID_W - 3 && y <= GRID_H - 4;
+  }
   /** Liegt ab (x, y) bis zum rechten Kartenrand durchgehend Gleis (oder ein Bahnübergang)? */
   trackToEdge(x: number, y: number): boolean {
     for (let xx = x; xx < GRID_W; xx++) {
@@ -1402,13 +1439,14 @@ export class Sim {
   // ───────────────────────── Bauen ─────────────────────────
 
   canBuild(tool: BuildTool, x: number, y: number): BuildCheck {
-    const cost = Math.round((this.costOf(tool) * (this.used && Sim.usable(tool) ? this.usedMarket.factor : 1)) / 100) * 100;
+    let cost = Math.round((this.costOf(tool) * (this.used && Sim.usable(tool) ? this.usedMarket.factor : 1)) / 100) * 100;
     if (!this.inBounds(x, y)) return { ok: false, reason: 'Außerhalb der Karte', cost };
     if (this.level < UNLOCK[tool]) return { ok: false, reason: `Erst ab Stufe ${UNLOCK[tool]} (${LEVELS[UNLOCK[tool] - 1].name})`, cost };
     const i = this.idx(x, y);
     const k = this.kind[i];
     if (!this.owned[x]) return { ok: false, reason: `Das Land gehört dir noch nicht. Kaufe es mit „Land kaufen“ (${eur(this.plotPrice)}).`, cost };
     if (k === T.Rock) return { ok: false, reason: `Hier liegt ein Felsen. Sprenge ihn mit „Abriss“ (${eur(ROCK_COST)}).`, cost };
+    if (k === T.Hill && tool !== 'road') return { ok: false, reason: `Hier ist ein Hügel. Eine Straße geht als Tunnel durch, sonst mit „Abriss“ abtragen (${eur(HILL_COST)}).`, cost };
     const [sw, sh] = dimsOf(tool, this.rot);
     if (sw > 1 || sh > 1) {
       for (let yy = y; yy < y + sh; yy++) {
@@ -1458,8 +1496,12 @@ export class Sim {
         else if (this.rtgs.some((r) => Math.abs(r.x - x) <= 2 && Math.abs(r.y - y) <= 2)) reason = 'Zu nah an einem anderen Portalkran';
         break;
       case 'road':
-        // Straße über ein Gleis wird zum Bahnübergang
-        if (k !== T.Land && k !== T.Track) reason = k === T.Water ? 'Nicht auf dem Wasser' : 'Das Feld ist belegt';
+        // Straße über ein Gleis wird zum Bahnübergang, durch einen Hügel zum Tunnel, über Wasser zur Brücke
+        if (k === T.Hill) cost = this.costOf('road') * TUNNEL_MUL;
+        else if (k === T.Water) {
+          if (!this.bridgeable(x, y)) reason = 'Brücken nur über Flüsse und Kanäle im Land, nicht über das Fahrwasser der Schiffe';
+          else cost = this.costOf('road') * BRIDGE_MUL;
+        } else if (k !== T.Land && k !== T.Track) reason = 'Das Feld ist belegt';
         break;
       case 'road2':
       case 'hwy': {
@@ -1517,7 +1559,10 @@ export class Sim {
         return undefined;
       case 'kai':
       case 'road':
-        if (tool === 'road') this.railX[i] = this.kind[i] === T.Track ? 1 : 0;
+        if (tool === 'road') {
+          this.railX[i] = this.kind[i] === T.Track ? 1 : 0;
+          this.roadUnder[i] = this.kind[i] === T.Hill ? 1 : this.kind[i] === T.Water ? 2 : 0;
+        }
         this.kind[i] = TILE_OF[tool]!;
         this.roadTier[i] = 0;
         return undefined;
@@ -1641,6 +1686,10 @@ export class Sim {
     const i = this.idx(x, y);
     const k = this.kind[i];
     if (k === T.Rock && !this.owned[x]) return { ok: false, reason: 'Das Land gehört dir nicht', cost: 0 };
+    if (k === T.Hill) {
+      if (!this.owned[x]) return { ok: false, reason: 'Das Land gehört dir nicht', cost: 0 };
+      return this.money >= HILL_COST ? { ok: true, cost: HILL_COST } : { ok: false, reason: `Abtragen kostet ${eur(HILL_COST)}`, cost: HILL_COST };
+    }
     if (k === T.Rock) {
       return this.money >= ROCK_COST ? { ok: true, cost: ROCK_COST } : { ok: false, reason: `Sprengen kostet ${eur(ROCK_COST)}`, cost: ROCK_COST };
     }
@@ -1664,10 +1713,11 @@ export class Sim {
     if (!chk.ok) return { ...chk, removed: [] };
     const i = this.idx(x, y);
     const removed: Removed[] = [];
-    if (this.kind[i] === T.Rock) {
+    if (this.kind[i] === T.Rock || this.kind[i] === T.Hill) {
+      const c = this.kind[i] === T.Hill ? HILL_COST : ROCK_COST;
       this.kind[i] = T.Land;
-      this.money -= ROCK_COST;
-      this.today.building += ROCK_COST;
+      this.money -= c;
+      this.today.building += c;
       this.touch();
       return { ...chk, removed };
     }
@@ -1732,6 +1782,12 @@ export class Sim {
         out.push({ tool: 'road', x, y, refund: this.give(this.costOf(this.roadTier[i] === 2 ? 'hwy' : this.roadTier[i] === 1 ? 'road2' : 'road'), factor), tier: this.roadTier[i], ow: this.oneway[i] });
         this.roadTier[i] = 0;
         this.oneway[i] = -1;
+        // Tunnel und Brücke: darunter liegt wieder Hügel oder Wasser
+        if (this.roadUnder[i]) {
+          this.kind[i] = this.roadUnder[i] === 1 ? T.Hill : T.Water;
+          this.roadUnder[i] = 0;
+          return;
+        }
         // Ein Bahnübergang wird wieder zum Gleis
         if (this.railX[i]) {
           this.railX[i] = 0;
@@ -4548,6 +4604,7 @@ export class Sim {
       },
       oneway: Array.from(this.oneway),
       roadTier: Array.from(this.roadTier),
+      roadUnder: Array.from(this.roadUnder),
       closedQ: Array.from(this.closedQ),
       railX: Array.from(this.railX),
       owned: Array.from(this.owned),
@@ -4614,6 +4671,7 @@ export class Sim {
     s.kind.set(d.kind);
     if (d.oneway) s.oneway.set(d.oneway);
     if (d.roadTier) s.roadTier.set(d.roadTier);
+    if (d.roadUnder) s.roadUnder.set(d.roadUnder);
     if (d.closedQ) s.closedQ.set(d.closedQ);
     if (d.railX) s.railX.set(d.railX);
     if (d.owned) s.owned.set(d.owned);

@@ -32,6 +32,7 @@ export enum T {
   Battery = 14,
   Track = 15,
   Parking = 16,
+  Hill = 17,
 }
 
 export type Tool = 'view' | 'kai' | 'crane' | 'lcrane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'road2' | 'hwy' | 'solar' | 'battery' | 'track' | 'parking' | 'rtg' | 'hazard' | 'emptyyard' | 'fill' | 'assign' | 'copy' | 'paste' | 'yarduse' | 'zone' | 'oneway' | 'buyland' | 'berth' | 'demolish';
@@ -235,13 +236,19 @@ export const PLOT_PRICE = 60_000;
 export const PLOT_PRICE_STEP = 30_000;
 
 // Karten
-export type MapId = 'coast' | 'island' | 'rocks';
+export type MapId = 'coast' | 'island' | 'rocks' | 'river';
 export const MAPS: Record<MapId, { name: string; text: string; ships: number; bonus: number }> = {
   coast: { name: 'Küste', text: 'Viel Platz, Bahnanschluss am rechten Rand.', ships: 1, bonus: 0 },
   island: { name: 'Insel', text: 'Kai an allen vier Küsten, aber wenig Land und keine Bahn. Ab Stufe 2 kommen Schiffe öfter. 150.000 € mehr Startgeld.', ships: 0.8, bonus: 150_000 },
   rocks: { name: 'Felsen', text: 'Felsen versperren Bauland. Sprengen kostet 8.000 € pro Feld. 50.000 € mehr Startgeld.', ships: 1, bonus: 50_000 },
+  river: { name: 'Fluss', text: 'Ein Fluss teilt das Land und Hügel liegen im Weg. Brücken und Tunnel kosten, verbinden aber. 100.000 € mehr Startgeld.', ships: 1, bonus: 100_000 },
 };
 export const ROCK_COST = 8_000;
+/** Hügel abtragen */
+export const HILL_COST = 12_000;
+/** Straße durch einen Hügel (Tunnel) oder über Wasser (Brücke): Vielfaches des Straßenpreises */
+export const TUNNEL_MUL = 6;
+export const BRIDGE_MUL = 16;
 
 // Konkurrenz und Ereignisse
 export const RIVAL_NAME = 'Hafen Nordstadt';

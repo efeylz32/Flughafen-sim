@@ -1601,3 +1601,39 @@ describe('Lagerblöcke, Stellplätze, Liegeplätze', () => {
     expect(sim.ships.some((s) => s.state === 'unloading' || s.state === 'sailing') || sim.shipsDone > 0).toBe(true);
   });
 });
+
+describe('Gelände: Hügel, Tunnel, Brücken', () => {
+  it('Flusskarte: Brücke über den Fluss, Tunnel durch Hügel, Abriss stellt das Gelände wieder her', () => {
+    const sim = new Sim(5, 'normal', 'river');
+    sim.money = 1e7;
+    // Ein Wasserfeld im Fluss suchen
+    let wx = -1;
+    const wy = k + 6;
+    for (let x = 2; x < GRID_W - 2; x++) if (sim.kind[sim.idx(x, wy)] === T.Water) wx = x;
+    expect(wx).toBeGreaterThan(0);
+    const m = sim.money;
+    expect(sim.build('road', wx, wy).ok).toBe(true);
+    expect(m - sim.money).toBe(sim.costOf('road') * 16);
+    expect(sim.roadUnder[sim.idx(wx, wy)]).toBe(2);
+    sim.demolish(wx, wy);
+    expect(sim.kind[sim.idx(wx, wy)]).toBe(T.Water);
+    // Hügel
+    const hill = Array.from(sim.kind).findIndex((v) => v === T.Hill);
+    expect(hill).toBeGreaterThan(0);
+    const hx = hill % GRID_W;
+    const hy = (hill / GRID_W) | 0;
+    expect(sim.canBuild('yard', hx, hy).ok).toBe(false);
+    expect(sim.build('road', hx, hy).ok).toBe(true);
+    expect(sim.roadUnder[hill]).toBe(1);
+    sim.demolish(hx, hy);
+    expect(sim.kind[hill]).toBe(T.Hill);
+    // Abtragen
+    expect(sim.demolish(hx, hy).ok).toBe(true);
+    expect(sim.kind[hill]).toBe(T.Land);
+  });
+
+  it('keine Brücke über die See', () => {
+    const sim = new Sim();
+    expect(sim.canBuild('road', 10, k - 1).ok).toBe(false);
+  });
+});

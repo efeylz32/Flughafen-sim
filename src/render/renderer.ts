@@ -683,6 +683,26 @@ export class Renderer {
                 .fill(C.grassA);
               g.moveTo(ox, oy + dy * 12.5).quadraticCurveTo(ox + dx * 1.5, oy + dy * 1.5, ox + dx * 12.5, oy).stroke({ width: 1.3, color: C.roadEdge, alpha: 0.85 });
             }
+            // Tunnel: dunkle Röhre mit Portalen, Brücke: Geländer und Schatten aufs Wasser
+            const under = sim.roadUnder[y * GRID_W + x];
+            if (under === 1) {
+              g.rect(px, py, TILE, TILE).fill({ color: 0x1d2228, alpha: 0.45 });
+              const tun = (dx: number, dy: number) => sim.kind[(y + dy) * GRID_W + x + dx] === T.Road && sim.roadUnder[(y + dy) * GRID_W + x + dx] === 1;
+              const portal = { color: 0x8d949b };
+              if (w && !tun(-1, 0)) g.rect(px, py + 2, 4, TILE - 4).fill(portal);
+              if (e && !tun(1, 0)) g.rect(px + TILE - 4, py + 2, 4, TILE - 4).fill(portal);
+              if (n && !tun(0, -1)) g.rect(px + 2, py, TILE - 4, 4).fill(portal);
+              if (s && !tun(0, 1)) g.rect(px + 2, py + TILE - 4, TILE - 4, 4).fill(portal);
+            } else if (under === 2) {
+              const rail = { color: 0xe9edf1 };
+              if ((w || e) && !(n || s)) {
+                g.rect(px, py - 1, TILE, 3).fill(rail);
+                g.rect(px, py + TILE - 2, TILE, 3).fill(rail);
+              } else {
+                g.rect(px - 1, py, 3, TILE).fill(rail);
+                g.rect(px + TILE - 2, py, 3, TILE).fill(rail);
+              }
+            }
             // Bahnübergang: Schienen über die Straße, weiß-rote Markierung
             if (sim.railX[y * GRID_W + x]) {
               g.rect(px, py + 19.6, TILE, 1.5).fill(0x8f979f);
@@ -765,6 +785,22 @@ export class Renderer {
             if (!same(0, 1)) g.rect(px, py + TILE - 2, TILE, 2).fill(0x3b9bd6);
             if (!same(-1, 0)) g.rect(px, py, 2, TILE).fill(0x3b9bd6);
             if (!same(1, 0)) g.rect(px + TILE - 2, py, 2, TILE).fill(0x3b9bd6);
+            break;
+          }
+          case T.Hill: {
+            // Hügel: höhere Ebene mit Schattenkante und Höhenlinien
+            g.rect(px, py, TILE, TILE).fill(0x7fb35f);
+            const up = kindAt(x, y - 1) === T.Hill;
+            const dn = kindAt(x, y + 1) === T.Hill;
+            const lf = kindAt(x - 1, y) === T.Hill;
+            const rt = kindAt(x + 1, y) === T.Hill;
+            if (!dn) g.rect(px, py + TILE - 6, TILE, 6).fill({ color: 0x3f6e33, alpha: 0.55 });
+            if (!rt) g.rect(px + TILE - 4, py, 4, TILE).fill({ color: 0x3f6e33, alpha: 0.35 });
+            if (!up) g.rect(px, py, TILE, 3).fill({ color: 0xc8e6a8, alpha: 0.7 });
+            if (!lf) g.rect(px, py, 3, TILE).fill({ color: 0xc8e6a8, alpha: 0.5 });
+            g.moveTo(px + 4, py + 12).quadraticCurveTo(px + 16, py + 6 + (h % 5), px + 28, py + 12).stroke({ width: 1, color: 0x5f8f48, alpha: 0.6 });
+            g.moveTo(px + 6, py + 21).quadraticCurveTo(px + 16, py + 16 + (h % 4), px + 26, py + 21).stroke({ width: 1, color: 0x5f8f48, alpha: 0.5 });
+            if (h % 3 === 0) g.circle(px + 9 + (h % 13), py + 8 + ((h >>> 4) % 14), 3.2).fill(0x5b9447);
             break;
           }
           case T.Parking: {
