@@ -1713,3 +1713,40 @@ describe('Wartung und Versicherung', () => {
     expect(c.insurance).toBe(2);
   });
 });
+
+describe('Lieferaufträge', () => {
+  it('Aufträge werden angeboten, gezählt, bezahlt oder bestraft', () => {
+    const sim = bigPort(2, 10);
+    run(sim, 25);
+    expect(sim.orderOffers.length).toBeGreaterThan(0);
+    const o = sim.orderOffers.find((o) => o.kind === 'road') ?? sim.orderOffers[0];
+    expect(sim.acceptOrder(o.id).ok).toBe(true);
+    o.qty = 5;
+    run(sim, 26);
+    expect(sim.ordersDone + sim.orders.length).toBeGreaterThan(0);
+    const late = { ...o, id: 999, qty: 1_000_000, done: 0, until: sim.day - 1 };
+    sim.orders.push(late);
+    const m = sim.money;
+    run(sim, 25);
+    expect(sim.orders.includes(late)).toBe(false);
+    expect(sim.money).toBeLessThan(m + 10_000_000);
+  });
+});
+
+describe('Hallen-Stufen', () => {
+  it('Ausbau ab Stufe 3 macht die Halle schneller und den Puffer größer', () => {
+    const sim = bigPort(2, 6);
+    expect(sim.build('unpack', 12, k + 6).ok).toBe(true);
+    sim.finishAll();
+    const p = sim.plants[0];
+    expect(sim.upgradePlant(p.id).ok).toBe(false);
+    sim.level = 3;
+    const before = sim.plantBuf(p);
+    expect(sim.upgradePlant(p.id).ok).toBe(true);
+    expect(p.lvl).toBe(2);
+    expect(p.build).toBeGreaterThan(0);
+    expect(sim.plantBuf(p)).toBeGreaterThan(before);
+    const c = Sim.deserialize(JSON.parse(JSON.stringify(sim.serialize())));
+    expect(c.plants[0].lvl).toBe(2);
+  });
+});

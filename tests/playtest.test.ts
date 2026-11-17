@@ -30,6 +30,7 @@ interface Report {
   spend: Record<string, number>;
   handled: number;
   perDay: number;
+  extra: string;
   dayMoney: string;
   used: string;
 }
@@ -130,6 +131,14 @@ class Bot {
     if (s.level >= 2 && s.batteryCap === 0 && s.money > 100_000 + reserve) this.try('battery', 18, k + 3);
     // Stellplätze für wartende Trucks
     if (s.level >= 2 && s.money > 30_000 + reserve && !this.spend.parking) for (let x = 14; x <= 17; x++) this.try('parking', x, k + 2);
+    // Zollhof, Versicherung, Lieferaufträge, Wartung ab Stufe 2
+    if (s.level >= 2 && s.customsTiles < 2 && s.money > 60_000 + reserve) this.try('customs', 18 + s.customsTiles, k + 8) || this.try('customs', 18 + s.customsTiles, k + 9);
+    if (s.level >= 2 && s.insurance === 0) s.setInsurance(1);
+    if (s.orders.length < 1) {
+      const o = s.orderOffers.find((o) => o.kind === 'road' || o.kind === 'export');
+      if (o) s.acceptOrder(o.id);
+    }
+    if (s.level >= 2 && s.hour >= 20 && s.hour < 21) for (const c of s.cranes) if (c.wear > 0.5 && !c.maintPlan && s.money > reserve) s.planMaint(c.id);
     // Leerlauf messen
     this.idleSamples++;
     this.idleSum += s.trucks.length ? s.trucks.filter((t) => !t.job && t.wait <= 0).length / s.trucks.length : 0;
@@ -182,6 +191,7 @@ function play(diff: DiffId): Report {
     handled: s.handled,
     perDay: s.history.at(-1)?.handled ?? 0,
     dayMoney: dayMoney.join(', '),
+    extra: `Zoll geprüft ${s.customsDone}, Lieferaufträge erfüllt ${s.ordersDone}, Versicherung erstattet ${Math.round(s.insuredTotal / 1000)}k, Querverkehr ${Math.round(s.crossWait / 60)} Std.`,
     used: Object.entries(bot.spend).map(([k, v]) => `${k} ${Math.round(v / 1000)}k`).join(', '),
   };
 }
@@ -199,6 +209,7 @@ it.skipIf(!ON)('Spieltest', () => {
         `Container: ${r.handled}, pro Tag zuletzt ${r.perDay}`,
         `Netto (Geld − Kredit) Tagesende: ${r.dayMoney}`,
         `Ausgaben: ${r.used}`,
+        r.extra,
         `Ausbau: ${r.cranes} Kräne, ${r.trucks} Trucks, ${r.gates} Gates, ausgefallen ${r.broken}, Trucks ohne Auftrag ${r.idleShare} %`,
       ].join('\n'),
     );

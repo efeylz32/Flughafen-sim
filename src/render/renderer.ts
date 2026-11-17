@@ -1027,6 +1027,8 @@ export class Renderer {
       g.roundRect(x + 3, y + 3.5, w - 7, h - 15, 2.5).fill(roof);
       // Sheddach: helle Streifen über die ganze Halle
       for (let sx = x + 6; sx < x + w - 8; sx += 7) g.rect(sx, y + 5, 3, h - 18).fill(tint(roof, 0.35));
+      // Ausbaustufe: goldene Punkte an der Dachkante
+      for (let k = 1; k < (p.lvl ?? 1); k++) g.circle(x + w - 9 - (k - 1) * 7, y + h - 16, 2.6).fill(0xf2c230).stroke({ width: 1, color: 0x6a4b00 });
       // Dachaufbauten: Lüfter und bei der Kühlhalle Kühlaggregate
       for (let k = 0; k < p.w; k++) {
         const cx = x + 16 + k * TILE;

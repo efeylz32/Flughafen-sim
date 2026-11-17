@@ -1,5 +1,5 @@
 import type { Game } from '../game';
-import { INSURANCE,
+import { INSURANCE, PLANT_LEVELS, MAX_ORDERS, ORDER_KINDS,
   BuildTool,
   DIFFS,
   DiffId,
@@ -15,7 +15,6 @@ import { INSURANCE,
   LEVELS,
   LEVEL_NEWS,
   PLANTS,
-  PLANT_BUF,
   ROLE_NAMES,
   TruckRole,
   RAIL_CAP,
@@ -490,6 +489,14 @@ export class UI {
       if (role) this.game.setTruckRole(role.dataset.role as TruckRole);
       else if (t.closest('[data-upgrade]')) this.game.upgradeSelected();
       else if (t.closest('[data-overhaul]')) this.game.overhaulSelected();
+      else if (t.closest('[data-plantup]') && this.game.selected?.kind === 'plant') {
+        const r = this.game.sim.upgradePlant(this.game.selected.id);
+        if (!r.ok) this.game.fail(r.reason ?? 'Nicht möglich');
+        else {
+          this.game.sound.play('upgrade');
+          this.toast(`Hallenausbau läuft: −${eur(r.cost)}. Solange steht die Halle.`, 'good');
+        }
+      }
       else if (t.closest('[data-maint]') && this.game.selected?.kind === 'crane') {
         const r = this.game.sim.planMaint(this.game.selected.id);
         if (!r.ok) this.game.fail(r.reason ?? 'Nicht möglich');
@@ -623,6 +630,13 @@ export class UI {
     this.deals.addEventListener('click', (e) => {
       const t = e.target as HTMLElement;
       if (t === this.deals) return this.hideDeals();
+      const ord = t.closest<HTMLElement>('[data-order]');
+      if (ord) {
+        const r = this.game.sim.acceptOrder(Number(ord.dataset.order));
+        if (!r.ok) this.game.fail(r.reason ?? 'Nicht möglich');
+        this.renderDeals(true);
+        return;
+      }
       const acc = t.closest<HTMLElement>('[data-accept]');
       const can = t.closest<HTMLElement>('[data-cancel]');
       if (acc) this.game.acceptContract(Number(acc.dataset.accept));
@@ -1744,7 +1758,7 @@ export class UI {
 
   private renderDeals(force: boolean) {
     const sim = this.game.sim;
-    const key = `${sim.level}|${sim.contracts.map((c) => `${c.id}:${c.calls}:${c.missed ?? 0}:${Math.round(c.next / 6)}`)}|${sim.offers.map((o) => o.id)}|${this.confirmCancel}`;
+    const key = `${sim.level}|${sim.contracts.map((c) => `${c.id}:${c.calls}:${c.missed ?? 0}:${Math.round(c.next / 6)}`)}|${sim.offers.map((o) => o.id)}|${this.confirmCancel}|${sim.orders.map((o) => `${o.id}:${o.done}`)}|${sim.orderOffers.map((o) => o.id)}`;
     if (!force && key === this.lastDeals) return;
     this.lastDeals = key;
     const free = sim.contracts.length < sim.maxContracts;
@@ -1754,7 +1768,28 @@ export class UI {
       ${sim.contracts.length ? sim.contracts.map((c) => this.contractCard(c, true, false)).join('') : '<p class="sub">Noch kein Vertrag.</p>'}
       <h3>Angebote</h3>
       ${sim.offers.length ? sim.offers.map((c) => this.contractCard(c, false, free)).join('') : '<p class="sub">Neue Angebote kommen jeden Morgen.</p>'}
-      ${free ? '' : '<p class="sub">Alle Vertragsplätze sind belegt. Die nächste Hafenstufe bringt mehr.</p>'}`;
+      ${free ? '' : '<p class="sub">Alle Vertragsplätze sind belegt. Die nächste Hafenstufe bringt mehr.</p>'}
+      <h3>Lieferaufträge (${sim.orders.length} von ${MAX_ORDERS})</h3>
+      ${
+        sim.level < 2
+          ? '<p class="sub">Ab Stufe 2 bestellen Firmen aus dem Hinterland feste Mengen: per Lkw, per Bahn, für den Export oder Ware aus den Hallen.</p>'
+          : `${sim.orders
+              .map(
+                (o) => `<div class="deal"><div class="dh"><b>${esc(o.firm)}</b><span class="tag">${o.done >= o.qty ? 'erfüllt, zahlt am Tagesende' : `bis Ende Tag ${o.until}`}</span></div>
+                <div class="meta">${o.qty} ${ORDER_KINDS[o.kind].text}</div>
+                <div class="progress"><span style="width:${Math.round((o.done / o.qty) * 100)}%"></span></div>
+                <div class="meta">${o.done} von ${o.qty} · Lohn ${eur(o.reward)} · Strafe ${eur(o.penalty)}</div></div>`,
+              )
+              .join('')}
+            ${sim.orderOffers
+              .map(
+                (o) => `<div class="deal"><div class="dh"><b>${esc(o.firm)}</b><span class="tag">${o.days} Tage</span></div>
+                <div class="meta">${o.qty} ${ORDER_KINDS[o.kind].text}</div>
+                <div class="meta">Lohn ${eur(o.reward)} · Strafe bei Verfehlen ${eur(o.penalty)}</div>
+                <div class="pm"><button class="primary" data-order="${o.id}" ${sim.orders.length < MAX_ORDERS ? '' : 'disabled'}>Annehmen</button></div></div>`,
+              )
+              .join('') || (sim.orders.length ? '' : '<p class="sub">Neue Aufträge kommen jeden Morgen.</p>')}`
+      }`;
   }
 
   private updateSheet() {
@@ -1870,15 +1905,22 @@ export class UI {
       if (!p) return gone();
       const cfg = PLANTS[p.kind];
       const pack = p.kind === 'pack';
-      html = `<h3>${cfg.name} <span class="tag">${Math.round(60 / cfg.time)} pro Stunde</span></h3>
+      const lv = p.lvl ?? 1;
+      const buf = sim.plantBuf(p);
+      html = `<h3>${cfg.name} <span class="tag">Stufe ${lv}</span> <span class="tag">${Math.round((60 / cfg.time) * PLANT_LEVELS[lv - 1].speed)} pro Stunde</span></h3>
         ${buildRow(p.build)}
         <div class="meta">${p.kind === 'fill' ? 'Macht aus einem leeren Container und einer Ladung Ware einen Export-Container (+150 €). Leergut kommt aus dem Leerlager, Ware aus der Packhalle oder vom Zug.' : pack ? `Macht aus 2 Einheiten ausgepackter Ware 1 Container ${PRODUCTS[p.product].name} (zurzeit ${eur(sim.price(p.product))}).` : p.kind === 'cold' ? `Verarbeitet Kühlcontainer zu Lebensmitteln (zurzeit ${eur(sim.price('food'))} statt 400 €).` : 'Packt Import-Container vom Stapelplatz aus. Die Ware geht weiter zur Veredelung.'}</div>
-        <div class="meta">Eingang: ${p.inBuf} von ${PLANT_BUF}${p.kind === 'fill' ? ` · Leergut: ${p.inEmpty} von ${PLANT_BUF}` : ''} · Ausgang: ${p.outBuf} von ${PLANT_BUF}${p.kind === 'unpack' ? ` · Leere Container: ${p.emptyOut}` : ''} · Hergestellt: ${num(p.made)}</div>
+        <div class="meta">Eingang: ${p.inBuf} von ${buf}${p.kind === 'fill' ? ` · Leergut: ${p.inEmpty} von ${buf}` : ''} · Ausgang: ${p.outBuf} von ${buf}${p.kind === 'unpack' ? ` · Leere Container: ${p.emptyOut}` : ''} · Hergestellt: ${num(p.made)}</div>
         <div class="why ${p.proc > 0 ? '' : 'alert'}"><b>${p.proc > 0 ? 'Arbeitet' : 'Steht'}</b><br>${sim.plantWhy(p)}</div>`;
       if (pack) {
         actions = `<div class="rolelabel">Produkt</div><div class="roles">${(['elec', 'cloth'] as ProductId[])
           .map((q) => `<button data-product="${q}" class="${p.product === q ? 'on' : ''}">${PRODUCTS[q].name} · ${eur(sim.price(q))}</button>`)
           .join('')}</div>`;
+      }
+      const pu = sim.plantUpgradeInfo(p.id);
+      if (pu && !p.build) {
+        const lock = sim.level < pu.level;
+        actions += `<button class="secondary" data-plantup="1" ${lock || sim.money < pu.cost ? 'disabled' : ''}>${lock ? `Stufe ${pu.next} ab Hafenstufe ${pu.level}` : `Ausbau auf Stufe ${pu.next} · ${eur(pu.cost)} (schneller, mehr Puffer)`}</button>`;
       }
     } else if (sel.kind === 'shop') {
       const sh = sim.shops.find((q) => q.id === sel.id);

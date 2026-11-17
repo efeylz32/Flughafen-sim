@@ -468,3 +468,6 @@ html, body { touch-action: none; overscroll-behavior: none; }
 .tipcard { position: fixed; left: 50%; bottom: 150px; transform: translateX(-50%); width: min(420px, calc(100vw - 32px)); background: #1d3550; color: #fff; border-radius: 14px; padding: 12px 14px; z-index: 40; box-shadow: 0 6px 20px rgba(0,0,0,.25); font-size: 14px; cursor: pointer; }
 .tipcard p { margin: 4px 0 8px; line-height: 1.4; }
 .tipcard .tipok { font-weight: 600; color: #ffd36a; }
+.deal .dh { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
+.deal .pm { margin-top: 8px; }
+.deal .progress { margin: 6px 0; }

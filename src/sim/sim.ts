@@ -67,6 +67,11 @@ import {
   CUSTOMS_QUEUE,
   CUSTOMS_RUN,
   MAINT_COST,
+  ORDER_KINDS,
+  ORDER_FIRMS,
+  MAX_ORDERS,
+  PLANT_LEVELS,
+  type OrderKind,
   INSURANCE,
   MAINT_GM,
   MAINT_HOUR,
@@ -189,6 +194,8 @@ export interface Rtg {
 
 export interface Plant {
   id: number;
+  /** Ausbaustufe 1..3 */
+  lvl?: number;
   /** Leere Container: Eingang der Befüllhalle, Ausgang der Packhalle */
   inEmpty: number;
   emptyOut: number;
@@ -472,6 +479,20 @@ export interface GameEvent {
   amount?: number;
 }
 
+/** Lieferauftrag einer Firma: feste Menge bis zu einem Tag, Lohn oder Strafe */
+export interface Order {
+  id: number;
+  firm: string;
+  kind: OrderKind;
+  qty: number;
+  done: number;
+  days: number;
+  /** Letzter Tag (einschließlich) */
+  until: number;
+  reward: number;
+  penalty: number;
+}
+
 export interface DayBook {
   fees: number;
   exportFees: number;
@@ -570,6 +591,10 @@ export interface SaveData {
   oneway?: number[];
   overpass?: number[];
   custQueue?: number[];
+  plantLvl?: number[];
+  orders?: Order[];
+  orderOffers?: Order[];
+  ordersDone?: number;
   insurance?: number;
   insuredTotal?: number;
   customsDone?: number;
@@ -796,6 +821,10 @@ export class Sim {
   crossWait = 0;
   /** Zoll: Gebühren der Container, die auf die Prüfung warten, Fortschritt und Zähler */
   custQueue: number[] = [];
+  /** Lieferaufträge: laufend, Angebote, erfüllt */
+  orders: Order[] = [];
+  orderOffers: Order[] = [];
+  ordersDone = 0;
   /** Versicherungsstufe 0..2 */
   insurance = 0;
   custProg = 0;
@@ -2153,6 +2182,33 @@ export class Sim {
   }
 
   /** Kosten und Mindeststufe der nächsten Aufrüstung */
+  plantBuf(p: Plant): number {
+    return PLANT_BUF + PLANT_LEVELS[(p.lvl ?? 1) - 1].buf;
+  }
+  /** Nächste Hallen-Stufe: Preis und ab welcher Hafenstufe, oder null bei Höchststufe */
+  plantUpgradeInfo(id: number): { cost: number; level: number; next: number } | null {
+    const p = this.plants.find((p) => p.id === id);
+    if (!p) return null;
+    const next = (p.lvl ?? 1) + 1;
+    if (next > PLANT_LEVELS.length) return null;
+    const L = PLANT_LEVELS[next - 1];
+    return { cost: Math.round((this.costOf(p.kind) * L.cost) / 500) * 500, level: L.level, next };
+  }
+  upgradePlant(id: number): BuildCheck {
+    const p = this.plants.find((p) => p.id === id);
+    const info = this.plantUpgradeInfo(id);
+    if (!p || !info) return { ok: false, reason: 'Schon auf der höchsten Stufe', cost: 0 };
+    if (p.build) return { ok: false, reason: 'Wird gerade gebaut', cost: 0 };
+    if (this.level < info.level) return { ok: false, reason: `Ab Hafenstufe ${info.level}`, cost: info.cost };
+    if (this.money < info.cost) return { ok: false, reason: 'Zu wenig Geld', cost: info.cost };
+    this.money -= info.cost;
+    this.today.building += info.cost;
+    p.lvl = info.next;
+    p.build = p.buildMax = PLANT_LEVELS[info.next - 1].time;
+    this.version++;
+    return { ok: true, cost: info.cost };
+  }
+
   upgradeInfo(kind: 'crane' | 'truck', id: number): { cost: number; level: number; label: string } | null {
     if (kind === 'truck') return { cost: Math.round(UPGRADE.truck.cost * this.inflation), level: UPGRADE.truck.level, label: 'Fahrerlos aufrüsten' };
     const c = this.cranes.find((c) => c.id === id);
@@ -2506,7 +2562,7 @@ export class Sim {
     // 6. Verarbeitung: Lager → Packhalle → Veredelung → Ausgang
     for (const p of this.plants) {
       if (!zOk(p.zone) || p.build) continue;
-      const room = PLANT_BUF - p.inBuf - p.resIn;
+      const room = this.plantBuf(p) - p.inBuf - p.resIn;
       const hungry = p.inBuf + p.resIn < PLANTS[p.kind].needs;
       if (room > 0 && p.kind === 'unpack') {
         const src = this.findSource(T.Yard, 'imp', t.tile, p.zone);
@@ -2561,7 +2617,7 @@ export class Sim {
       }
       // Befüllhalle: Leergut aus dem Leerlager und Ware (aus der Packhalle oder vom Zug)
       if (p.kind === 'fill') {
-        const roomE = PLANT_BUF - p.inEmpty - p.resInE;
+        const roomE = this.plantBuf(p) - p.inEmpty - p.resInE;
         if (roomE > 0) {
           const src = this.findSource(T.Empty, 'empty', t.tile, p.zone);
           const acc = src ? this.nearestAccess(p, src.access) : null;
@@ -3149,7 +3205,7 @@ export class Sim {
     if (p.build) return 'Im Bau.';
     if (this.powerDown) return 'Stromausfall: Die Halle steht.';
     if (p.proc > 0) return 'Arbeitet.';
-    if (p.outBuf >= PLANT_BUF) return 'Ausgang voll: Es fehlt ein Truck, der abholt (Rolle „Verarbeitung“ hilft).';
+    if (p.outBuf >= this.plantBuf(p)) return 'Ausgang voll: Es fehlt ein Truck, der abholt (Rolle „Verarbeitung“ hilft).';
     if (p.kind === 'fill') {
       if (p.inEmpty < 1) return this.emptyTiles.length ? 'Kein Leergut: Das Leerlager ist leer oder kein Truck bringt welches.' : 'Kein Leergut: Baue ein Leerlager.';
       if (p.inBuf < 1) return 'Keine Ware: Sie kommt aus der Packhalle oder mit dem Zug.';
@@ -3168,6 +3224,66 @@ export class Sim {
     if (t.parked) return 'Wartet auf dem Stellplatz auf einen Auftrag.';
     if (t.role !== 'auto') return 'Für seine feste Rolle gibt es gerade keine Fahrt.';
     return 'Kein Auftrag: Gerade ist nichts zu fahren.';
+  }
+
+  // ───────────────────────── Lieferaufträge ─────────────────────────
+
+  private orderProgress(kind: OrderKind, n: number) {
+    for (const o of this.orders) if (o.kind === kind && o.done < o.qty) o.done = Math.min(o.qty, o.done + n);
+  }
+  /** Was der Hafen von dieser Sorte zuletzt pro Tag geschafft hat (grobe Schätzung) */
+  private orderBase(kind: OrderKind): number {
+    const h = this.history.slice(-3);
+    const handled = h.length ? h.reduce((n, b) => n + b.handled, 0) / h.length : 300;
+    if (kind === 'goods') return Math.max(4, this.plants.filter((p) => p.kind !== 'unpack').length * 40);
+    if (kind === 'rail') return this.rails.length ? Math.max(40, handled * 0.25) : 0;
+    if (kind === 'export') return Math.max(40, handled * 0.2);
+    return Math.max(60, handled * 0.6);
+  }
+  private makeOrderOffers() {
+    this.orderOffers = [];
+    if (this.level < 2) return;
+    const kinds = (Object.keys(ORDER_KINDS) as OrderKind[]).filter((k) => this.level >= ORDER_KINDS[k].level && this.orderBase(k) > 0);
+    for (let i = 0; i < 3 && kinds.length; i++) {
+      const kind = this.pick(kinds);
+      const days = 2 + Math.floor(this.rnd() * 3);
+      const cfg = ORDER_KINDS[kind];
+      const qty = Math.max(10, Math.round((this.orderBase(kind) * cfg.share * days) / 10) * 10);
+      const reward = Math.round((qty * cfg.per * this.inflation) / 500) * 500;
+      this.orderOffers.push({ id: this.nextId++, firm: this.pick(ORDER_FIRMS), kind, qty, done: 0, days, until: 0, reward, penalty: Math.round(reward * 0.4 / 500) * 500 });
+    }
+  }
+  acceptOrder(id: number): BuildCheck {
+    const o = this.orderOffers.find((o) => o.id === id);
+    if (!o) return { ok: false, reason: 'Angebot nicht mehr da', cost: 0 };
+    if (this.orders.length >= MAX_ORDERS) return { ok: false, reason: `Höchstens ${MAX_ORDERS} Lieferaufträge gleichzeitig`, cost: 0 };
+    this.orderOffers = this.orderOffers.filter((x) => x !== o);
+    o.until = this.day + o.days - 1;
+    this.orders.push(o);
+    this.emit(`Lieferauftrag von ${o.firm}: ${o.qty} ${ORDER_KINDS[o.kind].text} bis Ende Tag ${o.until}.`, 'good');
+    return { ok: true, cost: 0 };
+  }
+  /** Am Tagesende: erfüllte Aufträge zahlen, abgelaufene kosten Strafe */
+  private settleOrders() {
+    const day = this.day - 1;
+    this.orders = this.orders.filter((o) => {
+      if (o.done >= o.qty) {
+        this.money += o.reward;
+        this.today.bonus += o.reward;
+        this.ordersDone++;
+        this.rep = Math.min(REP_MAX, this.rep + 2);
+        this.emit(`${o.firm}: Lieferauftrag erfüllt. +${eur(o.reward)}, Ruf +2`, 'good', { tag: 'contract' });
+        return false;
+      }
+      if (day >= o.until) {
+        this.money -= o.penalty;
+        this.today.penalty += o.penalty;
+        this.rep = Math.max(0, this.rep - 2);
+        this.emit(`${o.firm}: Lieferauftrag verfehlt (${o.done} von ${o.qty}). −${eur(o.penalty)}, Ruf −2`, 'bad');
+        return false;
+      }
+      return true;
+    });
   }
 
   /** Schaden: kostet Geld, die Versicherung zahlt einen Teil zurück */
@@ -4004,6 +4120,7 @@ export class Sim {
             ship.exportLeft--;
             ship.loaded++;
             this.exportsLoaded++;
+            this.orderProgress('export', 1);
             this.handled++, this.today.handled++;
             const ef = Math.round(EXPORT_FEE * (1 + 0.05 * this.tech.sales));
             this.money += ef;
@@ -4118,6 +4235,7 @@ export class Sim {
       this.containersDone++;
       this.handled++, this.today.handled++;
       this.customsDone++;
+      this.orderProgress('road', 1);
       this.money += fee;
       this.today.fees += fee;
     }
@@ -4149,6 +4267,7 @@ export class Sim {
               this.emit(undefined, 'good', { tag: 'container', x: g.x, y: g.y, amount: fee });
             } else {
               g.served++;
+              this.orderProgress('road', 1);
               this.containersDone++;
               this.handled++, this.today.handled++;
               if (type === 1) this.reefersHandled++;
@@ -4234,6 +4353,7 @@ export class Sim {
             this.today.handled += n;
             this.containersDone += n;
             this.trainsDone++;
+            this.orderProgress('rail', n);
             this.emit(`Zug abgefahren: ${n} Container, +${eur(r.value)}`, 'good', { tag: 'train', x: r.x, y: r.y, amount: r.value });
           }
           r.lastLoad = n;
@@ -4261,8 +4381,9 @@ export class Sim {
         p.proc = 0;
         p.outBuf++;
         p.made++;
+        if (p.kind !== 'unpack') this.orderProgress('goods', 1);
         // Beim Auspacken bleibt ein leerer Container übrig, wenn es ein Leerlager gibt
-        if (p.kind === 'unpack' && this.emptyTiles.length > 0 && p.emptyOut + p.resOutE < PLANT_BUF) p.emptyOut++;
+        if (p.kind === 'unpack' && this.emptyTiles.length > 0 && p.emptyOut + p.resOutE < this.plantBuf(p)) p.emptyOut++;
         // Die Befüllhalle verkauft die Ware, die in den Export-Container ging
         if (p.kind === 'fill') {
           this.money += FILL_FEE;
@@ -4270,12 +4391,12 @@ export class Sim {
         }
       }
       const ready = p.kind === 'fill' ? p.inBuf >= 1 && p.inEmpty >= 1 : p.inBuf >= cfg.needs;
-      if (ready && p.outBuf < PLANT_BUF) {
+      if (ready && p.outBuf < this.plantBuf(p)) {
         if (p.kind === 'fill') {
           p.inBuf--;
           p.inEmpty--;
         } else p.inBuf -= cfg.needs;
-        p.proc = cfg.time * (this.spec === 'hub' ? 1.3 : this.spec === 'logi' ? 0.75 : 1);
+        p.proc = (cfg.time * (this.spec === 'hub' ? 1.3 : this.spec === 'logi' ? 0.75 : 1)) / PLANT_LEVELS[(p.lvl ?? 1) - 1].speed;
       }
     }
   }
@@ -4719,6 +4840,8 @@ export class Sim {
     if (this.history.length > 14) this.history.shift();
     this.today = emptyBook();
     this.makeOffers();
+    this.settleOrders();
+    this.makeOrderOffers();
     this.planWeather();
     this.rollSickness();
     this.updateRival();
@@ -4838,6 +4961,7 @@ export class Sim {
       market: this.market,
       marketPrev: this.marketPrev,
       products: this.plants.map((p) => p.product),
+      plantLvl: this.plants.map((p) => p.lvl ?? 1),
       foodDone: this.foodDone,
       scenario: this.scenario,
       devs: {
@@ -4860,6 +4984,9 @@ export class Sim {
       overpass: Array.from(this.overpass),
       custQueue: [...this.custQueue],
       insurance: this.insurance,
+      orders: this.orders,
+      orderOffers: this.orderOffers,
+      ordersDone: this.ordersDone,
       insuredTotal: this.insuredTotal,
       customsDone: this.customsDone,
       roadTier: Array.from(this.roadTier),
@@ -4932,6 +5059,9 @@ export class Sim {
     if (d.overpass) s.overpass.set(d.overpass);
     if (d.custQueue) s.custQueue = [...d.custQueue];
     s.insurance = d.insurance ?? 0;
+    s.orders = d.orders ?? [];
+    s.orderOffers = d.orderOffers ?? [];
+    s.ordersDone = d.ordersDone ?? 0;
     s.insuredTotal = d.insuredTotal ?? 0;
     s.customsDone = d.customsDone ?? 0;
     if (d.roadTier) s.roadTier.set(d.roadTier);
@@ -4979,6 +5109,7 @@ export class Sim {
     if (d.market) s.market = { ...s.market, ...d.market };
     if (d.marketPrev) s.marketPrev = { ...s.marketPrev, ...d.marketPrev };
     s.plants.forEach((p, i) => (p.product = d.products?.[i] ?? 'elec'));
+    s.plants.forEach((p, i) => (p.lvl = d.plantLvl?.[i] ?? 1));
     s.foodDone = d.foodDone ?? 0;
     s.scenario = d.scenario ?? null;
     if (d.devs) {

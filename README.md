@@ -88,6 +88,11 @@ Der Aufstiegsbonus ist klein (40.000 € bis 600.000 €). Löhne steigen je Stu
 - **Tagesbericht:** Nach jedem Tag eine Karte mit Ergebnis, Containern, Pünktlichkeit, häufigstem Engpass und Stau.
 - **Szenarien:** Marode übernommen (Schulden tilgen), Insel-Express (600 Container an einem Tag), Kühlkette (150 Lebensmittel).
 - **Kreuzungen und Überführungen (ab Stufe 2):** Wo drei oder vier Straßen zusammenkommen, warten Trucks kurz auf Querverkehr. Eine Überführung (20k) auf der Kreuzung hebt das auf, nochmal tippen baut sie ab.
+- **Zoll (ab Stufe 2):** Etwa jeder achte Import-Container muss geprüft werden. Ohne Zollhof prüft das Gate selbst und braucht dreimal so lange. Jedes Zollhof-Feld (30k) prüft 8 Container pro Stunde, die Gebühr gibt es nach der Prüfung.
+- **Wartungsfenster (ab Stufe 2):** Im Kranblatt eine Wartung für 22 Uhr planen. Der Kran steht zwei Stunden still, verliert Verschleiß und hat drei Tage lang deutlich weniger Ausfälle und Unfälle.
+- **Versicherung:** In der Bilanz Keine, Basis oder Voll wählen. Die Tagesprämie wächst mit der Zahl der Kräne, erstattet werden 50 bzw. 85 % von Kranunfällen und verdorbenen Kühlcontainern.
+- **Lieferaufträge (ab Stufe 2):** Firmen aus dem Hinterland bestellen feste Mengen in 2 bis 4 Tagen: per Lkw, per Bahn, als Export oder (ab Stufe 3) Ware aus den Hallen. Höchstens zwei gleichzeitig, im Verträge-Fenster.
+- **Hallen-Stufen (ab Hafenstufe 3 und 4):** Hallen lassen sich zweimal ausbauen: schneller und mit mehr Puffer. Während des Ausbaus steht die Halle.
 - **Logbuch:** Im Leitstand stehen die letzten 200 Meldungen mit Tag und Uhrzeit. Antippen springt zum Ort, falls es einen gibt.
 - **Warum steht das?** Kran, Gate, Halle und Truck nennen im Info-Blatt den konkreten Grund, warum sie nicht arbeiten, und was hilft.
 - **Kurztipps:** Beim ersten Benutzen eines neuen Werkzeugs (Strom, Portalkran, Befüllkette, Gleise …) erklärt eine Karte das Wichtigste. Einmal pro Gerät.

@@ -287,6 +287,22 @@ export const CUSTOMS_QUEUE = 8;
 export const CUSTOMS_RUN = 600;
 /** Wartungsfenster: Kosten, Dauer (Spielminuten), Startstunde, Verschleiß weg, wie lange das Risiko sinkt (Spielminuten) */
 export const MAINT_COST = 2_500;
+/** Lieferaufträge von Firmen im Hinterland */
+export type OrderKind = 'road' | 'rail' | 'export' | 'goods';
+export const ORDER_KINDS: Record<OrderKind, { text: string; level: number; share: number; per: number }> = {
+  road: { text: 'Container per Lkw abholen', level: 2, share: 0.75, per: 11 },
+  rail: { text: 'Container per Bahn abholen', level: 2, share: 0.75, per: 12 },
+  export: { text: 'Export-Container aufs Schiff bringen', level: 2, share: 0.65, per: 14 },
+  goods: { text: 'Ladungen Ware aus den Hallen', level: 3, share: 0.8, per: 70 },
+};
+export const ORDER_FIRMS = ['Elektro Weser', 'Modehaus Lindgren', 'Frischkontor Nord', 'Möbel Hansen', 'Autoteile Brandt', 'Kaffeerösterei Albers', 'Spielwaren Kühn', 'Baustoff Petersen'];
+export const MAX_ORDERS = 2;
+/** Hallen-Stufen: Preis als Anteil des Neupreises, Tempo, Puffer, Bauzeit (Spielminuten), ab Hafenstufe */
+export const PLANT_LEVELS = [
+  { cost: 0, speed: 1, buf: 0, time: 0, level: 0 },
+  { cost: 0.6, speed: 1.4, buf: 2, time: 240, level: 3 },
+  { cost: 1, speed: 1.8, buf: 4, time: 360, level: 4 },
+] as const;
 /** Versicherung: Stufen mit Tagesprämie und Erstattungsanteil bei Unfall, Verderb und Sturmschäden */
 export const INSURANCE = [
   { name: 'Keine', premium: 0, share: 0 },
