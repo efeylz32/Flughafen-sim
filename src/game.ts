@@ -649,6 +649,11 @@ export class Game {
         else if (k === T.Reefer) add('reefer', x, y);
         else if (k === T.Hazmat) add('hazard', x, y);
         else if (k === T.Empty) add('emptyyard', x, y);
+        else if (k === T.Solar) add('solar', x, y);
+        else if (k === T.Battery) add('battery', x, y);
+        else if (k === T.Customs) add('customs', x, y);
+        else if (k === T.Track) add('track', x, y);
+        else if (k === T.Parking) add('parking', x, y);
       }
     }
     for (const gt of sim.gates) if (inside(gt.x, gt.y, gt.w, gt.h)) add('gate', gt.x, gt.y, { rot: gt.h > gt.w });

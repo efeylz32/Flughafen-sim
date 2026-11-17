@@ -1047,6 +1047,19 @@ export class Sim {
     return n >= 3;
   }
 
+  /** Fährt gerade ein anderer Truck quer über diese Kreuzung? Parkende und ladende zählen nicht. */
+  private crossTraffic(me: Truck, tile: number, dir: number): boolean {
+    const dirOf = (from: number, to: number) => (to === from + 1 ? 0 : to === from + GRID_W ? 1 : to === from - 1 ? 2 : 3);
+    for (const o of this.trucks) {
+      if (o === me || o.next < 0) continue;
+      let d = -1;
+      if (o.next === tile) d = dirOf(o.tile, tile);
+      else if (o.tile === tile) d = dirOf(tile, o.next);
+      if (d >= 0 && d % 2 !== dir % 2) return true;
+    }
+    return false;
+  }
+
   /** Überführung auf eine Kreuzung bauen oder wieder abbauen */
   toggleOverpass(x: number, y: number): BuildCheck {
     if (!this.inBounds(x, y)) return { ok: false, reason: 'Außerhalb', cost: 0 };
@@ -1887,6 +1900,7 @@ export class Sim {
           if (tr.tile === i || tr.next === i) this.takeTruck(tr, factor, out);
         }
         out.push({ tool: 'road', x, y, refund: this.give(this.costOf(this.roadTier[i] === 2 ? 'hwy' : this.roadTier[i] === 1 ? 'road2' : 'road'), factor), tier: this.roadTier[i], ow: this.oneway[i] });
+        if (this.overpass[i]) out[out.length - 1].refund += this.give(OVERPASS_COST * this.inflation, factor);
         this.roadTier[i] = 0;
         this.oneway[i] = -1;
         this.overpass[i] = 0;
@@ -2903,7 +2917,7 @@ export class Sim {
       if (!this.overpass[pick] && t.stuck < CROSS_WAIT_GM && this.isJunction(pick)) {
         const a = (pickDir + 1) % 4;
         const b = (pickDir + 3) % 4;
-        if (this.lane[pick * 4 + a] + this.lane[pick * 4 + b] > 0) {
+        if (this.lane[pick * 4 + a] + this.lane[pick * 4 + b] > 0 && this.crossTraffic(t, pick, pickDir)) {
           t.stuck += dt;
           this.crossWait += dt;
           this.roadJam[t.tile] += dt;
@@ -3515,8 +3529,16 @@ export class Sim {
     // Geplante Wartungen beginnen am Abend
     if (Math.floor(this.hour) === MAINT_HOUR) {
       for (const c of this.cranes) {
-        if (!c.maintPlan || c.build) continue;
+        if (!c.maintPlan) continue;
         c.maintPlan = false;
+        // Ausgefallen oder im Umbau: Wartung fällt aus, Geld zurück
+        if (c.build || c.wear >= 1) {
+          const back = this.maintCost();
+          this.money += back;
+          this.today.repair = (this.today.repair ?? 0) - back;
+          this.emit('Wartung fällt aus: Der Kran ist ausgefallen oder im Umbau. Geld zurück.', 'info', { x: c.x, y: c.y });
+          continue;
+        }
         c.maintLeft = MAINT_GM;
       }
     }
@@ -4256,6 +4278,7 @@ export class Sim {
             g.inApron++;
           } else if (g.procCust === 2) {
             // Geht an den Zollhof: Gebühr erst nach der Prüfung
+            g.served++;
             this.custQueue.push(g.procFee);
           } else {
             const type = Math.floor(g.procFee / 100000);

@@ -159,7 +159,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 @keyframes pop { from { transform: translateY(-6px) scale(.96); opacity: 0; } to { transform: none; opacity: 1; } }
 
 /* Menü */
-.modal { position: absolute; inset: 0; background: rgba(20,36,56,.55); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.modal { position: absolute; inset: 0; z-index: 30; background: rgba(20,36,56,.55); display: flex; align-items: center; justify-content: center; padding: 16px; }
 .dialog { background: var(--surface); width: min(440px, 100%); max-height: 100%; overflow: auto; border-radius: 24px; padding: 22px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 10px; }
 .dialog h1 { margin: 0; font-size: 28px; }
 .dialog .sub { margin: 0 0 6px; color: var(--muted); font-size: 14px; }
@@ -465,7 +465,7 @@ html, body { touch-action: none; overscroll-behavior: none; }
 .logrow.good { background: #e8f5ec; }
 .logrow.go { cursor: pointer; }
 .logrow .lt { font-size: 12px; color: #6a7686; }
-.tipcard { position: fixed; left: 50%; bottom: 150px; transform: translateX(-50%); width: min(420px, calc(100vw - 32px)); background: #1d3550; color: #fff; border-radius: 14px; padding: 12px 14px; z-index: 40; box-shadow: 0 6px 20px rgba(0,0,0,.25); font-size: 14px; cursor: pointer; }
+.tipcard { position: fixed; left: 50%; bottom: calc(300px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); width: min(420px, calc(100vw - 32px)); background: #1d3550; color: #fff; border-radius: 14px; padding: 12px 14px; z-index: 20; box-shadow: 0 6px 20px rgba(0,0,0,.25); font-size: 14px; cursor: pointer; }
 .tipcard p { margin: 4px 0 8px; line-height: 1.4; }
 .tipcard .tipok { font-weight: 600; color: #ffd36a; }
 .deal .dh { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }

@@ -1,5 +1,5 @@
 import type { Game } from '../game';
-import { INSURANCE, PLANT_LEVELS, MAX_ORDERS, ORDER_KINDS,
+import { INSURANCE, OVERPASS_LEVEL, PLANT_LEVELS, MAX_ORDERS, ORDER_KINDS,
   BuildTool,
   DIFFS,
   DiffId,
@@ -287,6 +287,7 @@ export class UI {
   private ctlBody!: HTMLElement;
   private ctlTab: 'overview' | 'devices' | 'fleet' | 'rules' | 'power' | 'log' = 'overview';
   private tipEl!: HTMLElement;
+  private tipTimer = 0;
   private ctlKey = '';
   private newRule: { cond: RuleCond; act: RuleAct } = { cond: 'yardHigh', act: 'role:out' };
   private ghostBar!: HTMLElement;
@@ -590,7 +591,7 @@ export class UI {
       const b = el('button', 'tool');
       b.innerHTML = `<span class="ico" style="--c:${t.color}">${ICONS[t.tool]}<span class="lk">${ICONS.lock}</span></span><b>${t.label}</b><small>${t.sub}</small>`;
       b.addEventListener('click', () => {
-        const need = UNLOCK[t.tool as BuildTool] ?? 1;
+        const need = t.tool === 'overpass' ? OVERPASS_LEVEL : (UNLOCK[t.tool as BuildTool] ?? 1);
         if (this.game.sim.level < need) {
           this.game.fail(`${t.label} gibt es ab Stufe ${need} (${LEVELS[need - 1].name})`);
           return;
@@ -1256,6 +1257,8 @@ export class UI {
     }
     this.tipEl.innerHTML = `<b>${tip[0]}</b><p>${tip[1]}</p><span class="tipok">Verstanden</span>`;
     this.tipEl.classList.remove('hidden');
+    clearTimeout(this.tipTimer);
+    this.tipTimer = window.setTimeout(() => this.tipEl.classList.add('hidden'), 15000);
   }
 
   toast(text: string, kind: 'info' | 'good' | 'bad' = 'info') {
@@ -1370,7 +1373,7 @@ export class UI {
     if (sim.level !== this.lastLevel) {
       this.lastLevel = sim.level;
       for (const v of this.toolBtns.values()) {
-        const need = UNLOCK[v.def.tool as BuildTool] ?? 1;
+        const need = v.def.tool === 'overpass' ? OVERPASS_LEVEL : (UNLOCK[v.def.tool as BuildTool] ?? 1);
         const locked = sim.level < need;
         v.btn.classList.toggle('locked', locked);
         v.sub.textContent = locked ? `Stufe ${need}` : this.toolSub(v.def);
