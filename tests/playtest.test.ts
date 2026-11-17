@@ -30,6 +30,8 @@ interface Report {
   spend: Record<string, number>;
   handled: number;
   perDay: number;
+  dayMoney: string;
+  used: string;
 }
 
 /** Ein einfacher, aber vernünftiger Spieler: baut eine Grundkette und behebt dann jede Stunde den Engpass. */
@@ -121,6 +123,13 @@ class Bot {
         if (x !== undefined) this.try('crane', x, k);
       }
     }
+    // Strom ab Stufe 2: Solar und eine Batterie gegen Ausfälle
+    if (s.level >= 2 && s.money > 80_000 + reserve && s.solarTiles < 6) {
+      for (let x = 15; x <= 19; x++) if (this.try('solar', x, k + 5) || this.try('solar', x, k + 6)) break;
+    }
+    if (s.level >= 2 && s.batteryCap === 0 && s.money > 100_000 + reserve) this.try('battery', 18, k + 3);
+    // Stellplätze für wartende Trucks
+    if (s.level >= 2 && s.money > 30_000 + reserve && !this.spend.parking) for (let x = 14; x <= 17; x++) this.try('parking', x, k + 2);
     // Leerlauf messen
     this.idleSamples++;
     this.idleSum += s.trucks.length ? s.trucks.filter((t) => !t.job && t.wait <= 0).length / s.trucks.length : 0;
@@ -136,6 +145,8 @@ function play(diff: DiffId): Report {
   let minMoney = s.money;
   let loanMax = 0;
   const levelDay: number[] = [];
+  const dayMoney: string[] = [];
+  let lastDay = s.day;
   const maxDays = DIFFS[diff].goalDays + 5;
   for (let h = 0; h < maxDays * 24; h++) {
     for (let i = 0; i < 150; i++) s.tick();
@@ -144,6 +155,10 @@ function play(diff: DiffId): Report {
     minMoney = Math.min(minMoney, s.money);
     loanMax = Math.max(loanMax, s.loan);
     while (levelDay.length < s.level - 1) levelDay.push(s.day);
+    if (s.day !== lastDay) {
+      lastDay = s.day;
+      if (dayMoney.length < 8) dayMoney.push(`T${s.day - 1} ${Math.round((s.money - s.loan) / 1000)}k`);
+    }
     if (s.status === 'won' || s.status === 'lost') break;
   }
   return {
@@ -166,6 +181,8 @@ function play(diff: DiffId): Report {
     spend: bot.spend,
     handled: s.handled,
     perDay: s.history.at(-1)?.handled ?? 0,
+    dayMoney: dayMoney.join(', '),
+    used: Object.entries(bot.spend).map(([k, v]) => `${k} ${Math.round(v / 1000)}k`).join(', '),
   };
 }
 
@@ -180,6 +197,8 @@ it.skipIf(!ON)('Spieltest', () => {
         `Geld: tiefster Stand ${k2(r.minMoney)}, Ende ${k2(r.endMoney)}, Kredit höchstens ${k2(r.loanMax)}`,
         `Schiffe ${r.ships}, pünktlich ${r.onTime} %, Verträge erfüllt ${r.contractsDone}, an Konkurrenz verloren ${r.lostToRival}`,
         `Container: ${r.handled}, pro Tag zuletzt ${r.perDay}`,
+        `Netto (Geld − Kredit) Tagesende: ${r.dayMoney}`,
+        `Ausgaben: ${r.used}`,
         `Ausbau: ${r.cranes} Kräne, ${r.trucks} Trucks, ${r.gates} Gates, ausgefallen ${r.broken}, Trucks ohne Auftrag ${r.idleShare} %`,
       ].join('\n'),
     );
