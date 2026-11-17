@@ -834,6 +834,17 @@ export class Renderer {
             }
             break;
           }
+          case T.Customs: {
+            // Zollhof: grünes Dach, Schranke und Prüfspur
+            g.rect(px, py, TILE, TILE).fill(0xd7dcd2);
+            g.roundRect(px + 3, py + 5, TILE - 5, TILE - 12, 2).fill({ color: 0x000000, alpha: 0.2 });
+            g.roundRect(px + 2, py + 3, TILE - 5, TILE - 12, 2).fill(0x3d6b4f);
+            g.rect(px + 2, py + 3, TILE - 5, 3).fill(0x5d8f6d);
+            g.circle(px + TILE / 2, py + 12, 4).fill(0xf2c230);
+            g.rect(px + 4, py + TILE - 6, TILE - 8, 2).fill(0xd9473f);
+            g.rect(px + 4 + (TILE - 8) / 2, py + TILE - 6, (TILE - 8) / 4, 2).fill(0xffffff);
+            break;
+          }
           case T.Battery: {
             // Batteriespeicher: Container mit Lüftern und grüner Ladeanzeige
             g.roundRect(px + 3, py + 6, TILE - 4, TILE - 9, 2).fill({ color: 0x000000, alpha: 0.2 });

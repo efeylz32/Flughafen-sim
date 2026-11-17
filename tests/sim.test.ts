@@ -1669,3 +1669,47 @@ describe('Kreuzungen und Überführungen', () => {
     expect(sim.toggleOverpass(8, k + 1).reason).toMatch(/Kreuzung/);
   });
 });
+
+describe('Zoll', () => {
+  it('Ohne Zollhof prüft das Gate selbst, der Zollhof übernimmt und zahlt nach der Prüfung', () => {
+    const a = bigPort(2, 10);
+    run(a, 16);
+    const b = bigPort(2, 10);
+    expect(b.build('customs', 26, k + 2).ok).toBe(true);
+    expect(b.build('customs', 27, k + 2).ok).toBe(true);
+    b.finishAll();
+    run(b, 16);
+    expect(a.customsDone).toBe(0);
+    expect(b.customsDone).toBeGreaterThan(0);
+    const c = Sim.deserialize(JSON.parse(JSON.stringify(b.serialize())));
+    expect(c.customsDone).toBe(b.customsDone);
+  });
+});
+
+describe('Wartung und Versicherung', () => {
+  it('Wartungsfenster nimmt den Kran nachts vom Netz und senkt den Verschleiß', () => {
+    const sim = bigPort(2, 6);
+    const c = sim.cranes[0];
+    c.wear = 0.6;
+    expect(sim.planMaint(c.id).ok).toBe(true);
+    let saw = false;
+    for (let i = 0; i < (26 * 60) / 0.4; i++) {
+      sim.tick();
+      if (c.state === 'maint') saw = true;
+    }
+    expect(saw).toBe(true);
+    expect(c.careUntil).toBeGreaterThan(sim.gm);
+    expect(c.wear).toBeLessThan(0.6);
+  });
+
+  it('Versicherung kostet täglich und erstattet Schäden', () => {
+    const sim = bigPort(2, 6);
+    sim.setInsurance(2);
+    const m = sim.money;
+    (sim as unknown as { loss(c: number): void }).loss(10_000);
+    expect(sim.money).toBe(m - 10_000 + 8_500);
+    expect(sim.insurancePremium()).toBeGreaterThan(0);
+    const c = Sim.deserialize(JSON.parse(JSON.stringify(sim.serialize())));
+    expect(c.insurance).toBe(2);
+  });
+});

@@ -1,5 +1,5 @@
 import type { Game } from '../game';
-import {
+import { INSURANCE,
   BuildTool,
   DIFFS,
   DiffId,
@@ -93,6 +93,7 @@ const ICONS: Record<string, string> = {
   rtg: svg('<path d="M4 20V5M20 20V5M3 5h18M3 9h18"/><rect x="10" y="10" width="4" height="3" rx=".5"/><path d="M12 13v3"/><rect x="9" y="16" width="6" height="4" rx=".6"/>'),
   zone: svg('<rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.5"/><rect x="13" y="3.5" width="7.5" height="7.5" rx="1.5"/><rect x="3.5" y="13" width="7.5" height="7.5" rx="1.5"/><path d="M13 16.8h7.5M16.8 13v7.5"/>'),
   chart: svg('<path d="M4 20V4M4 20h16"/><rect x="7" y="12" width="3" height="6" rx=".6"/><rect x="12" y="8" width="3" height="10" rx=".6"/><rect x="17" y="10.5" width="3" height="7.5" rx=".6"/>'),
+  customs: svg('<path d="M12 3l8 3v5c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/><path d="M9 12l2 2 4-4"/>'),
   overpass: svg('<path d="M2 15h20"/><path d="M5 15v5M19 15v5"/><path d="M12 3v18" opacity=".5"/>'),
   oneway: svg('<path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M3 5h18M3 19h18" opacity=".5"/>'),
   buyland: svg('<path d="M4 20V9l8-5 8 5v11z"/><path d="M9 20v-6h6v6"/><path d="M12 4v-1"/>'),
@@ -160,6 +161,7 @@ const TOOLS: ToolDef[] = [
   { cat: 'build', tool: 'cold', label: 'Kühlhalle', sub: '80k · 2×2', color: '#3b9bd6' },
   { cat: 'build', tool: 'solar', label: 'Solar', sub: '15k', color: '#f2c230' },
   { cat: 'build', tool: 'battery', label: 'Batterie', sub: '40k', color: '#2f9e6b' },
+  { cat: 'build', tool: 'customs', label: 'Zollhof', sub: '30k', color: '#3d6b4f' },
   { cat: 'build', tool: 'workshop', label: 'Werkstatt', sub: '40k · 2×2', color: '#5b6b82' },
   { cat: 'ways', tool: 'rail', label: 'Bahnhof', sub: '150k', color: '#5f6f82' },
   { cat: 'ways', tool: 'track', label: 'Gleis', sub: '3k', color: '#8f7a5b' },
@@ -220,6 +222,7 @@ const TIPS: Record<string, [string, string]> = {
   rail: ['Bahnterminal', 'Ein Teil der Container geht per Bahn. Das entlastet die Gates.'],
   parking: ['Stellplätze', 'Freie Trucks warten hier statt auf der Straße. Das hält die Wege frei.'],
   hwy: ['Autobahn', 'Schnell und breit, aber teuer. Lohnt sich für die Hauptachse vom Gate ins Lager.'],
+  customs: ['Zollhof', 'Ab Stufe 2 muss etwa jeder achte Import-Container durch den Zoll. Ohne Zollhof prüft das Gate selbst und braucht dafür dreimal so lange. Jedes Zollhof-Feld prüft 8 Container pro Stunde.'],
   overpass: ['Überführung', 'An Kreuzungen warten Trucks auf Querverkehr. Eine Überführung auf der Kreuzung hebt das auf. Nochmal tippen baut sie ab.'],
   oneway: ['Einbahnstraße', 'Tippe auf eine Straße, um die Fahrtrichtung festzulegen. Einbahnstraßen fassen mehr Trucks.'],
   berth: ['Liegeplätze', 'Tippe auf einen Liegeplatz, um ihn zu sperren oder wieder zu öffnen.'],
@@ -401,6 +404,12 @@ export class UI {
     this.finCard.addEventListener('click', (e) => {
       const t = e.target as HTMLElement;
       if (t === this.finCard) return this.finCard.classList.add('hidden');
+      const ins = t.closest<HTMLElement>('[data-ins]');
+      if (ins) {
+        this.game.sim.setInsurance(Number(ins.dataset.ins));
+        this.renderFinance(this.game.sim);
+        return;
+      }
       const l = t.closest<HTMLElement>('[data-loan]');
       if (l) {
         if (l.dataset.loan === 'take') this.game.takeLoan();
@@ -481,6 +490,11 @@ export class UI {
       if (role) this.game.setTruckRole(role.dataset.role as TruckRole);
       else if (t.closest('[data-upgrade]')) this.game.upgradeSelected();
       else if (t.closest('[data-overhaul]')) this.game.overhaulSelected();
+      else if (t.closest('[data-maint]') && this.game.selected?.kind === 'crane') {
+        const r = this.game.sim.planMaint(this.game.selected.id);
+        if (!r.ok) this.game.fail(r.reason ?? 'Nicht möglich');
+        else this.toast(r.cost > 0 ? 'Wartung geplant: Der Kran steht heute ab 22 Uhr zwei Stunden still.' : 'Wartung abgesagt.', 'good');
+      }
       else if (t.closest('[data-berth]') && this.game.selected?.kind === 'kai') this.game.toggleBerth(this.game.selected.id % GRID_W, (this.game.selected.id / GRID_W) | 0);
       else if (t.closest('[data-vip]') && this.game.selected?.kind === 'ship') this.game.prioritizeShip(this.game.selected.id);
       const prod = t.closest<HTMLElement>('[data-product]');
@@ -1410,8 +1424,8 @@ export class UI {
 
   private renderFinance(sim: Sim) {
     const d = sim.today;
-    const income = (b: typeof d) => b.fees + b.rail + b.exportFees + b.berth + b.bonus;
-    const costs = (b: typeof d) => b.running + b.building + b.penalty + b.wages + b.interest + (b.power ?? 0);
+    const income = (b: typeof d) => b.fees + b.rail + b.exportFees + b.berth + b.bonus + (b.refund ?? 0);
+    const costs = (b: typeof d) => b.running + b.building + b.penalty + b.wages + b.interest + (b.power ?? 0) + (b.repair ?? 0) + (b.insurance ?? 0);
     const inc = income(d);
     const exp = costs(d);
     const row = (label: string, v: number) => (v ? `<div class="fl sub"><span>${label}</span><span>${eur(v)}</span></div>` : '');
@@ -1463,9 +1477,9 @@ export class UI {
       <h3>Heute</h3>
       <div class="fl"><b>Einnahmen</b><b>${eur(inc)}</b></div>
       ${row('Container am Gate', d.fees)}${row('Container per Bahn', d.rail)}${row('Export aufs Schiff', d.exportFees)}
-      ${row('Liegegebühren', d.berth)}${row('Vertrags- und Stufenbonus', d.bonus)}
+      ${row('Liegegebühren', d.berth)}${row('Vertrags- und Stufenbonus', d.bonus)}${row('Erstattung der Versicherung', d.refund ?? 0)}
       <div class="fl"><b>Ausgaben</b><b>${eur(exp)}</b></div>
-      ${row('Löhne', d.wages)}${row('Bau und Aufrüstung', d.building)}${row('Strafen', d.penalty)}${row('Wartung (Tagesabschluss)', d.running)}${row('Zinsen (Tagesabschluss)', d.interest)}${row('Strom aus dem Netz', d.power ?? 0)}
+      ${row('Löhne', d.wages)}${row('Bau und Aufrüstung', d.building)}${row('Strafen', d.penalty)}${row('Wartung (Tagesabschluss)', d.running)}${row('Zinsen (Tagesabschluss)', d.interest)}${row('Strom aus dem Netz', d.power ?? 0)}${row('Wartungsfenster', d.repair ?? 0)}${row('Versicherung (Tagesabschluss)', d.insurance ?? 0)}
       <div class="fl total"><b>Ergebnis heute</b><b class="${inc - exp >= 0 ? 'pos' : 'neg'}">${eur(inc - exp)}</b></div>
       <div class="fl sub"><span>Laufend pro Tag: Wartung / Löhne</span><span>${eur(sim.runningCost())} / ${eur((Object.keys(ROLES) as Role[]).reduce((n, r) => n + sim.staff[r] * sim.wagePerHour(r) * 24, 0))}</span></div>
       ${sim.level >= 2 ? `<h3>Konkurrenz</h3><div class="fl sub"><span>${RIVAL_NAME}: pünktlich</span><span>${Math.round(sim.rivalRate * 100)} %</span></div><div class="fl sub"><span>Du gestern</span><span class="${sim.myRate !== null && sim.myRate < sim.rivalRate - 0.1 ? 'neg' : ''}">${sim.myRate === null ? '–' : `${Math.round(sim.myRate * 100)} %`}</span></div><p class="sub">Liegst du mehr als 10 Punkte darunter, wechseln Reedereien und es kommen weniger freie Schiffe.${sim.lostToRival ? ` Bisher verloren: ${sim.lostToRival} Verträge.` : ''}</p>` : ''}
@@ -1485,6 +1499,9 @@ export class UI {
           return `<div class="fl sub"><span>${PRODUCTS[p].name}</span><span>${arrow} ${eur(sim.price(p))}</span></div>`;
         })
         .join('')}
+      <h3>Versicherung</h3>
+      <div class="tabs insur">${INSURANCE.map((v, i) => `<button data-ins="${i}" class="${sim.insurance === i ? 'on' : ''}">${v.name}${v.premium ? ` · ${eur(sim.insurancePremium(i))}/Tag` : ''}</button>`).join('')}</div>
+      <p class="sub">Zahlt bei Kranunfällen und verdorbenen Kühlcontainern ${Math.round(INSURANCE[sim.insurance].share * 100)} % zurück. Die Prämie wächst mit der Zahl der Kräne.${sim.insuredTotal ? ` Bisher erstattet: ${eur(sim.insuredTotal)}.` : ''}</p>
       <h3>Kredit</h3>
       <div class="fl sub"><span>Offen</span><span>${eur(sim.loan)} von ${eur(sim.loanLimit)}</span></div>
       <div class="fl sub"><span>Zinsen pro Tag</span><span>${eur(sim.interestPerDay)}</span></div>
@@ -1798,6 +1815,8 @@ export class UI {
             ? 'Blockiert: Container am Kran warten auf einen Truck'
             : c.state === 'storm'
               ? 'Steht wegen Sturm still'
+              : c.state === 'maint'
+                ? 'Wartung'
               : c.state === 'power'
                 ? 'Stromausfall: steht still'
               : 'Wartet auf ein Schiff';
@@ -1808,6 +1827,7 @@ export class UI {
       const ui = sim.upgradeInfo('crane', c.id);
       if (ui && !c.build) actions = upgradeBtn('crane', ui.label, ui);
       if (!c.build) actions += overhaulBtn('crane', c.id, c.cap);
+      if (!c.build && sim.level >= 2 && c.wear < 1 && !c.maintLeft) actions += `<button class="secondary" data-maint="1">${c.maintPlan ? 'Wartung absagen' : `Wartung heute ab 22 Uhr · ${eur(sim.maintCost())}`}</button>`;
     } else if (sel.kind === 'gate') {
       const g = sim.gates.find((g) => g.id === sel.id);
       if (!g) return gone();

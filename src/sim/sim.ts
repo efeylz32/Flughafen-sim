@@ -61,6 +61,17 @@ import {
   DIST_UNIT,
   ROAD_LANES,
   OVERPASS_COST,
+  CUSTOMS_SHARE,
+  CUSTOMS_GATE_SLOW,
+  CUSTOMS_RATE,
+  CUSTOMS_QUEUE,
+  CUSTOMS_RUN,
+  MAINT_COST,
+  INSURANCE,
+  MAINT_GM,
+  MAINT_HOUR,
+  MAINT_WEAR,
+  MAINT_CARE_GM,
   OVERPASS_LEVEL,
   CROSS_WAIT_GM,
   ROAD_RUN,
@@ -231,7 +242,11 @@ export interface Crane {
   expBuf: number;
   resExpIn: number;
   cd: number;
-  state: 'idle' | 'working' | 'blocked' | 'storm' | 'broken' | 'building' | 'power';
+  state: 'idle' | 'working' | 'blocked' | 'storm' | 'broken' | 'building' | 'power' | 'maint';
+  /** Wartung: geplant für heute Abend, laufende Restzeit, gepflegt bis (Spielminute) */
+  maintPlan?: boolean;
+  maintLeft?: number;
+  careUntil?: number;
   /** Moves in der laufenden Stunde (für den Leitstand) */
   moves?: number;
   /** Verschleiß 0..1, bei 1 ausgefallen */
@@ -250,6 +265,8 @@ export interface Gate {
   resOutE: number;
   /** Die laufende Annahme ist ein Leercontainer */
   procEmpty?: boolean;
+  /** Zoll: 1 = das Gate prüft selbst (langsam), 2 = geht an den Zollhof */
+  procCust?: number;
   build?: number;
   buildMax?: number;
   x: number;
@@ -471,6 +488,10 @@ export interface DayBook {
   jamPeak: number;
   /** Stromkosten aus dem Netz */
   power?: number;
+  /** Wartung, Versicherungsprämie und Erstattungen */
+  repair?: number;
+  insurance?: number;
+  refund?: number;
   /** Umgeschlagene Container, abgefertigte und pünktliche Schiffe */
   handled: number;
   ships: number;
@@ -548,6 +569,10 @@ export interface SaveData {
   zones?: { cranes: number[]; gates: number[]; plants: number[]; rails: number[]; trucks: number[] };
   oneway?: number[];
   overpass?: number[];
+  custQueue?: number[];
+  insurance?: number;
+  insuredTotal?: number;
+  customsDone?: number;
   roadTier?: number[];
   roadUnder?: number[];
   closedQ?: number[];
@@ -627,7 +652,7 @@ const covers = (e: Box, x: number, y: number) => x >= e.x && y >= e.y && x < e.x
 const UNLOADING = 'Wird entladen.';
 const LOADING = 'Wird beladen.';
 const emptyBook = (): DayBook => ({ fees: 0, exportFees: 0, rail: 0, berth: 0, bonus: 0, penalty: 0, running: 0, wages: 0, interest: 0, building: 0, handled: 0, ships: 0, onTime: 0, bn: { crane: 0, trucks: 0, yard: 0, gate: 0 }, jamPeak: 0, power: 0 });
-const TILE_OF: Partial<Record<BuildTool, T>> = { kai: T.Kai, road: T.Road, yard: T.Yard, road2: T.Road, hwy: T.Road, solar: T.Solar, battery: T.Battery, track: T.Track, parking: T.Parking, reefer: T.Reefer, hazard: T.Hazmat, emptyyard: T.Empty, fill: T.Plant, gate: T.Gate, rail: T.Rail, unpack: T.Plant, pack: T.Plant, cold: T.Plant, workshop: T.Shop };
+const TILE_OF: Partial<Record<BuildTool, T>> = { kai: T.Kai, road: T.Road, yard: T.Yard, road2: T.Road, hwy: T.Road, solar: T.Solar, battery: T.Battery, customs: T.Customs, track: T.Track, parking: T.Parking, reefer: T.Reefer, hazard: T.Hazmat, emptyyard: T.Empty, fill: T.Plant, gate: T.Gate, rail: T.Rail, unpack: T.Plant, pack: T.Plant, cold: T.Plant, workshop: T.Shop };
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 
 const eur = (n: number) => `${Math.round(n).toLocaleString('de-DE')} €`;
@@ -769,6 +794,14 @@ export class Sim {
   powerDown = false;
   /** Summe der Wartezeit an Kreuzungen (Spielminuten), für Tests und Anzeige */
   crossWait = 0;
+  /** Zoll: Gebühren der Container, die auf die Prüfung warten, Fortschritt und Zähler */
+  custQueue: number[] = [];
+  /** Versicherungsstufe 0..2 */
+  insurance = 0;
+  custProg = 0;
+  customsDone = 0;
+  /** Summe aller Erstattungen der Versicherung */
+  insuredTotal = 0;
   /** Regeln für den Leitstand */
   rules: { cond: RuleCond; act: RuleAct; on: boolean }[] = [];
   /** Stündliche Messwerte der letzten 48 Stunden (nicht gespeichert) */
@@ -1517,6 +1550,7 @@ export class Sim {
       case 'hazard':
       case 'solar':
       case 'battery':
+      case 'customs':
       case 'track':
       case 'parking':
       case 'gate':
@@ -1596,6 +1630,7 @@ export class Sim {
     switch (tool) {
       case 'solar':
       case 'battery':
+      case 'customs':
       case 'track':
       case 'parking':
         this.kind[i] = TILE_OF[tool]!;
@@ -1861,9 +1896,10 @@ export class Sim {
       }
       case T.Solar:
       case T.Battery:
+      case T.Customs:
       case T.Track:
       case T.Parking: {
-        const tool: BuildTool = this.kind[i] === T.Solar ? 'solar' : this.kind[i] === T.Battery ? 'battery' : this.kind[i] === T.Parking ? 'parking' : 'track';
+        const tool: BuildTool = this.kind[i] === T.Solar ? 'solar' : this.kind[i] === T.Battery ? 'battery' : this.kind[i] === T.Customs ? 'customs' : this.kind[i] === T.Parking ? 'parking' : 'track';
         out.push({ tool, x, y, refund: this.give(this.costOf(tool), factor) });
         break;
       }
@@ -3033,6 +3069,7 @@ export class Sim {
     this.updateCranes(dt);
     this.updateTrucks(dt);
     this.updateGates(dt);
+    this.updateCustoms(dt);
     this.updateRails(dt);
     this.updatePlants(dt);
     this.updateReefers();
@@ -3082,6 +3119,7 @@ export class Sim {
   craneWhy(c: Crane): string {
     if (c.build) return 'Im Bau oder Umbau.';
     if (c.wear >= 1) return 'Ausgefallen: Eine Werkstatt mit Mechaniker repariert ihn.';
+    if (c.state === 'maint') return `Wartung läuft noch ${Math.ceil((c.maintLeft ?? 0) / 60)} Std. Danach weniger Verschleiß und Unfälle.`;
     if (c.state === 'power') return 'Stromausfall: Batterien würden überbrücken.';
     if (c.state === 'storm') return 'Sturm: Alle Kräne stehen still.';
     if (!c.staffed) return 'Kein Kranführer im Dienst: Stelle im Personal jemanden ein.';
@@ -3101,7 +3139,7 @@ export class Sim {
     if (g.build) return 'Im Bau.';
     if (!g.staffed) return 'Kein Gate-Personal im Dienst: Stelle im Personal jemanden ein.';
     if (!this.accessOf(g).length) return 'Keine Straße am Gate: Trucks kommen nicht hin.';
-    if (g.proc > 0) return g.procIn ? 'Nimmt gerade etwas von außen an.' : 'Fertigt gerade einen Container ab.';
+    if (g.proc > 0) return g.procIn ? 'Nimmt gerade etwas von außen an.' : g.procCust === 1 ? 'Zollkontrolle direkt am Gate: dauert dreimal so lange. Ein Zollhof mit freiem Platz übernimmt das.' : 'Fertigt gerade einen Container ab.';
     const road = this.yardTiles.filter((i) => this.zone[i] === g.zone).reduce((n, i) => n + this.stock[i] - this.stockRail[i], 0);
     if (!g.apron.length && !road) return 'Kein Container im Lager, der über die Straße raus soll.';
     if (!g.apron.length) return 'Wartet auf Trucks: Container liegen im Lager, aber kein Truck bringt sie.';
@@ -3130,6 +3168,49 @@ export class Sim {
     if (t.parked) return 'Wartet auf dem Stellplatz auf einen Auftrag.';
     if (t.role !== 'auto') return 'Für seine feste Rolle gibt es gerade keine Fahrt.';
     return 'Kein Auftrag: Gerade ist nichts zu fahren.';
+  }
+
+  /** Schaden: kostet Geld, die Versicherung zahlt einen Teil zurück */
+  private loss(cost: number) {
+    this.money -= cost;
+    this.today.penalty += cost;
+    const back = Math.round(cost * INSURANCE[this.insurance].share);
+    if (back > 0) {
+      this.money += back;
+      this.today.refund = (this.today.refund ?? 0) + back;
+      this.insuredTotal += back;
+    }
+  }
+  insurancePremium(level = this.insurance): number {
+    return Math.round((INSURANCE[level].premium * this.inflation * (1 + 0.1 * this.cranes.length)) / 100) * 100;
+  }
+  setInsurance(level: number) {
+    this.insurance = Math.max(0, Math.min(INSURANCE.length - 1, level));
+  }
+
+  /** Wartung für heute Abend planen oder absagen */
+  planMaint(id: number): BuildCheck {
+    const c = this.cranes.find((c) => c.id === id);
+    if (!c) return { ok: false, reason: 'Kran nicht gefunden', cost: 0 };
+    if (c.maintPlan) {
+      c.maintPlan = false;
+      const back = this.maintCost();
+      this.money += back;
+      this.today.repair = (this.today.repair ?? 0) - back;
+      return { ok: true, cost: -back };
+    }
+    if (c.maintLeft) return { ok: false, reason: 'Wird gerade gewartet', cost: 0 };
+    if (c.build) return { ok: false, reason: 'Wird gerade gebaut oder überholt', cost: 0 };
+    if (c.wear >= 1) return { ok: false, reason: 'Ausgefallen: Das ist ein Fall für die Werkstatt', cost: 0 };
+    const cost = this.maintCost();
+    if (this.money < cost) return { ok: false, reason: 'Zu wenig Geld', cost };
+    this.money -= cost;
+    this.today.repair = (this.today.repair ?? 0) + cost;
+    c.maintPlan = true;
+    return { ok: true, cost };
+  }
+  maintCost(): number {
+    return Math.round((MAINT_COST * this.inflation) / 100) * 100;
   }
 
   /** Truck gegen einen neuen tauschen: Der alte wird in Zahlung gegeben (je nach Zustand) */
@@ -3315,6 +3396,14 @@ export class Sim {
 
   /** Stündlich: Strom abrechnen, Messwerte sammeln, Regeln ausführen */
   private hourTick() {
+    // Geplante Wartungen beginnen am Abend
+    if (Math.floor(this.hour) === MAINT_HOUR) {
+      for (const c of this.cranes) {
+        if (!c.maintPlan || c.build) continue;
+        c.maintPlan = false;
+        c.maintLeft = MAINT_GM;
+      }
+    }
     const kw = this.powerDemand();
     const solar = this.solarNow();
     const net = kw - solar;
@@ -3422,17 +3511,17 @@ export class Sim {
     if (this.level < 2) return;
     for (const o of [...this.cranes, ...this.trucks]) {
       if (o.build || o.wear >= 1) continue;
-      if (this.rnd() < CRASH_RATE * (1 - o.cap) ** 2) {
+      const care = 'model' in o && (o.careUntil ?? 0) > this.gm ? 0.3 : 1;
+      if (this.rnd() < CRASH_RATE * (1 - o.cap) ** 2 * care) {
         o.wear = 1;
         this.noteBroken('model' in o ? 'Ein Kran' : 'Ein Truck', 'model' in o ? o : { x: o.px, y: o.py });
       }
       // Unfall: Ein alter oder überlasteter Kran lässt einen Container fallen
       if ('model' in o && o.state === 'working') {
         const risk = (o.cap < 0.55 ? (0.55 - o.cap) * 0.12 : 0) + (this.tech.akkord ? 0.004 : 0) + (o.wear > 0.8 ? 0.01 : 0);
-        if (this.rnd() < risk) {
+        if (this.rnd() < risk * ((o.careUntil ?? 0) > this.gm ? 0.3 : 1)) {
           const cost = Math.round((12_000 * this.inflation) / 500) * 500;
-          this.money -= cost;
-          this.today.penalty += cost;
+          this.loss(cost);
           this.rep = Math.max(0, this.rep - 3);
           this.mood = Math.max(0, this.mood - 0.1);
           o.build = o.buildMax = 180;
@@ -3873,6 +3962,16 @@ export class Sim {
         c.state = 'building';
         continue;
       }
+      if (c.maintLeft && c.maintLeft > 0) {
+        c.state = 'maint';
+        c.maintLeft = Math.max(0, c.maintLeft - dt);
+        c.wear = Math.max(0, c.wear - (MAINT_WEAR * dt) / MAINT_GM);
+        if (c.maintLeft === 0) {
+          c.careUntil = this.gm + MAINT_CARE_GM;
+          this.emit('Wartung abgeschlossen: Der Kran ist für drei Tage zuverlässiger.', 'good', { x: c.x, y: c.y });
+        }
+        continue;
+      }
       if (this.powerDown) {
         c.state = 'power';
         continue;
@@ -3998,6 +4097,32 @@ export class Sim {
     return Math.min(demand - have, free - 6);
   }
 
+  get customsTiles(): number {
+    let n = 0;
+    for (let i = 0; i < this.kind.length; i++) if (this.kind[i] === T.Customs) n++;
+    return n;
+  }
+  /** Zollhof: prüft Container aus der Warteschlange, erst dann gibt es die Gebühr */
+  private updateCustoms(dt: number) {
+    if (!this.custQueue.length) {
+      this.custProg = 0;
+      return;
+    }
+    const n = this.customsTiles;
+    this.custProg += (dt / 60) * n * CUSTOMS_RATE * (1 + 0.2 * this.tech.scanner) * (this.powerDown ? 0 : 1);
+    // Zollhof abgerissen: Warteschlange wird trotzdem langsam abgearbeitet
+    if (!n) this.custProg += (dt / 60) * 2;
+    while (this.custProg >= 1 && this.custQueue.length) {
+      this.custProg -= 1;
+      const fee = this.custQueue.shift()!;
+      this.containersDone++;
+      this.handled++, this.today.handled++;
+      this.customsDone++;
+      this.money += fee;
+      this.today.fees += fee;
+    }
+  }
+
   private updateGates(dt: number) {
     this.exportNeed = this.computeExportNeed();
     for (const g of this.gates) {
@@ -4011,6 +4136,9 @@ export class Sim {
             this.today.penalty += EMPTY_IN_COST;
           } else if (g.procIn) {
             g.inApron++;
+          } else if (g.procCust === 2) {
+            // Geht an den Zollhof: Gebühr erst nach der Prüfung
+            this.custQueue.push(g.procFee);
           } else {
             const type = Math.floor(g.procFee / 100000);
             const fee = g.procFee - type * 100000;
@@ -4049,8 +4177,19 @@ export class Sim {
       g.lastIn = takeIn;
       g.procIn = takeIn;
       g.proc = GATE_PROCESS_GM / (1 + 0.2 * this.tech.scanner) / (this.spec === 'logi' ? 1.15 : 1) / this.eff('gate') / this.hinterlandMul(g);
+      g.procCust = 0;
       if (takeIn) this.exportNeed--;
-      else g.procFee = g.apron.shift()!;
+      else {
+        g.procFee = g.apron.shift()!;
+        // Zoll ab Stufe 2: ein Teil der Import-Container muss geprüft werden
+        if (this.level >= 2 && g.procFee < 100000 && this.rnd() < CUSTOMS_SHARE) {
+          if (this.custQueue.length < this.customsTiles * CUSTOMS_QUEUE) g.procCust = 2;
+          else {
+            g.procCust = 1;
+            g.proc *= CUSTOMS_GATE_SLOW;
+          }
+        }
+      }
     }
   }
 
@@ -4157,8 +4296,7 @@ export class Sim {
     }
     if (!spoiled) return;
     const cost = spoiled * REEFER_SPOIL_PENALTY;
-    this.money -= cost;
-    this.today.penalty += cost;
+    this.loss(cost);
     if (this.gm - this.spoilNote > 60) {
       this.spoilNote = this.gm;
       this.emit(`Kühlcontainer verdorben: −${eur(cost)}. Kühlfracht muss in 10 Stunden raus.`, 'bad', { tag: 'spoil' });
@@ -4557,6 +4695,7 @@ export class Sim {
     for (const c of this.cranes) cost += CRANE_MODELS[c.model].run;
     for (let i = 0; i < this.roadTier.length; i++) cost += ROAD_RUN[this.roadTier[i]] * (this.kind[i] === T.Road ? 1 : 0);
     for (const t of this.trucks) cost += (t.agv ? R.agv : R.truck) * (this.tech.diesel ? 0.6 : 1);
+    cost += this.customsTiles * CUSTOMS_RUN;
     cost += this.gates.length * R.gate + this.rails.length * R.rail + this.plants.length * R.plant + this.shops.length * R.shop;
     cost += this.yardTiles.length * R.yardTile + this.reeferTiles.length * R.reeferTile + this.hazTiles.length * R.hazTile + this.emptyTiles.length * R.emptyTile;
     for (let i = 0; i < this.kind.length; i++) if (this.kind[i] === T.Kai) cost += R.kaiTile;
@@ -4573,6 +4712,9 @@ export class Sim {
     const interest = this.interestPerDay;
     this.money -= interest;
     this.today.interest += interest;
+    const prem = this.insurancePremium();
+    this.money -= prem;
+    this.today.insurance = (this.today.insurance ?? 0) + prem;
     this.history.push(this.today);
     if (this.history.length > 14) this.history.shift();
     this.today = emptyBook();
@@ -4716,6 +4858,10 @@ export class Sim {
       },
       oneway: Array.from(this.oneway),
       overpass: Array.from(this.overpass),
+      custQueue: [...this.custQueue],
+      insurance: this.insurance,
+      insuredTotal: this.insuredTotal,
+      customsDone: this.customsDone,
       roadTier: Array.from(this.roadTier),
       roadUnder: Array.from(this.roadUnder),
       closedQ: Array.from(this.closedQ),
@@ -4784,6 +4930,10 @@ export class Sim {
     s.kind.set(d.kind);
     if (d.oneway) s.oneway.set(d.oneway);
     if (d.overpass) s.overpass.set(d.overpass);
+    if (d.custQueue) s.custQueue = [...d.custQueue];
+    s.insurance = d.insurance ?? 0;
+    s.insuredTotal = d.insuredTotal ?? 0;
+    s.customsDone = d.customsDone ?? 0;
     if (d.roadTier) s.roadTier.set(d.roadTier);
     if (d.roadUnder) s.roadUnder.set(d.roadUnder);
     if (d.closedQ) s.closedQ.set(d.closedQ);

@@ -33,9 +33,10 @@ export enum T {
   Track = 15,
   Parking = 16,
   Hill = 17,
+  Customs = 18,
 }
 
-export type Tool = 'view' | 'kai' | 'crane' | 'lcrane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'road2' | 'hwy' | 'solar' | 'battery' | 'track' | 'parking' | 'rtg' | 'hazard' | 'emptyyard' | 'fill' | 'assign' | 'copy' | 'paste' | 'yarduse' | 'zone' | 'oneway' | 'overpass' | 'buyland' | 'berth' | 'demolish';
+export type Tool = 'view' | 'kai' | 'crane' | 'lcrane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'road2' | 'hwy' | 'solar' | 'battery' | 'customs' | 'track' | 'parking' | 'rtg' | 'hazard' | 'emptyyard' | 'fill' | 'assign' | 'copy' | 'paste' | 'yarduse' | 'zone' | 'oneway' | 'overpass' | 'buyland' | 'berth' | 'demolish';
 export type BuildTool = Exclude<Tool, 'view' | 'demolish' | 'assign' | 'copy' | 'paste' | 'yarduse' | 'zone' | 'oneway' | 'overpass' | 'buyland' | 'berth'>;
 
 export const COST: Record<BuildTool, number> = {
@@ -59,6 +60,7 @@ export const COST: Record<BuildTool, number> = {
   track: 3_000,
   parking: 2_000,
   battery: 40_000,
+  customs: 30_000,
   hwy: 4_000,
   hazard: 12_000,
   emptyyard: 2_000,
@@ -86,6 +88,7 @@ export const UNLOCK: Record<BuildTool, number> = {
   track: 3,
   parking: 1,
   battery: 3,
+  customs: 2,
   hwy: 3,
   hazard: 3,
   emptyyard: 2,
@@ -274,6 +277,26 @@ export const TRUCK_CAP = 2; // Container pro Fahrt
 export const TRUCK_PATIENCE_GM = 10;
 /** Überführung an einer Kreuzung: Preis und ab welcher Stufe */
 export const OVERPASS_COST = 20_000;
+/** Zoll: Anteil der Import-Container, die ab Stufe 2 kontrolliert werden müssen */
+export const CUSTOMS_SHARE = 0.12;
+/** Ohne Zollhof prüft das Gate selbst und braucht so viel länger */
+export const CUSTOMS_GATE_SLOW = 3;
+/** Ein Zollhof-Feld prüft so viele Container pro Stunde und nimmt so viele in die Warteschlange */
+export const CUSTOMS_RATE = 8;
+export const CUSTOMS_QUEUE = 8;
+export const CUSTOMS_RUN = 600;
+/** Wartungsfenster: Kosten, Dauer (Spielminuten), Startstunde, Verschleiß weg, wie lange das Risiko sinkt (Spielminuten) */
+export const MAINT_COST = 2_500;
+/** Versicherung: Stufen mit Tagesprämie und Erstattungsanteil bei Unfall, Verderb und Sturmschäden */
+export const INSURANCE = [
+  { name: 'Keine', premium: 0, share: 0 },
+  { name: 'Basis', premium: 1_200, share: 0.5 },
+  { name: 'Voll', premium: 3_500, share: 0.85 },
+] as const;
+export const MAINT_GM = 120;
+export const MAINT_HOUR = 22;
+export const MAINT_WEAR = 0.3;
+export const MAINT_CARE_GM = 3 * 24 * 60;
 export const OVERPASS_LEVEL = 2;
 /** So lange wartet ein Truck höchstens auf Querverkehr an einer Kreuzung (Spielminuten) */
 export const CROSS_WAIT_GM = 3;
