@@ -200,6 +200,31 @@ function jobText(j: Job | null): string {
   return `Bringt ${cargo} zu: ${dst}`;
 }
 
+const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+const TIP_KEY = 'hafen-imperium-tips';
+const TIPS: Record<string, [string, string]> = {
+  kai: ['Kaimauer', 'Ein Liegeplatz braucht 4 Kai-Felder in einer Reihe an der Küste. Kräne stehen auf dem Kai, Schiffe legen davor an.'],
+  crane: ['Kaikran', 'Kräne laden Schiffe. Hinter dem Kran braucht es eine Straße, damit Trucks die Container abholen.'],
+  rtg: ['Portalkran', 'Ein Portalkran (3×3) steht über einem Lagerblock und stapelt höher. Trucks liefern an seinem Rand ab.'],
+  yarduse: ['Lagerzweck', 'Lege fest, ob ein Lagerfeld für Import, Export, Bahn oder alles da ist. So bleibt Ordnung, wenn der Hafen wächst.'],
+  zone: ['Zonen', 'Zonen trennen den Hafen in Bereiche. Kräne, Lager und Gates einer Zone arbeiten zusammen.'],
+  solar: ['Strom', 'Kräne und Hallen brauchen Strom. Solarfelder liefern tagsüber, Batterien überbrücken die Nacht und Ausfälle.'],
+  battery: ['Batterie', 'Speichert überschüssigen Solarstrom und hält den Hafen bei Stromausfall am Laufen.'],
+  fill: ['Befüllkette', 'Die Befüllhalle braucht Ware und leere Container. Daraus werden volle Export-Container für Schiffe.'],
+  emptyyard: ['Leerlager', 'Hier landen leere Container. Die Befüllhalle holt sie, Trucks von außen bringen und holen welche.'],
+  hazard: ['Gefahrgut', 'Gefahrgut-Container dürfen nur auf diese Felder. Ohne Platz bleibt der Kran blockiert.'],
+  reefer: ['Kühlplätze', 'Kühlcontainer brauchen Strom und dürfen nicht zu lange warten, sonst verdirbt die Ware.'],
+  track: ['Gleise', 'Gleise verbinden das Bahnterminal mit dem Hinterland. Am Bahnterminal holen Züge viele Container auf einmal.'],
+  rail: ['Bahnterminal', 'Ein Teil der Container geht per Bahn. Das entlastet die Gates.'],
+  parking: ['Stellplätze', 'Freie Trucks warten hier statt auf der Straße. Das hält die Wege frei.'],
+  hwy: ['Autobahn', 'Schnell und breit, aber teuer. Lohnt sich für die Hauptachse vom Gate ins Lager.'],
+  oneway: ['Einbahnstraße', 'Tippe auf eine Straße, um die Fahrtrichtung festzulegen. Einbahnstraßen fassen mehr Trucks.'],
+  berth: ['Liegeplätze', 'Tippe auf einen Liegeplatz, um ihn zu sperren oder wieder zu öffnen.'],
+  copy: ['Kopieren', 'Ziehe ein Rechteck über einen Bereich. Danach kannst du ihn mit Einfügen anderswo bauen.'],
+  workshop: ['Werkstatt', 'Mechaniker reparieren ausgefallene Kräne und Trucks. Sie bringen Geräte aber nicht ganz auf Neuzustand.'],
+  unpack: ['Packhalle', 'Packt Import-Container aus. Die Ware bringt extra Geld oder geht in die Befüllhalle.'],
+};
+
 export class UI {
   private acc = 1;
   private moneyEl!: HTMLElement;
@@ -255,7 +280,8 @@ export class UI {
   private rtgPick!: HTMLElement;
   private ctlModal!: HTMLElement;
   private ctlBody!: HTMLElement;
-  private ctlTab: 'overview' | 'devices' | 'fleet' | 'rules' | 'power' = 'overview';
+  private ctlTab: 'overview' | 'devices' | 'fleet' | 'rules' | 'power' | 'log' = 'overview';
+  private tipEl!: HTMLElement;
   private ctlKey = '';
   private newRule: { cond: RuleCond; act: RuleAct } = { cond: 'yardHigh', act: 'role:out' };
   private ghostBar!: HTMLElement;
@@ -560,6 +586,9 @@ export class UI {
     this.ghostBar.querySelector('.grot')!.addEventListener('click', () => this.game.rotate());
     this.ghostBar.querySelector('.gno')!.addEventListener('click', () => this.game.cancelGhost());
 
+    this.tipEl = el('div', 'tipcard hidden');
+    this.tipEl.addEventListener('click', () => this.tipEl.classList.add('hidden'));
+    root.appendChild(this.tipEl);
     this.toasts = el('div', 'toasts');
 
     // Menü: Hauptmenü, Pause, Neues Spiel, Spielstände, Einstellungen
@@ -600,6 +629,7 @@ export class UI {
       ['fleet', 'Flotte'],
       ['rules', 'Regeln'],
       ['power', 'Strom'],
+      ['log', 'Logbuch'],
     ]
       .map(([k, n]) => `<button data-tab="${k}">${n}</button>`)
       .join('')}</div><div class="body"></div></div>`;
@@ -629,6 +659,15 @@ export class UI {
         if (what === 'show' && tr) {
           this.game.selected = { kind: 'truck', id };
           this.ctlModal.classList.add('hidden');
+        }
+      }
+      const lg = t.closest<HTMLElement>('[data-log]');
+      if (lg) {
+        const e = this.game.log[Number(lg.dataset.log)];
+        if (e && e.x !== undefined && e.y !== undefined) {
+          this.game.focusTile(e.x, e.y);
+          this.ctlModal.classList.add('hidden');
+          return;
         }
       }
       const ra = t.closest<HTMLElement>('[data-rule]');
@@ -1167,6 +1206,27 @@ export class UI {
     this.soundBtn.classList.toggle('off', !this.game.sound.enabled);
   }
 
+  /** Kurze Einführung beim ersten Benutzen eines Werkzeugs */
+  tipFor(tool: string) {
+    const tip = TIPS[tool];
+    if (!tip || this.game.showcase) return;
+    let seen: string[] = [];
+    try {
+      seen = JSON.parse(localStorage.getItem(TIP_KEY) ?? '[]') as string[];
+    } catch {
+      /* egal */
+    }
+    if (seen.includes(tool)) return;
+    seen.push(tool);
+    try {
+      localStorage.setItem(TIP_KEY, JSON.stringify(seen));
+    } catch {
+      /* egal */
+    }
+    this.tipEl.innerHTML = `<b>${tip[0]}</b><p>${tip[1]}</p><span class="tipok">Verstanden</span>`;
+    this.tipEl.classList.remove('hidden');
+  }
+
   toast(text: string, kind: 'info' | 'good' | 'bad' = 'info') {
     const t = el('div', `toast ${kind}`);
     t.textContent = text;
@@ -1552,7 +1612,7 @@ export class UI {
     const sim = this.game.sim;
     const fleetKey = this.ctlTab === 'fleet' ? sim.trucks.map((t) => `${t.id}${t.role}${t.agv}${Math.round(t.wear * 10)}${Math.round(t.cap * 10)}${t.build ? 1 : 0}${t.job ? 1 : 0}`).join() + Math.floor(sim.money / 10000) : '';
     const live = this.ctlTab === 'rules' || this.ctlTab === 'fleet' ? fleetKey : sim.tickCount >> 6;
-    const key = `${this.ctlTab}|${this.ctlTab === 'rules' ? 0 : sim.hourly.length}|${live}|${sim.rules.map((r) => `${r.cond}${r.act}${r.on}`).join()}`;
+    const key = `${this.ctlTab}|${this.ctlTab === 'rules' ? 0 : sim.hourly.length}|${live}|${this.ctlTab === 'log' ? this.game.log.length : 0}|${sim.rules.map((r) => `${r.cond}${r.act}${r.on}`).join()}`;
     if (!force && key === this.ctlKey) return;
     this.ctlKey = key;
     for (const b of this.ctlModal.querySelectorAll<HTMLElement>('[data-tab]')) b.classList.toggle('on', b.dataset.tab === this.ctlTab);
@@ -1585,6 +1645,14 @@ export class UI {
         <h3>Hallen</h3><table class="ctltab"><tr><th>Halle</th><th>Eingang</th><th>Ausgang</th><th>Gesamt</th></tr>${sim.plants
           .map((p) => `<tr><td>${PLANTS[p.kind].name}</td><td>${p.inBuf}</td><td>${p.outBuf}</td><td>${num(p.made)}</td></tr>`)
           .join('') || '<tr><td colspan="4">Keine</td></tr>'}</table>`;
+    } else if (this.ctlTab === 'log') {
+      const L = this.game.log;
+      html = L.length
+        ? `<p class="sub">Die letzten Meldungen. Antippen zeigt den Ort, falls es einen gibt.</p><div class="logbook">${L.map((e, i) => ({ e, i }))
+            .reverse()
+            .map(({ e, i }) => `<div class="logrow ${e.kind} ${e.x !== undefined ? 'go' : ''}" data-log="${i}"><span class="lt">Tag ${e.day} · ${e.clock}</span><span>${esc(e.text)}</span></div>`)
+            .join('')}</div>`
+        : '<p class="sub">Noch keine Meldungen in dieser Sitzung.</p>';
     } else if (this.ctlTab === 'fleet') {
       const status = (t: (typeof sim.trucks)[number]) => (t.build ? 'Überholung' : t.wear >= 1 ? 'ausgefallen' : !t.staffed ? 'ohne Fahrer' : t.stuck > 0 ? 'im Stau' : t.job ? 'unterwegs' : 'frei');
       html = `<p class="sub">Alle Trucks auf einen Blick. Rolle antippen wechselt sie. ${sim.trucks.length} Trucks, davon ${sim.trucks.filter((t) => t.agv).length} fahrerlos.</p>
@@ -1731,7 +1799,7 @@ export class UI {
                 ? 'Stromausfall: steht still'
               : 'Wartet auf ein Schiff';
       html = `<h3>${CRANE_MODELS[c.model].name} <span class="tag">${Math.round(movesPerHour(c.model) * (1 + 0.1 * sim.tech.spreader) * (sim.tech.akkord ? 1.2 : 1) * (sim.spec === 'hub' ? 1.15 : sim.spec === 'logi' ? 0.95 : 1))} Moves pro Stunde</span></h3>
-        ${c.build ? buildRow(c.build, 'Im Bau oder Umbau') : `<div class="meta">${c.state === 'broken' ? 'Ausgefallen: wartet auf die Werkstatt' : st}</div>`}
+        ${c.build ? buildRow(c.build, 'Im Bau oder Umbau') : `<div class="why ${c.state === 'working' ? '' : 'alert'}"><b>${st}</b><br>${sim.craneWhy(c)}</div>`}
         ${wearRow(c.wear, c.cap)}
         <div class="meta">Entladen am Kran: ${c.buffer + c.bufReef + c.bufHaz} von ${sim.bufCap(c)}${sim.level >= 2 ? ` · Export am Kran: ${c.expBuf} von ${sim.bufCap(c, true)}` : ''}</div>`;
       const ui = sim.upgradeInfo('crane', c.id);
@@ -1742,7 +1810,7 @@ export class UI {
       if (!g) return gone();
       html = `<h3>Gate <span class="tag">${Math.round(30 * (1 + 0.2 * sim.tech.scanner))} Container pro Stunde</span></h3>
         ${buildRow(g.build)}
-        <div class="meta">${g.proc > 0 ? (g.procIn ? 'Nimmt einen Export-Container an' : 'Fertigt einen Container ab') : 'Wartet auf Container'}</div>
+        <div class="why"><b>Zustand</b><br>${sim.gateWhy(g)}</div>
         <div class="meta">Wartend nach draußen: ${g.apron.length} von ${GATE_APRON_CAP}${sim.level >= 2 ? ` · Export wartet auf Truck: ${g.inApron}` : ''}</div>
         <div class="meta">Abgefertigt: ${num(g.served)}${g.emptyIn ? ` · Leercontainer von außen: ${g.emptyIn}` : ''}</div>
         <div class="meta ${sim.hinterlandMul(g) > 1 ? 'pos' : ''}">${sim.hinterlandMul(g) > 1 ? `Hinterland angebunden: +${Math.round((sim.hinterlandMul(g) - 1) * 100)} % Tempo` : 'Nicht ans Hinterland angebunden: Eine Straße bis zum unteren oder linken Kartenrand bringt +30 % Tempo (mit Autobahn +50 %).'}</div>`;
@@ -1783,7 +1851,7 @@ export class UI {
         ${buildRow(p.build)}
         <div class="meta">${p.kind === 'fill' ? 'Macht aus einem leeren Container und einer Ladung Ware einen Export-Container (+150 €). Leergut kommt aus dem Leerlager, Ware aus der Packhalle oder vom Zug.' : pack ? `Macht aus 2 Einheiten ausgepackter Ware 1 Container ${PRODUCTS[p.product].name} (zurzeit ${eur(sim.price(p.product))}).` : p.kind === 'cold' ? `Verarbeitet Kühlcontainer zu Lebensmitteln (zurzeit ${eur(sim.price('food'))} statt 400 €).` : 'Packt Import-Container vom Stapelplatz aus. Die Ware geht weiter zur Veredelung.'}</div>
         <div class="meta">Eingang: ${p.inBuf} von ${PLANT_BUF}${p.kind === 'fill' ? ` · Leergut: ${p.inEmpty} von ${PLANT_BUF}` : ''} · Ausgang: ${p.outBuf} von ${PLANT_BUF}${p.kind === 'unpack' ? ` · Leere Container: ${p.emptyOut}` : ''} · Hergestellt: ${num(p.made)}</div>
-        <div class="meta ${p.outBuf >= PLANT_BUF ? 'neg' : ''}">${p.proc > 0 ? 'Arbeitet' : p.outBuf >= PLANT_BUF ? 'Ausgang voll: Es fehlt ein Truck, der abholt' : p.inBuf < cfg.needs ? 'Wartet auf Nachschub' : 'Bereit'}</div>`;
+        <div class="why ${p.proc > 0 ? '' : 'alert'}"><b>${p.proc > 0 ? 'Arbeitet' : 'Steht'}</b><br>${sim.plantWhy(p)}</div>`;
       if (pack) {
         actions = `<div class="rolelabel">Produkt</div><div class="roles">${(['elec', 'cloth'] as ProductId[])
           .map((q) => `<button data-product="${q}" class="${p.product === q ? 'on' : ''}">${PRODUCTS[q].name} · ${eur(sim.price(q))}</button>`)
@@ -1818,7 +1886,7 @@ export class UI {
       const t = sim.trucks.find((t) => t.id === sel.id);
       if (!t) return gone();
       html = `<h3>${t.agv ? 'Fahrerloses Fahrzeug' : 'Truck'} <span class="tag">2 Container pro Fahrt</span></h3>
-        ${t.build ? buildRow(t.build, 'In der Generalüberholung') : `<div class="meta">${t.wear >= 1 ? 'Ausgefallen: wartet auf die Werkstatt' : jobText(t.job)}</div>`}
+        ${t.build ? buildRow(t.build, 'In der Generalüberholung') : `<div class="meta">${t.job && t.wear < 1 ? jobText(t.job) : ''}</div>${sim.truckWhy(t) ? `<div class="why alert">${sim.truckWhy(t)}</div>` : ''}`}
         <div class="meta">Geladen: ${t.load}</div>
         ${wearRow(t.wear, t.cap)}`;
       const roles = (Object.keys(ROLE_NAMES) as TruckRole[]).filter((r) => r !== 'plant' || sim.level >= 2).filter((r) => r !== 'export' || sim.level >= 2);

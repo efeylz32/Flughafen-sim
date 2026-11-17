@@ -2784,7 +2784,7 @@ export class Sim {
     t.prog += (t.agv ? AGV_SPEED : TRUCK_SPEED) * ROAD_SPEED[this.roadTier[t.next]] * (t.agv ? 1 : this.eff('driver')) * (1 + 0.08 * this.tech.engine) * (t.role === 'auto' ? 1 : ROUTINE_SPEED) * (1 - WEAR_SLOWDOWN * t.wear) * dt;
     if (this.level >= 2) {
       this.addWear(t, WEAR_TRUCK_PER_GM * this.wearMul * (this.tech.diesel ? 1.3 : 1) * dt);
-      if (t.wear >= 1) this.noteBroken('Ein Truck');
+      if (t.wear >= 1) this.noteBroken('Ein Truck', { x: t.px, y: t.py });
     }
     const nx = t.next % GRID_W;
     const ny = (t.next / GRID_W) | 0;
@@ -3022,6 +3022,61 @@ export class Sim {
     return { ok: true, cost };
   }
 
+  // ───────────────────────── Warum steht das? ─────────────────────────
+
+  craneWhy(c: Crane): string {
+    if (c.build) return 'Im Bau oder Umbau.';
+    if (c.wear >= 1) return 'Ausgefallen: Eine Werkstatt mit Mechaniker repariert ihn.';
+    if (c.state === 'power') return 'Stromausfall: Batterien würden überbrücken.';
+    if (c.state === 'storm') return 'Sturm: Alle Kräne stehen still.';
+    if (!c.staffed) return 'Kein Kranführer im Dienst: Stelle im Personal jemanden ein.';
+    const q = this.cq(c);
+    if (this.berthContaining(q) < 0) return 'Steht an keinem Liegeplatz: Dafür braucht es 4 Kai-Felder in einer Reihe.';
+    if (this.closedQ[q]) return 'Der Liegeplatz ist gesperrt.';
+    if (c.state === 'blocked') {
+      const kind = c.bufHaz ? T.Hazmat : c.bufReef ? T.Reefer : T.Yard;
+      if (!this.hasFreeStore(kind, c.zone)) return 'Puffer voll und das passende Lager ist voll. Baue Lager oder mehr Ausgänge.';
+      if (this.trucks.every((t) => t.job || t.wear >= 1 || !t.staffed)) return 'Puffer voll: Kein freier Truck holt ab. Kaufe Trucks oder gib welchen die Rolle „Kran räumen“.';
+      return 'Puffer voll: Trucks sind unterwegs, aber zu langsam. Prüfe Wege und Staus.';
+    }
+    if (c.state === 'working') return 'Arbeitet am Schiff.';
+    return 'Wartet auf ein Schiff.';
+  }
+  gateWhy(g: Gate): string {
+    if (g.build) return 'Im Bau.';
+    if (!g.staffed) return 'Kein Gate-Personal im Dienst: Stelle im Personal jemanden ein.';
+    if (!this.accessOf(g).length) return 'Keine Straße am Gate: Trucks kommen nicht hin.';
+    if (g.proc > 0) return g.procIn ? 'Nimmt gerade etwas von außen an.' : 'Fertigt gerade einen Container ab.';
+    const road = this.yardTiles.filter((i) => this.zone[i] === g.zone).reduce((n, i) => n + this.stock[i] - this.stockRail[i], 0);
+    if (!g.apron.length && !road) return 'Kein Container im Lager, der über die Straße raus soll.';
+    if (!g.apron.length) return 'Wartet auf Trucks: Container liegen im Lager, aber kein Truck bringt sie.';
+    return 'Bereit.';
+  }
+  plantWhy(p: Plant): string {
+    if (p.build) return 'Im Bau.';
+    if (this.powerDown) return 'Stromausfall: Die Halle steht.';
+    if (p.proc > 0) return 'Arbeitet.';
+    if (p.outBuf >= PLANT_BUF) return 'Ausgang voll: Es fehlt ein Truck, der abholt (Rolle „Verarbeitung“ hilft).';
+    if (p.kind === 'fill') {
+      if (p.inEmpty < 1) return this.emptyTiles.length ? 'Kein Leergut: Das Leerlager ist leer oder kein Truck bringt welches.' : 'Kein Leergut: Baue ein Leerlager.';
+      if (p.inBuf < 1) return 'Keine Ware: Sie kommt aus der Packhalle oder mit dem Zug.';
+    }
+    if (p.kind === 'unpack' && p.inBuf < 1) return 'Kein Import-Container im Lager oder kein Truck bringt einen.';
+    if (p.kind === 'pack' && p.inBuf < 2) return 'Braucht 2 Ladungen ausgepackte Ware aus der Packhalle.';
+    if (p.kind === 'cold' && p.inBuf < 1) return 'Keine Kühlcontainer auf den Kühlplätzen.';
+    return 'Bereit.';
+  }
+  truckWhy(t: Truck): string {
+    if (t.build) return 'In der Generalüberholung.';
+    if (t.wear >= 1) return 'Ausgefallen: Eine Werkstatt mit Mechaniker repariert ihn.';
+    if (!t.staffed) return this.strikeLeft > 0 ? 'Streik: Die Fahrer arbeiten nicht.' : 'Kein Fahrer im Dienst: Stelle im Personal jemanden ein.';
+    if (t.stuck > 0) return 'Steht im Stau.';
+    if (t.job) return '';
+    if (t.parked) return 'Wartet auf dem Stellplatz auf einen Auftrag.';
+    if (t.role !== 'auto') return 'Für seine feste Rolle gibt es gerade keine Fahrt.';
+    return 'Kein Auftrag: Gerade ist nichts zu fahren.';
+  }
+
   /** Truck gegen einen neuen tauschen: Der alte wird in Zahlung gegeben (je nach Zustand) */
   replaceCost(id: number): number {
     const t = this.trucks.find((x) => x.id === id);
@@ -3133,12 +3188,12 @@ export class Sim {
 
   /** Baustellen und Umbauten laufen weiter. Fertige melden sich. */
   private updateConstruction(dt: number) {
-    const step = (e: { build?: number }, name: string) => {
+    const step = (e: { build?: number; x?: number; y?: number }, name: string) => {
       if (!e.build) return;
       e.build = Math.max(0, e.build - dt);
       if (e.build === 0) {
         this.version++;
-        if (name) this.emit(`${name} ist fertig.`, 'good', { tag: 'built' });
+        if (name) this.emit(`${name} ist fertig.`, 'good', { tag: 'built', x: e.x, y: e.y });
       }
     };
     for (const c of this.cranes) step(c, CRANE_MODELS[c.model].name);
@@ -3314,7 +3369,7 @@ export class Sim {
       if (o.build || o.wear >= 1) continue;
       if (this.rnd() < CRASH_RATE * (1 - o.cap) ** 2) {
         o.wear = 1;
-        this.noteBroken('model' in o ? 'Ein Kran' : 'Ein Truck');
+        this.noteBroken('model' in o ? 'Ein Kran' : 'Ein Truck', 'model' in o ? o : { x: o.px, y: o.py });
       }
       // Unfall: Ein alter oder überlasteter Kran lässt einen Container fallen
       if ('model' in o && o.state === 'working') {
@@ -3355,13 +3410,13 @@ export class Sim {
     this.today.wages += pay;
   }
 
-  private noteBroken(what: string) {
+  private noteBroken(what: string, at?: { x: number; y: number }) {
     if (this.gm - this.brokeNote < 120) return;
     this.brokeNote = this.gm;
     this.emit(
       `${what} ist ausgefallen. ${this.shops.length ? 'Die Werkstatt kümmert sich darum.' : 'Baue eine Werkstatt mit Mechaniker.'}`,
       'bad',
-      { tag: 'broken' },
+      { tag: 'broken', x: at ? Math.floor(at.x) : undefined, y: at ? Math.floor(at.y) : undefined },
     );
   }
 
@@ -3735,11 +3790,13 @@ export class Sim {
       });
     } else if (imports > 0) {
       this.rep = Math.max(0, this.rep - 3);
-      this.emit(`${s.name} ist mit ${imports} Containern an Bord wieder ausgelaufen. Ruf −3`, 'bad', { tag: 'ship-late' });
+      this.emit(`${s.name} ist mit ${imports} Containern an Bord wieder ausgelaufen. Ruf −3`, 'bad', { tag: 'ship-late', x: this.shipBox(s).x, y: this.shipBox(s).y });
     } else {
       this.rep = Math.max(0, this.rep - 1);
       this.emit(`${s.name} hat zu lange gelegen (${Math.round(s.atBerth / 60)} h statt ${Math.round(s.dwellTarget / 60)} h). Ruf −1`, 'bad', {
         tag: 'ship-late',
+        x: this.shipBox(s).x,
+        y: this.shipBox(s).y,
       });
     }
     this.settleContract(s, onTime);
@@ -3784,7 +3841,7 @@ export class Sim {
           c.cd += mt;
           c.moves = (c.moves ?? 0) + 1;
           if (this.level >= 2) this.addWear(c, WEAR_CRANE_PER_MOVE * this.wearMul);
-          if (c.wear >= 1) this.noteBroken('Ein Kran');
+          if (c.wear >= 1) this.noteBroken('Ein Kran', c);
           // Abwechselnd ent- und beladen, wenn beides geht
           const load = canLoad && (!canUnload || !c.lastLoad);
           c.lastLoad = load;

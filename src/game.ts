@@ -84,6 +84,8 @@ export class Game {
   settings: Settings = loadSettings();
   /** Läuft schon ein Spiel (neu gestartet oder geladen)? */
   inGame = false;
+  /** Logbuch der letzten Meldungen */
+  log: { day: number; clock: string; text: string; kind: string; x?: number; y?: number }[] = [];
   /** Hauptmenü: Ein Schauhafen läuft im Hintergrund, die Kamera schwebt darüber */
   showcase = false;
   private undoStack: UndoGroup[] = [];
@@ -155,7 +157,11 @@ export class Game {
 
   private onEvent(e: GameEvent) {
     if (this.showcase) return;
-    if (e.text) this.ui.toast(e.text, e.kind);
+    if (e.text) {
+      this.ui.toast(e.text, e.kind);
+      this.log.push({ day: this.sim.day, clock: this.sim.clock, text: e.text, kind: e.kind, x: e.x, y: e.y });
+      if (this.log.length > 200) this.log.shift();
+    }
     switch (e.tag) {
       case 'container': {
         this.sound.play('coin');
@@ -269,6 +275,7 @@ export class Game {
   }
   setTool(t: Tool) {
     this.tool = t;
+    this.ui.tipFor(t);
     this.ghost = null;
     this.demolishAsk = null;
     this.hover = null;
@@ -365,7 +372,14 @@ export class Game {
     this.save();
   }
 
+  /** Kamera auf ein Feld richten */
+  focusTile(x: number, y: number) {
+    const p = this.renderer.tileToScreen(x + 0.5, y + 0.5);
+    this.renderer.panBy(window.innerWidth / 2 - p.x, window.innerHeight / 2 - p.y);
+  }
+
   private resetTransient() {
+    this.log = [];
     this.selected = null;
     this.hover = null;
     this.acc = 0;

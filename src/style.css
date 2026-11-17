@@ -458,3 +458,13 @@ html, body { touch-action: none; overscroll-behavior: none; }
 .fleetrow .fb span { flex: 1 1 100%; }
 .fleetrow .fb button { border: 0; border-radius: 9px; padding: 7px 9px; font-weight: 700; font-size: 12.5px; background: #e3e8ef; }
 .ghostbtns .primary.danger { background: var(--bad); }
+
+.logbook { display: flex; flex-direction: column; gap: 4px; }
+.logrow { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 10px; background: #f1f5fa; font-size: 14px; }
+.logrow.bad { background: #fdecea; }
+.logrow.good { background: #e8f5ec; }
+.logrow.go { cursor: pointer; }
+.logrow .lt { font-size: 12px; color: #6a7686; }
+.tipcard { position: fixed; left: 50%; bottom: 150px; transform: translateX(-50%); width: min(420px, calc(100vw - 32px)); background: #1d3550; color: #fff; border-radius: 14px; padding: 12px 14px; z-index: 40; box-shadow: 0 6px 20px rgba(0,0,0,.25); font-size: 14px; cursor: pointer; }
+.tipcard p { margin: 4px 0 8px; line-height: 1.4; }
+.tipcard .tipok { font-weight: 600; color: #ffd36a; }
