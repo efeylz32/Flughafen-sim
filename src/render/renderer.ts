@@ -908,6 +908,17 @@ export class Renderer {
     };
     for (const e of [...sim.gates, ...sim.plants, ...sim.rails]) tag(e.x, e.y, e.zone);
 
+    // Überführungen: helles Deck mit Schatten und Geländer über der Kreuzung
+    for (let i = 0; i < sim.overpass.length; i++) {
+      if (!sim.overpass[i] || sim.kind[i] !== T.Road) continue;
+      const px = (i % GRID_W) * TILE;
+      const py = ((i / GRID_W) | 0) * TILE;
+      g.rect(px - 2, py + 6, TILE + 4, TILE - 8).fill({ color: 0x000000, alpha: 0.22 });
+      g.rect(px - 3, py + 3, TILE + 6, TILE - 10).fill(0xb9c2cc);
+      g.rect(px - 3, py + 3, TILE + 6, 2).fill(0xeef2f6);
+      g.rect(px - 3, py + TILE - 9, TILE + 6, 2).fill(0xeef2f6);
+      g.rect(px - 3, py + TILE / 2 - 5, TILE + 6, 1.2).fill({ color: 0xffffff, alpha: 0.8 });
+    }
     // Einbahnstraßen: weiße Pfeile in Fahrtrichtung
     for (let i = 0; i < sim.oneway.length; i++) {
       const ow = sim.oneway[i];

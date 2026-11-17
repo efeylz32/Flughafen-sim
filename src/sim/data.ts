@@ -35,8 +35,8 @@ export enum T {
   Hill = 17,
 }
 
-export type Tool = 'view' | 'kai' | 'crane' | 'lcrane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'road2' | 'hwy' | 'solar' | 'battery' | 'track' | 'parking' | 'rtg' | 'hazard' | 'emptyyard' | 'fill' | 'assign' | 'copy' | 'paste' | 'yarduse' | 'zone' | 'oneway' | 'buyland' | 'berth' | 'demolish';
-export type BuildTool = Exclude<Tool, 'view' | 'demolish' | 'assign' | 'copy' | 'paste' | 'yarduse' | 'zone' | 'oneway' | 'buyland' | 'berth'>;
+export type Tool = 'view' | 'kai' | 'crane' | 'lcrane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'road2' | 'hwy' | 'solar' | 'battery' | 'track' | 'parking' | 'rtg' | 'hazard' | 'emptyyard' | 'fill' | 'assign' | 'copy' | 'paste' | 'yarduse' | 'zone' | 'oneway' | 'overpass' | 'buyland' | 'berth' | 'demolish';
+export type BuildTool = Exclude<Tool, 'view' | 'demolish' | 'assign' | 'copy' | 'paste' | 'yarduse' | 'zone' | 'oneway' | 'overpass' | 'buyland' | 'berth'>;
 
 export const COST: Record<BuildTool, number> = {
   kai: 5_000,
@@ -272,6 +272,11 @@ export const TRUCK_HANDLE_GM = 0.4;
 export const TRUCK_CAP = 2; // Container pro Fahrt
 /** Nach so vielen Spielminuten im Stau drängelt sich ein Truck durch, damit nichts für immer feststeckt. */
 export const TRUCK_PATIENCE_GM = 10;
+/** Überführung an einer Kreuzung: Preis und ab welcher Stufe */
+export const OVERPASS_COST = 20_000;
+export const OVERPASS_LEVEL = 2;
+/** So lange wartet ein Truck höchstens auf Querverkehr an einer Kreuzung (Spielminuten) */
+export const CROSS_WAIT_GM = 3;
 
 // Stapelplatz und Kühlplätze
 export const YARD_CAP_PER_TILE = 6;

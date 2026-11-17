@@ -60,6 +60,9 @@ import {
   ROAD_SPEED,
   DIST_UNIT,
   ROAD_LANES,
+  OVERPASS_COST,
+  OVERPASS_LEVEL,
+  CROSS_WAIT_GM,
   ROAD_RUN,
   HAZ_FEE,
   HAZ_SHARE,
@@ -544,6 +547,7 @@ export interface SaveData {
   devs?: { cranes: number[][]; trucks: number[][]; gates: number[]; plants: number[]; rails: number[]; rtgs: number[]; shops: number[] };
   zones?: { cranes: number[]; gates: number[]; plants: number[]; rails: number[]; trucks: number[] };
   oneway?: number[];
+  overpass?: number[];
   roadTier?: number[];
   roadUnder?: number[];
   closedQ?: number[];
@@ -666,6 +670,8 @@ export class Sim {
   scenario: string | null = null;
   /** Einbahnstraßen: erlaubte Fahrtrichtung je Feld (0 Ost, 1 Süd, 2 West, 3 Nord), -1 = beide Richtungen */
   oneway = new Int8Array(GRID_W * GRID_H).fill(-1);
+  /** Überführung: Kreuzung ohne Querverkehr */
+  overpass = new Uint8Array(GRID_W * GRID_H);
   /** Straßenart je Feld: 0 Straße, 1 Doppelspur, 2 Autobahn */
   roadTier = new Uint8Array(GRID_W * GRID_H);
   /** Bahnübergang: Straße über einem Gleis */
@@ -761,6 +767,8 @@ export class Sim {
   powerOutLeft = 0;
   /** Bei Stromausfall und leerer Batterie stehen Kräne und Hallen */
   powerDown = false;
+  /** Summe der Wartezeit an Kreuzungen (Spielminuten), für Tests und Anzeige */
+  crossWait = 0;
   /** Regeln für den Leitstand */
   rules: { cond: RuleCond; act: RuleAct; on: boolean }[] = [];
   /** Stündliche Messwerte der letzten 48 Stunden (nicht gespeichert) */
@@ -962,6 +970,41 @@ export class Sim {
     this.oneway[i] = this.oneway[i] >= 3 ? -1 : this.oneway[i] + 1;
     this.touch();
     return { ok: true, cost: 0 };
+  }
+
+  /** Straßenfelder mit mindestens drei Straßen-Nachbarn sind Kreuzungen */
+  isJunction(i: number): boolean {
+    if (this.kind[i] !== T.Road) return false;
+    const x = i % GRID_W;
+    const y = (i / GRID_W) | 0;
+    let n = 0;
+    if (x > 0 && this.kind[i - 1] === T.Road) n++;
+    if (x < GRID_W - 1 && this.kind[i + 1] === T.Road) n++;
+    if (y > 0 && this.kind[i - GRID_W] === T.Road) n++;
+    if (y < GRID_H - 1 && this.kind[i + GRID_W] === T.Road) n++;
+    return n >= 3;
+  }
+
+  /** Überführung auf eine Kreuzung bauen oder wieder abbauen */
+  toggleOverpass(x: number, y: number): BuildCheck {
+    if (!this.inBounds(x, y)) return { ok: false, reason: 'Außerhalb', cost: 0 };
+    const i = this.idx(x, y);
+    if (this.overpass[i]) {
+      const back = Math.round(this.give(OVERPASS_COST * this.inflation, 0.5));
+      this.overpass[i] = 0;
+      this.touch();
+      return { ok: true, cost: -back };
+    }
+    if (this.level < OVERPASS_LEVEL) return { ok: false, reason: `Überführungen gibt es ab Stufe ${OVERPASS_LEVEL}`, cost: 0 };
+    if (!this.isJunction(i)) return { ok: false, reason: 'Eine Überführung geht nur auf einer Kreuzung (3 oder 4 Straßen treffen sich)', cost: 0 };
+    if (this.roadUnder[i] || this.railX[i]) return { ok: false, reason: 'Nicht auf Brücke, Tunnel oder Bahnübergang', cost: 0 };
+    const cost = Math.round((OVERPASS_COST * this.inflation) / 100) * 100;
+    if (this.money < cost) return { ok: false, reason: 'Zu wenig Geld', cost };
+    this.money -= cost;
+    this.today.building += cost;
+    this.overpass[i] = 1;
+    this.touch();
+    return { ok: true, cost };
   }
 
   /** Setzt eine Einbahnrichtung direkt (0 Ost, 1 Süd, 2 West, 3 Nord) */
@@ -1782,6 +1825,7 @@ export class Sim {
         out.push({ tool: 'road', x, y, refund: this.give(this.costOf(this.roadTier[i] === 2 ? 'hwy' : this.roadTier[i] === 1 ? 'road2' : 'road'), factor), tier: this.roadTier[i], ow: this.oneway[i] });
         this.roadTier[i] = 0;
         this.oneway[i] = -1;
+        this.overpass[i] = 0;
         // Tunnel und Brücke: darunter liegt wieder Hügel oder Wasser
         if (this.roadUnder[i]) {
           this.kind[i] = this.roadUnder[i] === 1 ? T.Hill : T.Water;
@@ -2763,6 +2807,17 @@ export class Sim {
       }
       if (pick < 0) return 'lost';
       t.angle = [0, Math.PI / 2, Math.PI, -Math.PI / 2][pickDir];
+      // Kreuzung ohne Überführung: Querverkehr hat Vorrang, kurz warten
+      if (!this.overpass[pick] && t.stuck < CROSS_WAIT_GM && this.isJunction(pick)) {
+        const a = (pickDir + 1) % 4;
+        const b = (pickDir + 3) % 4;
+        if (this.lane[pick * 4 + a] + this.lane[pick * 4 + b] > 0) {
+          t.stuck += dt;
+          this.crossWait += dt;
+          this.roadJam[t.tile] += dt;
+          return 'ok';
+        }
+      }
       // Die Spur im nächsten Feld ist belegt: warten. Das ist der Stau.
       if (this.lane[pick * 4 + pickDir] >= this.laneCap(pick, pickDir) && t.stuck < TRUCK_PATIENCE_GM) {
         t.stuck += dt;
@@ -4660,6 +4715,7 @@ export class Sim {
         trucks: this.trucks.map((t) => t.zone),
       },
       oneway: Array.from(this.oneway),
+      overpass: Array.from(this.overpass),
       roadTier: Array.from(this.roadTier),
       roadUnder: Array.from(this.roadUnder),
       closedQ: Array.from(this.closedQ),
@@ -4727,6 +4783,7 @@ export class Sim {
     const s = new Sim(d.seed, d.diff ?? 'normal', d.map ?? 'coast');
     s.kind.set(d.kind);
     if (d.oneway) s.oneway.set(d.oneway);
+    if (d.overpass) s.overpass.set(d.overpass);
     if (d.roadTier) s.roadTier.set(d.roadTier);
     if (d.roadUnder) s.roadUnder.set(d.roadUnder);
     if (d.closedQ) s.closedQ.set(d.closedQ);

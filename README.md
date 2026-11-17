@@ -87,6 +87,7 @@ Der Aufstiegsbonus ist klein (40.000 € bis 600.000 €). Löhne steigen je Stu
 - **Markt:** Elektronik, Kleidung und Lebensmittel haben eigene Preise, die sich täglich ändern (mit Boom und Einbruch). In der Veredelung wählst du, was produziert wird. Kurse stehen in der Bilanz.
 - **Tagesbericht:** Nach jedem Tag eine Karte mit Ergebnis, Containern, Pünktlichkeit, häufigstem Engpass und Stau.
 - **Szenarien:** Marode übernommen (Schulden tilgen), Insel-Express (600 Container an einem Tag), Kühlkette (150 Lebensmittel).
+- **Kreuzungen und Überführungen (ab Stufe 2):** Wo drei oder vier Straßen zusammenkommen, warten Trucks kurz auf Querverkehr. Eine Überführung (20k) auf der Kreuzung hebt das auf, nochmal tippen baut sie ab.
 - **Logbuch:** Im Leitstand stehen die letzten 200 Meldungen mit Tag und Uhrzeit. Antippen springt zum Ort, falls es einen gibt.
 - **Warum steht das?** Kran, Gate, Halle und Truck nennen im Info-Blatt den konkreten Grund, warum sie nicht arbeiten, und was hilft.
 - **Kurztipps:** Beim ersten Benutzen eines neuen Werkzeugs (Strom, Portalkran, Befüllkette, Gleise …) erklärt eine Karte das Wichtigste. Einmal pro Gerät.

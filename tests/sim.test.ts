@@ -1637,3 +1637,35 @@ describe('Gelände: Hügel, Tunnel, Brücken', () => {
     expect(sim.canBuild('road', 10, k - 1).ok).toBe(false);
   });
 });
+
+describe('Kreuzungen und Überführungen', () => {
+  it('Trucks warten an Kreuzungen, die Überführung hebt das auf', () => {
+    const make = () => {
+      const sim = bigPort(2, 10);
+      // Querstraße mitten durch die Hauptachse: Kreuzung bei x=21
+      for (let y = k + 2; y <= k + 6; y++) sim.build('road', 21, y);
+      for (let x = 20; x <= 23; x++) sim.build('road', x, k + 6);
+      sim.finishAll();
+      return sim;
+    };
+    const a = make();
+    const j = a.idx(21, k + 1);
+    expect(a.isJunction(j)).toBe(true);
+    run(a, 12);
+    const b = make();
+    expect(b.toggleOverpass(21, k + 1).ok).toBe(true);
+    for (let x = 4; x < GRID_W; x++) if (b.isJunction(b.idx(x, k + 1))) b.overpass[b.idx(x, k + 1)] = 1;
+    run(b, 12);
+    expect(b.crossWait).toBeLessThan(a.crossWait);
+    // Gespeichert und geladen
+    const c = Sim.deserialize(JSON.parse(JSON.stringify(b.serialize())));
+    expect(c.overpass[j]).toBe(1);
+  });
+
+  it('Überführung nur auf Kreuzungen und ab Stufe 2', () => {
+    const sim = bigPort(1);
+    expect(sim.toggleOverpass(8, k + 1).ok).toBe(false);
+    sim.level = 2;
+    expect(sim.toggleOverpass(8, k + 1).reason).toMatch(/Kreuzung/);
+  });
+});

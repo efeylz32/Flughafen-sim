@@ -499,6 +499,13 @@ export class Game {
       if (!r.ok) return r.reason ?? 'Nicht möglich';
       return null;
     }
+    if (this.tool === 'overpass') {
+      const r = this.sim.toggleOverpass(x, y);
+      if (!r.ok) return r.reason ?? 'Nicht möglich';
+      this.sound.play(r.cost > 0 ? 'buildBig' : 'click');
+      this.ui.toast(r.cost > 0 ? `Überführung gebaut: −${r.cost.toLocaleString('de-DE')} €` : 'Überführung abgebaut', 'good');
+      return null;
+    }
     if (this.tool === 'oneway') {
       const r = this.sim.toggleOneway(x, y);
       if (!r.ok) return r.reason ?? 'Nicht möglich';
@@ -897,6 +904,7 @@ export class Game {
       return k === T.Yard || k === T.Reefer || k === T.Hazmat || k === T.Empty || !!(this.sim.craneAt(x, y) ?? this.sim.gateAt(x, y) ?? this.sim.plantAt(x, y) ?? this.sim.railAt(x, y) ?? this.sim.truckAtTile(i));
     }
     if (this.tool === 'oneway') return this.sim.kind[this.sim.idx(x, y)] === T.Road;
+    if (this.tool === 'overpass') return this.sim.isJunction(this.sim.idx(x, y)) || this.sim.overpass[this.sim.idx(x, y)] === 1;
     if (this.tool === 'yarduse') return this.sim.kind[this.sim.idx(x, y)] === T.Yard;
     if (this.tool === 'buyland') return x >= 0 && x < GRID_W && !this.sim.owned[x];
     if (this.tool === 'demolish') return this.sim.canDemolish(x, y).ok;
