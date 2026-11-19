@@ -1,4 +1,4 @@
-# Hafen-Imperium (Arbeitstitel)
+# Port Empire
 
 Ein Browser-Tycoon für Handy und PC: Baue aus einem kleinen Anleger einen Containerhafen und
 beseitige die Engpässe, bevor die Schiffe zu lange liegen.
@@ -93,6 +93,8 @@ Der Aufstiegsbonus ist klein (40.000 € bis 600.000 €). Löhne steigen je Stu
 - **Versicherung:** In der Bilanz Keine, Basis oder Voll wählen. Die Tagesprämie wächst mit der Zahl der Kräne, erstattet werden 50 bzw. 85 % von Kranunfällen und verdorbenen Kühlcontainern.
 - **Lieferaufträge (ab Stufe 2):** Firmen aus dem Hinterland bestellen feste Mengen in 2 bis 4 Tagen: per Lkw, per Bahn, als Export oder (ab Stufe 3) Ware aus den Hallen. Höchstens zwei gleichzeitig, im Verträge-Fenster.
 - **Hallen-Stufen (ab Hafenstufe 3 und 4):** Hallen lassen sich zweimal ausbauen: schneller und mit mehr Puffer. Während des Ausbaus steht die Halle.
+- **Grafik:** Unter Einstellungen „Auto“ (scharf, wird bei Ruckeln automatisch gröber), „Scharf“ oder „Flüssig“, dazu „Akku sparen“ mit höchstens 30 Bildern pro Sekunde.
+- **Spielstände** enthalten auch Schiffe, Puffer an Kränen, Gates, Hallen und Bahn, Wetter und Stromausfall. Nur laufende Truckfahrten werden nach dem Laden neu verteilt.
 - **Logbuch:** Im Leitstand stehen die letzten 200 Meldungen mit Tag und Uhrzeit. Antippen springt zum Ort, falls es einen gibt.
 - **Warum steht das?** Kran, Gate, Halle und Truck nennen im Info-Blatt den konkreten Grund, warum sie nicht arbeiten, und was hilft.
 - **Kurztipps:** Beim ersten Benutzen eines neuen Werkzeugs (Strom, Portalkran, Befüllkette, Gleise …) erklärt eine Karte das Wichtigste. Einmal pro Gerät.
@@ -151,7 +153,7 @@ Im Menü gibt es zwei Startarten:
 | Info | „Ansehen“ wählen, Schiff oder Gebäude antippen | Klick |
 
 Tasten: Leertaste Pause, `1` `2` `3` Tempo 1×/3×/8×, `Strg+Z` rückgängig, `O` Engpass auf der Karte einfärben, `M` Ton,
-`V` `K` `C` `R` `Y` `G` `T` `X` Werkzeuge, `Esc` abbrechen.
+`R` drehen, `V` `K` `C` `S` `Y` `G` `T` `E` `X` Werkzeuge (`S` Straße, `E` Einbahn), `Esc` abbrechen oder Fenster schließen.
 
 **Rückgängig** nimmt den letzten Bauschritt zurück (ein gezogener Strich zählt als ein Schritt) und erstattet die vollen Kosten.
 Das geht 4 Spielstunden lang, danach bleibt nur der Abriss mit 50 % Erstattung.

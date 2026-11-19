@@ -96,10 +96,43 @@ export class Game {
   async start(host: HTMLElement) {
     await this.renderer.init(host);
     this.renderer.app.ticker.add((tk) => this.frame(tk.deltaMS / 1000));
+    this.applyQuality();
     this.fitCamera();
   }
 
+  /** Grafik an Gerät und Einstellung anpassen */
+  applyQuality() {
+    const r = this.renderer;
+    const q = this.settings.quality;
+    r.setResolution(q === 'fast' ? 1 : r.maxRes);
+    r.app.ticker.maxFPS = this.settings.saver ? 30 : 0;
+    this.perfT = 0;
+    this.perfN = 0;
+    this.perfWarm = 0;
+  }
+  private perfT = 0;
+  private perfN = 0;
+  private perfWarm = 0;
+  /** Automatisch: Wenn das Gerät länger unter etwa 40 Bildern pro Sekunde bleibt, schrittweise schärfe gegen Tempo tauschen */
+  private watchPerf(dtSec: number) {
+    if (this.settings.quality !== 'auto' || this.settings.saver || document.hidden) return;
+    this.perfWarm += dtSec;
+    if (this.perfWarm < 3) return;
+    this.perfT += dtSec;
+    this.perfN++;
+    if (this.perfT < 2.5) return;
+    const avg = this.perfT / this.perfN;
+    this.perfT = 0;
+    this.perfN = 0;
+    const r = this.renderer;
+    if (avg > 1 / 40 && r.resolution > 1) {
+      r.setResolution(Math.max(1, r.resolution - 0.5));
+      this.perfWarm = 0;
+    }
+  }
+
   private frame(dtSec: number) {
+    if (dtSec < 0.25) this.watchPerf(dtSec);
     dtSec = Math.min(dtSec, 0.1);
     this.time += dtSec;
     if (this.showcase) {
@@ -137,6 +170,7 @@ export class Game {
       time: this.time,
       dt: dtSec,
       rect: this.rect,
+      painting: !!this.stroke,
     });
     this.ui.update(dtSec);
     // Erfolge etwa einmal pro Sekunde prüfen

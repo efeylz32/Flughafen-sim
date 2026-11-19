@@ -94,8 +94,12 @@ export function latestSlot(): Slot | null {
 export interface Settings {
   autosave: boolean;
   dayReport: boolean;
+  /** Grafik: automatisch anpassen, immer scharf oder immer flüssig */
+  quality: 'auto' | 'high' | 'fast';
+  /** Akku sparen: höchstens 30 Bilder pro Sekunde */
+  saver: boolean;
 }
-const DEFAULTS: Settings = { autosave: true, dayReport: true };
+const DEFAULTS: Settings = { autosave: true, dayReport: true, quality: 'auto', saver: false };
 
 export function loadSettings(): Settings {
   try {

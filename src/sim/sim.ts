@@ -333,6 +333,8 @@ export interface Job {
 
 export interface Truck {
   id: number;
+  /** Erst ab diesem Tick wieder nach Arbeit suchen */
+  retryAt?: number;
   /** Parkplatz-Feld, zu dem der Truck ohne Auftrag fährt (-1 keins), Zufahrt und ob er dort steht */
   parkAt?: number;
   parkTgt?: number;
@@ -591,6 +593,24 @@ export interface SaveData {
   oneway?: number[];
   overpass?: number[];
   custQueue?: number[];
+  /** Laufender Zustand: Schiffe, Puffer, Wetter. Fehlt in alten Spielständen. */
+  live?: {
+    nextId: number;
+    ships: Ship[];
+    cranes: Partial<Crane>[];
+    gates: Partial<Gate>[];
+    plants: Partial<Plant>[];
+    rails: Partial<Rail>[];
+    shops: Partial<Shop>[];
+    rtgs: Partial<Rtg>[];
+    trucks: { id: number }[];
+    weather: Weather;
+    weatherLeft: number;
+    forecast: Sim['forecast'];
+    powerOutLeft: number;
+    reef: [number, number[]][];
+    exportNeed: number;
+  };
   plantLvl?: number[];
   orders?: Order[];
   orderOffers?: Order[];
@@ -1138,10 +1158,23 @@ export class Sim {
     return (this.rtgCovers(i) ? RTG_CAP : YARD_CAP_PER_TILE) + this.tech.stack;
   }
   rtgCovers(i: number): boolean {
-    const x = i % GRID_W;
-    const y = (i / GRID_W) | 0;
-    return this.rtgs.some((r) => r.staffed && !r.build && Math.abs(r.x - x) <= RTG_RADIUS && Math.abs(r.y - y) <= RTG_RADIUS);
+    if (!this.rtgs.length) return false;
+    // Abdeckung einmal pro Tick als Karte berechnen statt für jedes Feld alle Portalkräne zu prüfen
+    if (this.rtgMapTick !== this.tickCount || this.rtgMapVer !== this.version) {
+      this.rtgMapTick = this.tickCount;
+      this.rtgMapVer = this.version;
+      this.rtgMap.fill(0);
+      for (const r of this.rtgs) {
+        if (!r.staffed || r.build) continue;
+        for (let y = Math.max(0, r.y - RTG_RADIUS); y <= Math.min(GRID_H - 1, r.y + RTG_RADIUS); y++)
+          for (let x = Math.max(0, r.x - RTG_RADIUS); x <= Math.min(GRID_W - 1, r.x + RTG_RADIUS); x++) this.rtgMap[y * GRID_W + x] = 1;
+      }
+    }
+    return this.rtgMap[i] === 1;
   }
+  private rtgMap = new Uint8Array(GRID_W * GRID_H);
+  private rtgMapTick = -1;
+  private rtgMapVer = -1;
   rtgAt(x: number, y: number): Rtg | undefined {
     return this.rtgs.find((r) => r.x === x && r.y === y);
   }
@@ -4200,7 +4233,11 @@ export class Sim {
         t.stuck = 0;
         // Ohne Fahrer bleibt der Truck stehen
         if (!t.staffed) continue;
-        if (t.next < 0) this.assignJob(t);
+        // Wer gerade nichts gefunden hat, sucht erst ein paar Ticks später wieder (spart viel Rechenzeit)
+        if (t.next < 0 && this.tickCount >= (t.retryAt ?? 0)) {
+          this.assignJob(t);
+          if (!t.job) t.retryAt = this.tickCount + 3 + (t.id % 2);
+        }
         if (!t.job) {
           this.idleTruck(t, dt);
           continue;
@@ -4237,10 +4274,16 @@ export class Sim {
   }
 
   get customsTiles(): number {
-    let n = 0;
-    for (let i = 0; i < this.kind.length; i++) if (this.kind[i] === T.Customs) n++;
-    return n;
+    if (this.custVer !== this.version) {
+      this.custVer = this.version;
+      let n = 0;
+      for (let i = 0; i < this.kind.length; i++) if (this.kind[i] === T.Customs) n++;
+      this.custN = n;
+    }
+    return this.custN;
   }
+  private custVer = -1;
+  private custN = 0;
   /** Zollhof: prüft Container aus der Warteschlange, erst dann gibt es die Gebühr */
   private updateCustoms(dt: number) {
     if (!this.custQueue.length) {
@@ -5006,6 +5049,23 @@ export class Sim {
       oneway: Array.from(this.oneway),
       overpass: Array.from(this.overpass),
       custQueue: [...this.custQueue],
+      live: {
+        nextId: this.nextId,
+        ships: this.ships.map((x) => ({ ...x })),
+        cranes: this.cranes.map((x) => ({ ...x })),
+        gates: this.gates.map((x) => ({ ...x, apron: [...x.apron] })),
+        plants: this.plants.map((x) => ({ ...x })),
+        rails: this.rails.map((x) => ({ ...x })),
+        shops: this.shops.map((x) => ({ ...x, target: x.target ? { ...x.target } : null })),
+        rtgs: this.rtgs.map((x) => ({ ...x })),
+        trucks: this.trucks.map((t) => ({ id: t.id })),
+        weather: this.weather,
+        weatherLeft: this.weatherLeft,
+        forecast: this.forecast ? { ...this.forecast } : null,
+        powerOutLeft: this.powerOutLeft,
+        reef: [...this.reefTimes].map(([k, v]) => [k, [...v]] as [number, number[]]),
+        exportNeed: this.exportNeed,
+      },
       insurance: this.insurance,
       orders: this.orders,
       orderOffers: this.orderOffers,
@@ -5201,6 +5261,39 @@ export class Sim {
     s.history = d.history.map((h) => ({ ...emptyBook(), ...h }));
     s.touch();
     for (const i of s.reeferTiles) if (s.stock[i]) s.reefTimes.set(i, new Array(s.stock[i]).fill(s.gm));
+    if (d.live) s.restoreLive(d.live);
+    s.nextId = Math.max(s.nextId, ...s.orders.map((o) => o.id + 1), ...s.orderOffers.map((o) => o.id + 1));
     return s;
+  }
+
+  /** Laufenden Zustand übernehmen. Fahrten der Trucks und alle Reservierungen beginnen neu. */
+  private restoreLive(L: NonNullable<SaveData['live']>) {
+    const same = <E extends { x: number; y: number }>(list: E[], saved: Partial<E>[]) => list.length === saved.length && list.every((e, i) => e.x === saved[i].x && e.y === saved[i].y);
+    const take = <E extends object>(list: E[], saved: Partial<E>[]) => {
+      list.forEach((e, i) => {
+        Object.assign(e, saved[i]);
+        // Reservierungen gehören zu Fahrten, die es nach dem Laden nicht mehr gibt
+        for (const k of Object.keys(e)) if (/^res[A-Z]?/.test(k) && typeof (e as Record<string, unknown>)[k] === 'number') (e as Record<string, number>)[k] = 0;
+      });
+    };
+    if (same(this.cranes, L.cranes)) take(this.cranes, L.cranes);
+    if (same(this.gates, L.gates)) take(this.gates, L.gates);
+    if (same(this.plants, L.plants)) take(this.plants, L.plants);
+    if (same(this.rails, L.rails)) take(this.rails, L.rails);
+    if (same(this.shops, L.shops)) take(this.shops, L.shops);
+    if (same(this.rtgs, L.rtgs)) take(this.rtgs, L.rtgs);
+    if (this.trucks.length === L.trucks.length) this.trucks.forEach((t, i) => (t.id = L.trucks[i].id));
+    this.ships = (L.ships ?? []).map((x) => ({ ...x }));
+    this.weather = L.weather ?? 'clear';
+    this.weatherLeft = L.weatherLeft ?? 0;
+    this.forecast = L.forecast ?? null;
+    this.powerOutLeft = L.powerOutLeft ?? 0;
+    this.exportNeed = L.exportNeed ?? 0;
+    if (L.reef?.length) {
+      this.reefTimes.clear();
+      for (const [k, v] of L.reef) if (this.stock[k]) this.reefTimes.set(k, v.slice(0, this.stock[k]));
+    }
+    this.nextId = Math.max(this.nextId, L.nextId ?? 0);
+    this.version++;
   }
 }

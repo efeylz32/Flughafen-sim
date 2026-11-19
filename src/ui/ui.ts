@@ -1,4 +1,5 @@
 import type { Game } from '../game';
+import LOGO from '../assets/logo.webp?inline';
 import { INSURANCE, OVERPASS_LEVEL, PLANT_LEVELS, MAX_ORDERS, ORDER_KINDS,
   BuildTool,
   DIFFS,
@@ -228,6 +229,14 @@ const TIPS: Record<string, [string, string]> = {
   copy: ['Kopieren', 'Ziehe ein Rechteck über einen Bereich. Danach kannst du ihn mit Einfügen anderswo bauen.'],
   workshop: ['Werkstatt', 'Mechaniker reparieren ausgefallene Kräne und Trucks. Sie bringen Geräte aber nicht ganz auf Neuzustand.'],
   unpack: ['Packhalle', 'Packt Import-Container aus. Die Ware bringt extra Geld oder geht in die Befüllhalle.'],
+};
+
+/** Nur schreiben, wenn sich etwas ändert: spart Neuberechnung und Neuzeichnen der Oberfläche */
+const setText = (e: Element, v: string) => {
+  if (e.textContent !== v) e.textContent = v;
+};
+const setStyle = (e: HTMLElement, k: 'width' | 'height', v: string) => {
+  if (e.style[k] !== v) e.style[k] = v;
 };
 
 export class UI {
@@ -829,6 +838,18 @@ export class UI {
     this.game.startShowcase();
     this.root.classList.add('showcase');
   }
+  /** Esc: oberstes Fenster schließen (Entscheidungen und Spielende nicht, die brauchen eine Wahl) */
+  closeTopModal() {
+    const open = [...this.root.querySelectorAll<HTMLElement>('.modal:not(.hidden)')];
+    const m = open.at(-1);
+    if (!m) return;
+    if (m === this.menu) {
+      if (this.game.inGame && !this.game.showcase) this.hideMenu();
+      return;
+    }
+    m.querySelector<HTMLElement>('.x')?.click();
+  }
+
   hideMenu() {
     this.menu.classList.add('hidden');
     if (this.game.showcase) {
@@ -918,6 +939,16 @@ export class UI {
       case 'autosave':
         g.setSetting('autosave', !g.settings.autosave);
         break;
+      case 'quality': {
+        const order = ['auto', 'high', 'fast'] as const;
+        g.setSetting('quality', order[(order.indexOf(g.settings.quality) + 1) % order.length]);
+        g.applyQuality();
+        break;
+      }
+      case 'saver':
+        g.setSetting('saver', !g.settings.saver);
+        g.applyQuality();
+        break;
       case 'dayreport':
         g.setSetting('dayReport', !g.settings.dayReport);
         if (!g.settings.dayReport) this.dayCard.classList.add('hidden');
@@ -963,7 +994,7 @@ export class UI {
         const last = latestSlot();
         const m = last ? metaOfSlot(last) : null;
         body = `
-          <h1 class="title">Hafen-Imperium</h1>
+          <h1 class="title"><img class="logo" src="${LOGO}" alt="Port Empire" width="280" height="280"></h1>
           <p class="sub">Vom Anleger zum Weltklasse-Hafen</p>
           ${note}
           ${m ? `<button class="primary resume" data-act="resume">Weiterspielen<small>Tag ${m.day} · ${m.levelName} · ${eur(m.money)}</small></button>` : ''}
@@ -979,7 +1010,7 @@ export class UI {
         const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
         body = `
           <h1>Als App installieren</h1>
-          <p class="sub">Hafen-Imperium läuft als App ohne Store. Nach dem ersten Öffnen ist alles gespeichert, danach geht es auch offline.</p>
+          <p class="sub">Port Empire läuft als App ohne Store. Nach dem ersten Öffnen ist alles gespeichert, danach geht es auch offline.</p>
           ${
             ios
               ? '<div class="setrow"><div><b>iPhone und iPad (Safari)</b><span>Unten auf „Teilen“ tippen (Quadrat mit Pfeil), dann „Zum Home-Bildschirm“.</span></div></div>'
@@ -1048,6 +1079,8 @@ export class UI {
           ${toggle('Ton', 'Geräusche und Effekte', g.sound.enabled, 'sound')}
           ${toggle('Autosave', 'Speichert automatisch in den Autosave-Platz', g.settings.autosave, 'autosave')}
           ${toggle('Tagesbericht', 'Zeigt nach jedem Tag eine Karte mit dem Ergebnis', g.settings.dayReport, 'dayreport')}
+          <div class="setrow"><div><b>Grafik</b><span>${g.settings.quality === 'auto' ? 'Automatisch: scharf, wird bei Ruckeln gröber' : g.settings.quality === 'high' ? 'Immer scharf' : 'Flüssig: gröber, aber schneller'}</span></div><button class="switch on" data-act="quality">${g.settings.quality === 'auto' ? 'Auto' : g.settings.quality === 'high' ? 'Scharf' : 'Flüssig'}</button></div>
+          ${toggle('Akku sparen', 'Höchstens 30 Bilder pro Sekunde', g.settings.saver, 'saver')}
           <button class="${this.menuConfirm === 'wipe' ? 'danger' : 'secondary'}" data-act="wipe">${this.menuConfirm === 'wipe' ? 'Wirklich alle Spielstände löschen?' : 'Alle Spielstände löschen'}</button>
           ${back(g.inGame ? 'pause' : 'main')}`;
         break;
@@ -1061,7 +1094,7 @@ export class UI {
               <li><b>Zonen:</b> Unter Geräte „Zonen“ wählen, eine Farbe antippen und Lagerflächen, Kräne, Gates, Hallen, Gleise oder Trucks anmalen. Fahrten verbinden dann nur Dinge derselben Zone.</li>
               <li><b>Aufrüsten:</b> Mit „Ansehen“ einen Kran oder Truck antippen, dann im Info-Blatt aufrüsten.</li>
               <li><b>Rückgängig:</b> Der Pfeil-Knopf oder Strg+Z nimmt den letzten Bauschritt zurück, mit voller Erstattung (4 Spielstunden lang).</li>
-              <li><b>Tasten:</b> Leertaste Pause, 1/2/3 Tempo, O Engpass einfärben, M Ton, R Drehen, V K C Y G T X Werkzeuge, Esc Abbrechen.</li>
+              <li><b>Tasten:</b> Leertaste Pause, 1/2/3 Tempo, O Engpass einfärben, M Ton, R Drehen, V K C S Y G T E X Werkzeuge (S Straße, E Einbahn), Esc Abbrechen.</li>
             </ul>
           </details>
           <details><summary>Wie verdiene ich Geld?</summary>
@@ -1354,35 +1387,36 @@ export class UI {
     this.renderZones(sim);
     this.renderGhostBar(sim);
 
-    this.moneyEl.textContent = eur(sim.money);
+    setText(this.moneyEl, eur(sim.money));
     this.moneyEl.classList.toggle('neg', sim.money < 0);
-    this.repEl.textContent = String(Math.round(sim.rep));
-    this.clockEl.textContent = `Tag ${sim.day} ${sim.clock}`;
+    setText(this.repEl, String(Math.round(sim.rep)));
+    setText(this.clockEl, `Tag ${sim.day} ${sim.clock}`);
     this.undoBtn.classList.toggle('off', !this.game.canUndo);
 
     // Hafenstufe
     const next = LEVELS[sim.level];
-    this.levelName.textContent = `Stufe ${sim.level}`;
-    this.levelBar.style.width = `${Math.round(sim.levelProgress * 100)}%`;
-    this.levelEl.title =
+    setText(this.levelName, `Stufe ${sim.level}`);
+    setStyle(this.levelBar, 'width', `${Math.round(sim.levelProgress * 100)}%`);
+    const lvlTitle =
       (next ? `${sim.levelName}: ${num(sim.handled)} von ${num(next.need)} Containern bis ${next.name}` : `${sim.levelName}: ${num(sim.handled)} Container umgeschlagen`) +
       (sim.status === 'play' ? `. Ziel: Weltklasse-Hafen bis Tag ${sim.goalDay}.` : '');
+    if (this.levelEl.title !== lvlTitle) this.levelEl.title = lvlTitle;
     const debt = sim.status === 'play' && sim.money < 0;
     this.alertEl.classList.toggle('hidden', !debt);
-    if (debt) this.alertEl.textContent = `Minus: noch ${Math.max(1, sim.debtLimit - sim.debtDays)} ${sim.debtLimit - sim.debtDays === 1 ? 'Tag' : 'Tage'}`;
+    if (debt) setText(this.alertEl, `Minus: noch ${Math.max(1, sim.debtLimit - sim.debtDays)} ${sim.debtLimit - sim.debtDays === 1 ? 'Tag' : 'Tage'}`);
     if (sim.level !== this.lastLevel) {
       this.lastLevel = sim.level;
       for (const v of this.toolBtns.values()) {
         const need = v.def.tool === 'overpass' ? OVERPASS_LEVEL : (UNLOCK[v.def.tool as BuildTool] ?? 1);
         const locked = sim.level < need;
         v.btn.classList.toggle('locked', locked);
-        v.sub.textContent = locked ? `Stufe ${need}` : this.toolSub(v.def);
+        setText(v.sub, locked ? `Stufe ${need}` : this.toolSub(v.def));
       }
       this.refreshTools();
     }
 
     const land = this.toolBtns.get('buyland');
-    if (land && !land.btn.classList.contains('locked')) land.sub.textContent = `${Math.round(sim.plotPrice / 1000)}k`;
+    if (land && !land.btn.classList.contains('locked')) setText(land.sub, `${Math.round(sim.plotPrice / 1000)}k`);
 
     // Wetter
     const f = sim.forecast;
@@ -1392,12 +1426,12 @@ export class UI {
     else if (f && f.warned) wx = `${f.kind === 'storm' ? 'Sturm' : 'Nebel'} ab ${sim.clockAt(sim.gm + f.in)}`;
     this.weatherEl.classList.toggle('hidden', !wx);
     this.weatherEl.classList.toggle('now', sim.weather !== 'clear');
-    this.weatherEl.textContent = wx;
+    setText(this.weatherEl, wx);
 
     // Verträge: Zähler am Knopf, wenn Angebote offen und Plätze frei sind
     const open = sim.level >= 2 && sim.contracts.length < sim.maxContracts ? sim.offers.length : 0;
     this.dealBadge.classList.toggle('hidden', open === 0);
-    this.dealBadge.textContent = String(open);
+    setText(this.dealBadge, String(open));
     if (!this.deals.classList.contains('hidden')) this.renderDeals(false);
 
     // Personal: Warnung am Knopf, wenn Leute fehlen
@@ -1412,9 +1446,9 @@ export class UI {
     const m = MISSIONS[sim.mission];
     if (m) {
       this.missionCard.classList.remove('hidden');
-      this.missionCount.textContent = `MISSION ${sim.mission + 1} VON ${MISSIONS.length}`;
-      this.missionTitle.textContent = m.title;
-      this.missionText.textContent = m.text;
+      setText(this.missionCount, `MISSION ${sim.mission + 1} VON ${MISSIONS.length}`);
+      setText(this.missionTitle, m.title);
+      setText(this.missionText, m.text);
     } else {
       this.missionCard.classList.add('hidden');
     }
@@ -1423,16 +1457,16 @@ export class UI {
     for (const s of STAGES) {
       const v = sim.stats[s.key];
       const r = this.bnRows.get(s.key)!;
-      r.bar.style.width = `${Math.round(v * 100)}%`;
+      setStyle(r.bar, 'width', `${Math.round(v * 100)}%`);
       r.bar.className = `bar ${utilClass(v)}`;
-      r.val.textContent = `${Math.round(v * 100)} %`;
+      setText(r.val, `${Math.round(v * 100)} %`);
     }
     const b = sim.bottleneck();
-    this.bnHint.textContent = b ? STAGES.find((s) => s.key === b)!.hint : sim.weather === 'storm' ? 'Sturm: Die Kräne stehen still.' : 'Kein Engpass erkennbar.';
+    setText(this.bnHint, b ? STAGES.find((s) => s.key === b)!.hint : sim.weather === 'storm' ? 'Sturm: Die Kräne stehen still.' : 'Kein Engpass erkennbar.');
     if (sim.jamShare > 0.2) this.bnHint.textContent += ` Stau: ${Math.round(sim.jamShare * 100)} % der Trucks stehen. Rote Straßen zeigen wo, Einbahnstraßen oder eine zweite Straße helfen.`;
     this.bnHint.classList.toggle('alert', b !== null || sim.jamShare > 0.2);
     const sum = this.bnCard.querySelector('.bnsum')!;
-    sum.textContent = b ? `${STAGES.find((s) => s.key === b)!.label} ${Math.round(sim.stats[b] * 100)} %` : 'keiner';
+    setText(sum, b ? `${STAGES.find((s) => s.key === b)!.label} ${Math.round(sim.stats[b] * 100)} %` : 'keiner');
     sum.className = `bnsum ${b ? 'alert' : ''}`;
 
     if (!this.finCard.classList.contains('hidden')) this.renderFinance(sim);

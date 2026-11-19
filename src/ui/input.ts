@@ -5,7 +5,7 @@ const KEY_TOOLS: Record<string, Tool> = {
   v: 'view',
   k: 'kai',
   c: 'crane',
-  r: 'road',
+  s: 'road',
   y: 'yard',
   g: 'gate',
   t: 'truck',
@@ -100,7 +100,11 @@ export function setupInput(game: Game, el: HTMLElement) {
   el.addEventListener('pointerdown', (e) => {
     // Ein neuer erster Finger: hängengebliebene Zeiger von vorher verwerfen
     if (e.isPrimary && ptrs.size > 0) resetPointers();
-    el.setPointerCapture(e.pointerId);
+    try {
+      el.setPointerCapture(e.pointerId);
+    } catch {
+      /* Zeiger schon weg */
+    }
     const p = rel(e);
     ptrs.set(e.pointerId, { x: p.x, y: p.y, sx: p.x, sy: p.y });
     if (ptrs.size === 2) {
@@ -261,8 +265,15 @@ export function setupInput(game: Game, el: HTMLElement) {
   );
 
   window.addEventListener('keydown', (e) => {
-    if (e.target instanceof HTMLElement && /INPUT|TEXTAREA/.test(e.target.tagName)) return;
+    if (e.target instanceof HTMLElement && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
     const k = e.key.toLowerCase();
+    // Im Hauptmenü oder bei offenem Fenster: Esc schließt das Fenster, sonst keine Kürzel
+    if (game.showcase || !game.inGame) return;
+    const open = [...document.querySelectorAll<HTMLElement>('#hud .modal:not(.hidden)')];
+    if (open.length) {
+      if (k === 'escape') game.ui.closeTopModal();
+      return;
+    }
     if ((e.ctrlKey || e.metaKey) && k === 'z') {
       e.preventDefault();
       game.undo();

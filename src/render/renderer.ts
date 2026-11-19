@@ -6,6 +6,8 @@ import { N as QN, S as QS_, W as QW, qOf, qOfWater, qTile, sideOf, OUT, Q_MAX } 
 const SIDE_ANGLE = [0, Math.PI, -Math.PI / 2, Math.PI / 2];
 
 export interface View {
+  /** Gerade wird gemalt (Straße ziehen usw.) */
+  painting?: boolean;
   overlay: boolean;
   tool: string;
   hover: { x: number; y: number; ok: boolean } | null;
@@ -213,6 +215,8 @@ export class Renderer {
   private stormA = 0;
   private fogA = 0;
   private floats: Float[] = [];
+  private floatPoolGood: Text[] = [];
+  private floatPoolBad: Text[] = [];
   private pops: Pop[] = [];
   private simRef: Sim | null = null;
   private version = -1;
@@ -224,6 +228,20 @@ export class Renderer {
   scale = 1;
   ox = 0;
   oy = 0;
+
+  /** Höchste Auflösung für dieses Gerät */
+  readonly maxRes = Math.min(window.devicePixelRatio || 1, 2);
+  /** Auflösung ändern, z. B. wenn das Gerät nicht mitkommt */
+  setResolution(r: number) {
+    const R = this.app.renderer;
+    if (Math.abs(R.resolution - r) < 0.01) return;
+    R.resize(this.app.screen.width, this.app.screen.height, r);
+  }
+  get resolution(): number {
+    return this.app.renderer.resolution;
+  }
+
+  private terrainAt = -1;
 
   async init(host: HTMLElement) {
     this.app = new Application();
@@ -352,17 +370,25 @@ export class Renderer {
   /** Aufsteigender Text über einem Feld, z. B. „+200 €“. */
   addFloat(tx: number, ty: number, text: string, good = true) {
     if (this.floats.length > 14) return;
-    const t = new Text({
-      text,
-      style: {
-        fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
-        fontSize: 13,
-        fontWeight: '800',
-        fill: 0xffffff,
-        stroke: { color: good ? 0x14693c : 0x8c2420, width: 3.5, join: 'round' },
-      },
-    });
-    t.resolution = 2;
+    // Textobjekte wiederverwenden: Neu anlegen kostet am Handy spürbar Zeit
+    const pool = good ? this.floatPoolGood : this.floatPoolBad;
+    let t = pool.pop();
+    if (t) t.text = text;
+    else {
+      t = new Text({
+        text,
+        style: {
+          fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+          fontSize: 13,
+          fontWeight: '800',
+          fill: 0xffffff,
+          stroke: { color: good ? 0x14693c : 0x8c2420, width: 3.5, join: 'round' },
+        },
+      });
+      t.resolution = 2;
+      (t as Text & { good?: boolean }).good = good;
+    }
+    t.alpha = 1;
     t.anchor.set(0.5, 1);
     const f: Float = { text: t, x: (tx + 0.5) * TILE, y: ty * TILE + 4, age: 0 };
     t.position.set(f.x, f.y);
@@ -1719,7 +1745,10 @@ export class Renderer {
       this.version = -1;
     }
     if (this.baseMap !== sim.map) this.drawBase(sim.map);
-    if (this.version !== sim.version) {
+    // Beim Malen (Straße ziehen) höchstens alle 60 ms neu zeichnen, sonst ruckelt es am Handy
+    const throttle = view.painting && view.time - this.terrainAt < 0.06;
+    if (this.version !== sim.version && !throttle) {
+      this.terrainAt = view.time;
       this.drawTerrain(sim);
       this.syncYard(sim);
       this.drawLights(sim);
@@ -2159,7 +2188,10 @@ export class Renderer {
     }
     this.floats = this.floats.filter((f) => {
       if (f.age < 1.25) return true;
-      f.text.destroy();
+      this.fxLayer.removeChild(f.text);
+      const pool = (f.text as Text & { good?: boolean }).good === false ? this.floatPoolBad : this.floatPoolGood;
+      if (pool.length < 16) pool.push(f.text);
+      else f.text.destroy();
       return false;
     });
   }

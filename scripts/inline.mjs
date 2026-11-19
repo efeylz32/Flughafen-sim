@@ -13,8 +13,9 @@ if (js.length !== 1) throw new Error(`Erwartet genau ein JS-Bundle, gefunden: ${
 const style = css.map((f) => readFileSync(join(assets, f), 'utf8')).join('\n');
 const script = readFileSync(join(assets, js[0]), 'utf8').replace(/<\/script/gi, '<\\/script');
 
+const favicon = `data:image/png;base64,${readFileSync(join(dist, 'favicon.png')).toString('base64')}`;
 const html = `<script>window.__SINGLE_FILE__ = true</script>
-<title>Hafen-Imperium</title>
+<title>Port Empire</title>\n<link rel="icon" href="${favicon}">
 <meta name="description" content="Baue einen Containerhafen und beseitige die Engpässe.">
 <style>${style}</style>
 <div id="app"><div id="game"></div><div id="hud"></div></div>
