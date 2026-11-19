@@ -1,4 +1,4 @@
-import { Game, PAINT_TOOLS } from '../game';
+import { AREA_TOOLS, Game, PAINT_TOOLS } from '../game';
 import type { Tool } from '../sim/data';
 
 const KEY_TOOLS: Record<string, Tool> = {
@@ -24,12 +24,15 @@ interface Ptr {
 /** Zeigerbedienung für Maus und Touch: Tippen, Malen, Ziehen, Zoomen. */
 export function setupInput(game: Game, el: HTMLElement) {
   const ptrs = new Map<number, Ptr>();
-  let mode: 'none' | 'paint' | 'pan' | 'tap' | 'pinch' | 'rect' | 'ghostdrag' = 'none';
+  let mode: 'none' | 'paint' | 'pan' | 'tap' | 'pinch' | 'rect' | 'area' | 'ghostdrag' = 'none';
   let grab = { x: 0, y: 0 };
   let pendingPaint: { x: number; y: number } | null = null;
   let paintStart = 0;
   let ghostMoved = false;
   let last: { x: number; y: number } | null = null;
+  /** Gerade Linien beim Malen: Achse und Eckpunkt, ab dem sie läuft */
+  let axis: 'x' | 'y' | null = null;
+  let anchor: { x: number; y: number } | null = null;
   let failReason: string | null = null;
   let okCount = 0;
   let pinchDist = 0;
@@ -43,31 +46,25 @@ export function setupInput(game: Game, el: HTMLElement) {
   function paintLine(a: { x: number; y: number }, b: { x: number; y: number }, skipFirst = false) {
     // Autobahn: Die Zugrichtung bestimmt, ob die Fahrbahnen waagerecht oder senkrecht liegen
     if (game.tool === 'hwy' && (a.x !== b.x || a.y !== b.y)) game.sim.rot = Math.abs(b.y - a.y) > Math.abs(b.x - a.x);
-    // Bresenham über Felder
+    // Nur waagerecht und senkrecht: erst entlang der längeren Richtung, dann um die Ecke.
+    // So entstehen nie Felder, die sich nur an der Ecke berühren (darauf fährt kein Truck).
     let x0 = a.x;
     let y0 = a.y;
-    const dx = Math.abs(b.x - x0);
-    const dy = Math.abs(b.y - y0);
-    const sx = x0 < b.x ? 1 : -1;
-    const sy = y0 < b.y ? 1 : -1;
-    let err = dx - dy;
-    let first = true;
-    for (;;) {
-      if (!(skipFirst && first)) {
-        const r = game.applyTool(x0, y0);
-        if (r) failReason ??= r;
-        else okCount++;
-      }
-      first = false;
-      if (x0 === b.x && y0 === b.y) break;
-      const e2 = 2 * err;
-      if (e2 > -dy) {
-        err -= dy;
-        x0 += sx;
-      }
-      if (e2 < dx) {
-        err += dx;
-        y0 += sy;
+    const sx = Math.sign(b.x - x0);
+    const sy = Math.sign(b.y - y0);
+    const xFirst = Math.abs(b.x - x0) >= Math.abs(b.y - y0);
+    const put = () => {
+      const r = game.applyTool(x0, y0);
+      if (r) failReason ??= r;
+      else okCount++;
+    };
+    if (!skipFirst) put();
+    for (let pass = 0; pass < 2; pass++) {
+      const alongX = xFirst === (pass === 0);
+      while (alongX ? x0 !== b.x : y0 !== b.y) {
+        if (alongX) x0 += sx;
+        else y0 += sy;
+        put();
       }
     }
   }
@@ -127,6 +124,11 @@ export function setupInput(game: Game, el: HTMLElement) {
     const wantPan = e.button === 1 || e.button === 2;
     if (wantPan) {
       mode = 'pan';
+    } else if (AREA_TOOLS.includes(game.tool)) {
+      // Flächen: Rechteck aufziehen, gebaut wird beim Loslassen
+      mode = 'area';
+      const t = tileOf(p);
+      game.rect = { x0: t.x, y0: t.y, x1: t.x, y1: t.y };
     } else if (game.tool === 'assign' || game.tool === 'copy') {
       mode = 'rect';
       const t = tileOf(p);
@@ -135,6 +137,8 @@ export function setupInput(game: Game, el: HTMLElement) {
       mode = 'paint';
       game.beginStroke();
       last = tileOf(p);
+      anchor = { ...last };
+      axis = null;
       paintStart = performance.now();
       // Am Handy erst bauen, wenn klar ist, dass kein zweiter Finger (Zoom) kommt
       if (e.pointerType === 'touch') pendingPaint = { ...last };
@@ -185,7 +189,7 @@ export function setupInput(game: Game, el: HTMLElement) {
       }
       return;
     }
-    if (mode === 'rect' && game.rect) {
+    if ((mode === 'rect' || mode === 'area') && game.rect) {
       const t = tileOf(p);
       game.rect = { ...game.rect, x1: t.x, y1: t.y };
       return;
@@ -197,9 +201,19 @@ export function setupInput(game: Game, el: HTMLElement) {
         pendingPaint = null;
       }
       if (pendingPaint) return;
-      if (last && (t.x !== last.x || t.y !== last.y)) {
-        paintLine(last, t, true);
-        last = t;
+      if (last && anchor && (t.x !== last.x || t.y !== last.y)) {
+        // Gerade weiterbauen; erst wenn der Finger 2 Felder neben der Linie ist, um die Ecke
+        if (!axis) axis = Math.abs(t.x - anchor.x) >= Math.abs(t.y - anchor.y) ? 'x' : 'y';
+        const off = axis === 'x' ? Math.abs(t.y - anchor.y) : Math.abs(t.x - anchor.x);
+        if (off >= 2) {
+          anchor = { ...last };
+          axis = axis === 'x' ? 'y' : 'x';
+        }
+        const target = axis === 'x' ? { x: t.x, y: anchor.y } : { x: anchor.x, y: t.y };
+        if (target.x !== last.x || target.y !== last.y) {
+          paintLine(last, target, true);
+          last = target;
+        }
       }
       game.hover = { ...t, ok: game.previewOk(t.x, t.y) };
       return;
@@ -235,6 +249,9 @@ export function setupInput(game: Game, el: HTMLElement) {
         pendingPaint = null;
       }
       finishPaint();
+    } else if (mode === 'area' && game.rect) {
+      game.fillRect(game.rect);
+      game.rect = null;
     } else if (mode === 'rect' && game.rect) {
       if (game.tool === 'copy') game.copyRect(game.rect);
       else game.assignRect(game.rect);

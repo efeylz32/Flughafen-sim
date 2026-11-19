@@ -1,4 +1,4 @@
-import type { Game } from '../game';
+import { AREA_TOOLS, type Game } from '../game';
 import { INSURANCE, OVERPASS_LEVEL, PLANT_LEVELS, MAX_ORDERS, ORDER_KINDS,
   BuildTool,
   DIFFS,
@@ -49,7 +49,7 @@ import { INSURANCE, OVERPASS_LEVEL, PLANT_LEVELS, MAX_ORDERS, ORDER_KINDS,
 import { ACHIEVEMENTS } from '../achievements';
 import { qOf } from '../sim/quay';
 import { latestSlot, metaOfSlot, removeSlot, Slot, SLOTS } from '../saves';
-import { MISSIONS } from '../sim/missions';
+import { MISSIONS, MISSION_GO } from '../sim/missions';
 import { SCENARIOS } from '../sim/scenarios';
 import type { Contract, Job, Sim } from '../sim/sim';
 
@@ -224,7 +224,7 @@ const TIPS: Record<string, [string, string]> = {
   customs: ['Zollhof', 'Ab Stufe 2 muss etwa jeder achte Import-Container durch den Zoll. Ohne Zollhof prüft das Gate selbst und braucht dafür dreimal so lange. Jedes Zollhof-Feld prüft 8 Container pro Stunde.'],
   overpass: ['Überführung', 'An Kreuzungen warten Trucks auf Querverkehr. Eine Überführung auf der Kreuzung hebt das auf. Nochmal tippen baut sie ab.'],
   oneway: ['Einbahnstraße', 'Tippe auf eine Straße, um die Fahrtrichtung festzulegen. Einbahnstraßen fassen mehr Trucks.'],
-  berth: ['Liegeplätze', 'Tippe auf einen Liegeplatz, um ihn zu sperren oder wieder zu öffnen.'],
+  berth: ['Liegeplatz', 'Setzt 4 Kai-Felder auf einmal an die Küste: Tippen zeigt die Vorschau, nochmal tippen baut. Sperren kannst du einen Liegeplatz, indem du ihn mit „Ansehen“ antippst.'],
   copy: ['Kopieren', 'Ziehe ein Rechteck über einen Bereich. Danach kannst du ihn mit Einfügen anderswo bauen.'],
   workshop: ['Werkstatt', 'Mechaniker reparieren ausgefallene Kräne und Trucks. Sie bringen Geräte aber nicht ganz auf Neuzustand.'],
   unpack: ['Packhalle', 'Packt Import-Container aus. Die Ware bringt extra Geld oder geht in die Befüllhalle.'],
@@ -254,6 +254,8 @@ export class UI {
   private missionTitle!: HTMLElement;
   private missionText!: HTMLElement;
   private bnCard!: HTMLElement;
+  private bnFix!: HTMLButtonElement;
+  private missionGo!: HTMLButtonElement;
   private bnRows = new Map<string, { bar: HTMLElement; val: HTMLElement }>();
   private bnHint!: HTMLElement;
   private finCard!: HTMLElement;
@@ -381,7 +383,7 @@ export class UI {
     this.missionCard = el('div', 'card mission');
     this.missionCard.innerHTML = `
       <div class="mhead"><div class="flag">${ICONS.star}</div>
-        <div><div class="mcount"></div><div class="mtitle"></div></div></div>
+        <div class="mcol"><div class="mcount"></div><div class="mtitle"></div></div><button class="mgo hidden">Los</button></div>
       <div class="mtext"></div>
       <button class="skip">Überspringen</button>`;
     this.missionCount = this.missionCard.querySelector('.mcount')!;
@@ -391,10 +393,21 @@ export class UI {
       e.stopPropagation();
       this.game.sim.mission = Math.min(MISSIONS.length, this.game.sim.mission + 1);
     });
+    this.missionGo = this.missionCard.querySelector('.mgo')!;
+    this.missionGo.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.game.goMission();
+    });
     this.missionCard.addEventListener('click', () => this.missionCard.classList.toggle('open'));
 
     this.bnCard = el('div', 'card bn');
-    this.bnCard.innerHTML = `<div class="ctitle"><span>Engpass</span><span class="bnsum"></span></div><div class="rows"></div><div class="hint"></div>`;
+    this.bnCard.innerHTML = `<div class="ctitle"><span>Engpass</span><span class="bnsum"></span></div><div class="rows"></div><div class="hint"></div><button class="bnfix hidden"></button>`;
+    this.bnFix = this.bnCard.querySelector('.bnfix')!;
+    this.bnFix.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const k = this.bnFix.dataset.k as 'crane' | 'trucks' | 'yard' | 'gate' | undefined;
+      if (k) this.game.fixBottleneck(k);
+    });
     this.bnCard.addEventListener('click', () => this.bnCard.classList.toggle('open'));
     const rows = this.bnCard.querySelector('.rows')!;
     for (const s of STAGES) {
@@ -1320,6 +1333,23 @@ export class UI {
       return;
     }
     this.ghostBar.querySelector('.gok')!.classList.remove('danger');
+    // Fläche aufziehen: Größe und ungefähre Kosten zeigen, gebaut wird beim Loslassen
+    const rc = this.game.rect;
+    if (rc && AREA_TOOLS.includes(this.game.tool)) {
+      const w = Math.abs(rc.x1 - rc.x0) + 1;
+      const h = Math.abs(rc.y1 - rc.y0) + 1;
+      const t = this.game.tool;
+      const cost = t === 'yarduse' || t === 'zone' ? 0 : sim.costOf(t as BuildTool) * w * h;
+      const key = `area${w}x${h}${cost}`;
+      this.ghostBar.classList.remove('hidden');
+      this.ghostBar.classList.add('info');
+      if (key !== this.ghostKey) {
+        this.ghostKey = key;
+        this.ghostBar.querySelector('.ghosttext')!.innerHTML = `<b>${w} × ${h} = ${w * h} Felder</b>${cost ? ` · höchstens ${eur(cost)}` : ''} · Loslassen baut`;
+      }
+      return;
+    }
+    this.ghostBar.classList.remove('info');
     const gh = this.game.ghost;
     this.ghostBar.classList.toggle('hidden', !gh);
     if (!gh) return;
@@ -1448,6 +1478,8 @@ export class UI {
       setText(this.missionCount, `MISSION ${sim.mission + 1} VON ${MISSIONS.length}`);
       setText(this.missionTitle, m.title);
       setText(this.missionText, m.text);
+      this.missionGo.classList.toggle('hidden', !MISSION_GO[sim.mission] || (MISSION_GO[sim.mission] === this.game.tool && this.game.tool !== 'view'));
+      setText(this.missionGo, MISSION_GO[sim.mission] === 'view' ? 'Ansehen' : MISSION_GO[sim.mission] === 'deals' ? 'Verträge' : 'Los');
     } else {
       this.missionCard.classList.add('hidden');
     }
@@ -1461,8 +1493,17 @@ export class UI {
       setText(r.val, `${Math.round(v * 100)} %`);
     }
     const b = sim.bottleneck();
-    setText(this.bnHint, b ? STAGES.find((s) => s.key === b)!.hint : sim.weather === 'storm' ? 'Sturm: Die Kräne stehen still.' : 'Kein Engpass erkennbar.');
-    if (sim.jamShare > 0.2) this.bnHint.textContent += ` Stau: ${Math.round(sim.jamShare * 100)} % der Trucks stehen. Rote Straßen zeigen wo, Einbahnstraßen oder eine zweite Straße helfen.`;
+    setText(
+      this.bnHint,
+      (b ? STAGES.find((s) => s.key === b)!.hint : sim.weather === 'storm' ? 'Sturm: Die Kräne stehen still.' : 'Kein Engpass erkennbar.') +
+        (sim.jamShare > 0.2 ? ` Stau: ${Math.round(sim.jamShare * 100)} % der Trucks stehen. Rote Straßen zeigen wo, Einbahnstraßen oder eine zweite Straße helfen.` : ''),
+    );
+    // Ein Tipp zum Beheben: Trucks direkt kaufen, sonst das passende Werkzeug wählen
+    this.bnFix.classList.toggle('hidden', !b);
+    if (b) {
+      this.bnFix.dataset.k = b;
+      setText(this.bnFix, b === 'trucks' ? `+1 Truck · ${eur(sim.costOf('truck'))}` : b === 'crane' ? 'Kran bauen' : b === 'yard' ? 'Stapelplatz bauen' : 'Gate bauen');
+    }
     this.bnHint.classList.toggle('alert', b !== null || sim.jamShare > 0.2);
     const sum = this.bnCard.querySelector('.bnsum')!;
     setText(sum, b ? `${STAGES.find((s) => s.key === b)!.label} ${Math.round(sim.stats[b] * 100)} %` : 'keiner');

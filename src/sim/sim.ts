@@ -3376,6 +3376,29 @@ export class Sim {
     return Math.round((MAINT_COST * this.inflation) / 100) * 100;
   }
 
+  /** Truck ohne Zielen kaufen: auf eine Straße, die mit den Kränen verbunden ist, möglichst frei */
+  buyTruckAuto(): BuildResult & { x: number; y: number } {
+    const acc: number[] = [];
+    for (const c of this.cranes) acc.push(...this.adjRoad(this.idx(c.x, c.y)));
+    const busy = new Set(this.trucks.map((t) => t.tile));
+    let best = -1;
+    let bestD = Infinity;
+    const d = acc.length ? this.distMap(acc[0]) : null;
+    for (let i = 0; i < this.kind.length; i++) {
+      if (this.kind[i] !== T.Road || this.roadTier[i] === 2) continue;
+      if (d && d[i] < 0) continue;
+      const score = (busy.has(i) ? 1000 : 0) + (d ? d[i] : 0);
+      if (score < bestD) {
+        bestD = score;
+        best = i;
+      }
+    }
+    if (best < 0) return { ok: false, reason: 'Es gibt keine Straße für einen Truck', cost: 0, x: 0, y: 0 };
+    const x = best % GRID_W;
+    const y = (best / GRID_W) | 0;
+    return { ...this.build('truck', x, y), x, y };
+  }
+
   /** Truck gegen einen neuen tauschen: Der alte wird in Zahlung gegeben (je nach Zustand) */
   replaceCost(id: number): number {
     const t = this.trucks.find((x) => x.id === id);

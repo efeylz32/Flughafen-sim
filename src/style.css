@@ -471,3 +471,10 @@ html, body { touch-action: none; overscroll-behavior: none; }
 .deal .dh { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
 .deal .pm { margin-top: 8px; }
 .deal .progress { margin: 6px 0; }
+
+.ghostbar.info .ghostbtns { display: none; }
+.mission .mhead .mcol { flex: 1; min-width: 0; }
+.mission .mgo { flex: none; border: 0; border-radius: 10px; background: var(--good); color: #fff; font-weight: 800; font-size: 14px; padding: 8px 14px; }
+.mission .mgo.hidden { display: none; }
+.bn .bnfix { margin-top: 8px; width: 100%; border: 0; border-radius: 10px; background: var(--accent); color: #fff; font-weight: 800; font-size: 14px; padding: 9px 12px; }
+.bn .bnfix.hidden { display: none; }

@@ -143,3 +143,8 @@ export const MISSIONS: Mission[] = [
     done: (s) => s.level >= 5,
   },
 ];
+
+/** Was der „Los“-Knopf der Mission öffnet: ein Werkzeug oder ein Fenster */
+export const MISSION_GO: (string | null)[] = [
+  'berth', 'crane', 'road', 'yard', 'gate', 'truck', 'view', 'view', null, 'workshop', 'assign', null, 'deals', 'view', 'unpack', 'buyland', null, 'reefer', 'rail', 'berth', null, 'view', null,
+];

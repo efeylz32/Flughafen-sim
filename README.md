@@ -93,6 +93,8 @@ Der Aufstiegsbonus ist klein (40.000 € bis 600.000 €). Löhne steigen je Stu
 - **Versicherung:** In der Bilanz Keine, Basis oder Voll wählen. Die Tagesprämie wächst mit der Zahl der Kräne, erstattet werden 50 bzw. 85 % von Kranunfällen und verdorbenen Kühlcontainern.
 - **Lieferaufträge (ab Stufe 2):** Firmen aus dem Hinterland bestellen feste Mengen in 2 bis 4 Tagen: per Lkw, per Bahn, als Export oder (ab Stufe 3) Ware aus den Hallen. Höchstens zwei gleichzeitig, im Verträge-Fenster.
 - **Hallen-Stufen (ab Hafenstufe 3 und 4):** Hallen lassen sich zweimal ausbauen: schneller und mit mehr Puffer. Während des Ausbaus steht die Halle.
+- **Bauen ohne Fummelei:** Straßen, Kai, Gleise und Baggern laufen beim Ziehen gerade und gehen erst um die Ecke, wenn der Finger 2 Felder daneben ist. Lager, Kühlplätze, Gefahrgut, Leerlager, Solar, Stellplätze, Lagerzweck und Zonen zieht man als Rechteck auf (mit Größe und Kosten), gebaut wird beim Loslassen. Trucks setzt ein Tipp ohne Bestätigung.
+- **Ein Tipp zum Ziel:** Die Missionskarte hat einen „Los“-Knopf, der das passende Werkzeug wählt. Die Engpass-Karte hat einen Knopf zum Beheben, bei Trucks kauft er direkt einen neuen.
 - **Grafik:** Unter Einstellungen „Auto“ (scharf, wird bei Ruckeln automatisch gröber), „Scharf“ oder „Flüssig“, dazu „Akku sparen“ mit höchstens 30 Bildern pro Sekunde.
 - **Spielstände** enthalten auch Schiffe, Puffer an Kränen, Gates, Hallen und Bahn, Wetter und Stromausfall. Nur laufende Truckfahrten werden nach dem Laden neu verteilt.
 - **Logbuch:** Im Leitstand stehen die letzten 200 Meldungen mit Tag und Uhrzeit. Antippen springt zum Ort, falls es einen gibt.

@@ -18,6 +18,8 @@ interface BpItem {
   rot?: boolean;
   ow?: number;
 }
+import { MISSION_GO } from './sim/missions';
+
 export interface Blueprint {
   w: number;
   h: number;
@@ -34,7 +36,9 @@ function loadBp(): Blueprint | null {
   }
 }
 
-export const PAINT_TOOLS: Tool[] = ['yarduse', 'kai', 'road', 'road2', 'hwy', 'yard', 'reefer', 'hazard', 'emptyyard', 'dredge', 'zone', 'demolish'];
+/** Werkzeuge, die man als Rechteck aufzieht */
+export const AREA_TOOLS: Tool[] = ['yard', 'reefer', 'hazard', 'emptyyard', 'solar', 'parking', 'yarduse', 'zone'];
+export const PAINT_TOOLS: Tool[] = ['kai', 'road', 'road2', 'hwy', 'track', 'dredge', 'demolish'];
 
 /** So lange (in Spielminuten) lässt sich eine Bauaktion rückgängig machen. */
 const UNDO_WINDOW_GM = 240;
@@ -749,7 +753,7 @@ export class Game {
 
   /** Große Bauten werden erst als Vorschau gesetzt, verschoben und mit einem zweiten Klick gebaut. */
   needsConfirm(tool: Tool = this.tool): boolean {
-    return ['berth', 'paste', 'crane', 'lcrane', 'gate', 'unpack', 'pack', 'cold', 'fill', 'workshop', 'rtg', 'rail', 'truck'].includes(tool);
+    return ['berth', 'paste', 'crane', 'lcrane', 'gate', 'unpack', 'pack', 'cold', 'fill', 'workshop', 'rtg', 'rail'].includes(tool);
   }
   /** Größe der Vorschau in Feldern */
   ghostSize(): [number, number] {
@@ -769,6 +773,52 @@ export class Game {
     this.ghost = { x, y };
     this.hover = { x, y, ok: this.previewOk(x, y) };
   }
+  /** Rechteck füllen: ein Rückgängig-Schritt, eine Meldung mit Anzahl und Kosten */
+  fillRect(r: NonNullable<View['rect']>) {
+    const x0 = Math.max(0, Math.min(r.x0, r.x1));
+    const x1 = Math.min(GRID_W - 1, Math.max(r.x0, r.x1));
+    const y0 = Math.max(0, Math.min(r.y0, r.y1));
+    const y1 = Math.min(GRID_H - 1, Math.max(r.y0, r.y1));
+    const before = this.sim.money;
+    let ok = 0;
+    let fail: string | null = null;
+    this.beginStroke();
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const res = this.applyTool(x, y);
+        if (res) fail ??= res;
+        else ok++;
+      }
+    }
+    this.endStroke();
+    const n = (x1 - x0 + 1) * (y1 - y0 + 1);
+    if (!ok) return this.fail(fail ?? 'Nicht möglich');
+    const spent = Math.round(before - this.sim.money);
+    if (n > 1) this.ui.toast(`${ok} von ${n} Feldern${spent > 0 ? ` · −${spent.toLocaleString('de-DE')} €` : ''}${ok < n && fail ? ` · Rest: ${fail}` : ''}`, ok < n ? 'info' : 'good');
+  }
+
+  /** Mission „Los“: passendes Werkzeug wählen oder Fenster öffnen */
+  goMission() {
+    const go = MISSION_GO[this.sim.mission];
+    if (!go) return;
+    if (go === 'deals') return this.ui.showDeals();
+    this.setTool(go as Tool);
+  }
+
+  /** Engpass beheben: Trucks direkt kaufen, sonst das passende Werkzeug */
+  fixBottleneck(stage: 'crane' | 'trucks' | 'yard' | 'gate') {
+    if (stage === 'trucks') {
+      const res = this.sim.buyTruckAuto();
+      if (!res.ok) return this.fail(res.reason ?? 'Nicht möglich');
+      this.record({ kind: 'build', tool: 'truck', x: res.x, y: res.y, truckId: res.truckId });
+      this.sound.play('truck');
+      this.renderer.addPop(res.x, res.y, 'build');
+      this.ui.toast(`Neuer Truck: −${res.cost.toLocaleString('de-DE')} €`, 'good');
+      return;
+    }
+    this.setTool(stage === 'crane' ? 'crane' : stage);
+  }
+
   confirmGhost() {
     const g = this.ghost;
     if (!g) return;
