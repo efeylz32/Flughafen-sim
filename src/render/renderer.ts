@@ -40,27 +40,27 @@ const DECOR = 36 * TILE;
 const WATER_EXT = DECOR + 18 * TILE;
 
 const C = {
-  deep: 0x2a76b0,
-  shallow: 0x5fb3de,
-  surf: 0x9adbee,
-  sand: 0xe8d9a9,
-  sandDark: 0xd3c08b,
-  grassA: 0x8dc86d,
-  grassB: 0x82bd63,
-  grassTuft: 0x6aa953,
-  grassOut: 0x78b65e,
-  grassOutDark: 0x69a853,
-  kai: 0xd3d7da,
+  deep: 0x1a6cb8,
+  shallow: 0x35aee6,
+  surf: 0x8ce3f5,
+  sand: 0xf2d98e,
+  sandDark: 0xdcbc68,
+  grassA: 0x72c74a,
+  grassB: 0x66bb40,
+  grassTuft: 0x4c9c34,
+  grassOut: 0x5fae40,
+  grassOutDark: 0x4f9a35,
+  kai: 0xcfd5da,
   kaiJoint: 0xb9bfc4,
   kaiWall: 0x75808b,
   kaiCurb: 0x98a1aa,
   yellow: 0xf2c230,
   bollard: 0x39424f,
-  road: 0x4b525c,
-  roadSpeck: 0x434952,
+  road: 0x3a414b,
+  roadSpeck: 0x333941,
   roadEdge: 0xe4e7ea,
-  roadDash: 0xf1cc52,
-  yard: 0xbcc2c6,
+  roadDash: 0xffcc2e,
+  yard: 0xb0b9c0,
   yardLine: 0xf6f8f9,
   steel: 0x5a6370,
   white: 0xf3f5f7,
@@ -71,8 +71,8 @@ const C = {
   accent: 0x2a6fdb,
 };
 /** Containerfarben. Die Textur ist hellgrau und wird damit eingefärbt. */
-const BOX = [0xd2503f, 0x3b7fc8, 0xeba433, 0x35996c, 0x8a6bc4, 0xe6e1d3, 0x27a5ad];
-const CAB = [0xf2b632, 0xe8542f, 0x2f7fd0, 0xf4f5f7];
+const BOX = [0xe23d2a, 0x2672d9, 0xf7a11a, 0x1fa65f, 0x8b50dc, 0xf1e8d2, 0x10aebb];
+const CAB = [0xffb81f, 0xf04a24, 0x2479de, 0xf4f5f7];
 /** Export-Container sind einheitlich dunkel, Kühlcontainer weiß. */
 const EXPORT_BOX = 0x4a607c;
 const REEFER_BOX = 0xf4f9fd;

@@ -60,6 +60,8 @@ const hours = (gm: number) => `${(gm / 60).toFixed(1).replace('.', ',').replace(
 const svg = (body: string) =>
   `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 
+const ANCHOR = '<svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="2.2"/><path d="M12 7.2V21M7.5 10.5h9M4 13.5c0 4 3.6 7.5 8 7.5s8-3.5 8-7.5M4 13.5l-1.5 1.5M20 13.5l1.5 1.5"/></svg>';
+
 const ICONS: Record<string, string> = {
   view: svg('<path d="M7 3.5l11 7-4.6 1.4 2.8 5.6-2.6 1.3-2.8-5.6L5.8 16z"/>'),
   kai: svg('<rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M3 9h18M7 9v4M12 9v4M17 9v4"/>'),
@@ -401,7 +403,7 @@ export class UI {
     this.missionCard.addEventListener('click', () => this.missionCard.classList.toggle('open'));
 
     this.bnCard = el('div', 'card bn');
-    this.bnCard.innerHTML = `<div class="ctitle"><span>Engpass</span><span class="bnsum"></span></div><div class="rows"></div><div class="hint"></div><button class="bnfix hidden"></button>`;
+    this.bnCard.innerHTML = `<div class="ctitle"><span>Engpass</span><span class="bnsum"></span><button class="bnfix hidden"></button></div><div class="rows"></div><div class="hint"></div>`;
     this.bnFix = this.bnCard.querySelector('.bnfix')!;
     this.bnFix.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1005,17 +1007,23 @@ export class UI {
       case 'main': {
         const last = latestSlot();
         const m = last ? metaOfSlot(last) : null;
+        const mi = (icon: string, label: string, attrs: string, cls = 'mbtn') => `<button class="${cls}" ${attrs}><span class="mi">${icon}</span><span class="ml">${label}</span></button>`;
         body = `
-          <h1 class="title">Port Empire</h1>
-          <p class="sub">Vom Anleger zum Weltklasse-Hafen</p>
+          <div class="brand">
+            <div class="anchor">${ANCHOR}</div>
+            <h1 class="title"><span class="t1">PORT</span><span class="t2">EMPIRE</span></h1>
+            <p class="tagline">Vom Anleger zum Weltklasse-Hafen</p>
+          </div>
           ${note}
-          ${m ? `<button class="primary resume" data-act="resume">Weiterspielen<small>Tag ${m.day} · ${m.levelName} · ${eur(m.money)}</small></button>` : ''}
-          <button class="${m ? 'secondary' : 'primary'}" data-act="view" data-arg="new">Neues Spiel</button>
-          <button class="secondary" data-act="view" data-arg="saves">Spielstand laden</button>
-          <button class="secondary" data-act="achv">Erfolge und Bestenliste</button>
-          <button class="secondary" data-act="view" data-arg="settings">Einstellungen</button>
-          <button class="secondary" data-act="view" data-arg="help">Bedienung und Hilfe</button>
-          ${this.standalone ? '' : `<button class="secondary" data-act="install">Als App installieren</button>`}`;
+          ${m ? `<button class="hero" data-act="resume"><span class="ml">Weiterspielen</span><small>Tag ${m.day} · ${m.levelName} · ${eur(m.money)}</small></button>` : ''}
+          ${m ? mi(ICONS.crane, 'Neues Spiel', 'data-act="view" data-arg="new"') : `<button class="hero" data-act="view" data-arg="new"><span class="ml">Neues Spiel</span><small>Baue deinen ersten Hafen</small></button>`}
+          <div class="mgrid">
+            ${mi(ICONS.paste, 'Laden', 'data-act="view" data-arg="saves"')}
+            ${mi(ICONS.trophy, 'Erfolge', 'data-act="achv"')}
+            ${mi(ICONS.tech, 'Einstellungen', 'data-act="view" data-arg="settings"')}
+            ${mi(ICONS.eye, 'Hilfe', 'data-act="view" data-arg="help"')}
+          </div>
+          ${this.standalone ? '' : mi(ICONS.star, 'Als App installieren', 'data-act="install"', 'mbtn install')}`;
         break;
       }
       case 'install': {
@@ -1119,7 +1127,7 @@ export class UI {
           ${back(g.inGame ? 'pause' : 'main')}`;
         break;
     }
-    this.menu.innerHTML = `<div class="dialog menu">${body}</div>`;
+    this.menu.innerHTML = `<div class="dialog menu ${this.menuView === 'main' ? 'mainmenu' : ''}">${body}</div>`;
   }
   showDeals() {
     this.confirmCancel = 0;
@@ -1502,7 +1510,8 @@ export class UI {
     this.bnFix.classList.toggle('hidden', !b);
     if (b) {
       this.bnFix.dataset.k = b;
-      setText(this.bnFix, b === 'trucks' ? `+1 Truck · ${eur(sim.costOf('truck'))}` : b === 'crane' ? 'Kran bauen' : b === 'yard' ? 'Stapelplatz bauen' : 'Gate bauen');
+      setText(this.bnFix, b === 'trucks' ? `+1 Truck` : b === 'crane' ? '+ Kran' : b === 'yard' ? '+ Lager' : '+ Gate');
+      this.bnFix.title = b === 'trucks' ? `Neuen Truck kaufen (${eur(sim.costOf('truck'))})` : 'Passendes Werkzeug wählen';
     }
     this.bnHint.classList.toggle('alert', b !== null || sim.jamShare > 0.2);
     const sum = this.bnCard.querySelector('.bnsum')!;

@@ -162,6 +162,9 @@ import { SCENARIOS } from './scenarios';
 /** Import, Kühlfracht (Import) oder Export */
 export type Cargo = 'imp' | 'rimp' | 'reef' | 'haz' | 'empty' | 'exp' | 'ware' | 'prem' | 'food';
 
+/** Spielminuten als „5:20 h“ */
+const hm = (gm: number) => `${Math.floor(gm / 60)}:${String(Math.round(gm % 60)).padStart(2, '0').replace('60', '59')} h`;
+
 export interface Shop {
   id: number;
   /** Restliche Bauzeit in Spielminuten (0 = fertig) */
@@ -4131,7 +4134,7 @@ export class Sim {
       this.emit(`${s.name} ist mit ${imports} Containern an Bord wieder ausgelaufen. Ruf −3`, 'bad', { tag: 'ship-late', x: this.shipBox(s).x, y: this.shipBox(s).y });
     } else {
       this.rep = Math.max(0, this.rep - 1);
-      this.emit(`${s.name} hat zu lange gelegen (${Math.round(s.atBerth / 60)} h statt ${Math.round(s.dwellTarget / 60)} h). Ruf −1`, 'bad', {
+      this.emit(`${s.name} hat zu lange gelegen (${hm(s.atBerth)} statt ${hm(s.dwellTarget)}). Ruf −1`, 'bad', {
         tag: 'ship-late',
         x: this.shipBox(s).x,
         y: this.shipBox(s).y,
