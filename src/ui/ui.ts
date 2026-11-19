@@ -1,5 +1,4 @@
 import type { Game } from '../game';
-import LOGO from '../assets/logo.webp?inline';
 import { INSURANCE, OVERPASS_LEVEL, PLANT_LEVELS, MAX_ORDERS, ORDER_KINDS,
   BuildTool,
   DIFFS,
@@ -994,7 +993,7 @@ export class UI {
         const last = latestSlot();
         const m = last ? metaOfSlot(last) : null;
         body = `
-          <h1 class="title"><img class="logo" src="${LOGO}" alt="Port Empire" width="280" height="280"></h1>
+          <h1 class="title">Port Empire</h1>
           <p class="sub">Vom Anleger zum Weltklasse-Hafen</p>
           ${note}
           ${m ? `<button class="primary resume" data-act="resume">Weiterspielen<small>Tag ${m.day} · ${m.levelName} · ${eur(m.money)}</small></button>` : ''}

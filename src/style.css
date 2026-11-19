@@ -471,6 +471,3 @@ html, body { touch-action: none; overscroll-behavior: none; }
 .deal .dh { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
 .deal .pm { margin-top: 8px; }
 .deal .progress { margin: 6px 0; }
-.dialog.menu .title { margin: 0 auto; line-height: 0; }
-.dialog.menu .title .logo { width: min(240px, 60vw, 28vh); height: auto; aspect-ratio: 1; border-radius: 22px; box-shadow: 0 8px 24px rgba(0,0,0,.25); display: block; }
-.dialog.menu .title + .sub { text-align: center; margin-top: 4px; }
