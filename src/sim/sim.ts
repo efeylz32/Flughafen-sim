@@ -173,6 +173,9 @@ export type Cargo = 'imp' | 'rimp' | 'reef' | 'haz' | 'empty' | 'exp' | 'ware' |
 /** Spielminuten als „5:20 h“ */
 const hm = (gm: number) => `${Math.floor(gm / 60)}:${String(Math.round(gm % 60)).padStart(2, '0').replace('60', '59')} h`;
 
+/** Höchster Aufschlag auf den Fahrerlohn durch Streik-Forderungen (+50 %) */
+const WAGE_BOOST_MAX = 1.5;
+
 export interface Shop {
   id: number;
   /** Restliche Bauzeit in Spielminuten (0 = fertig) */
@@ -4848,7 +4851,9 @@ export class Sim {
         options: ['Kaufen (60.000 €)', 'Ablehnen'],
       });
     }
-    this.pending = this.pick(list);
+    // Lohnforderungen haben eine Grenze: Ist der Tarif ausgereizt, droht niemand mehr mit Streik
+    const options = list.filter((d) => d.id !== 'strike' || this.wageBoost.driver < WAGE_BOOST_MAX - 0.01);
+    this.pending = this.pick(options);
     this.emit(undefined, 'info', { tag: 'decision' });
   }
 
@@ -4871,8 +4876,11 @@ export class Sim {
       }
       case 'strike':
         if (choice === 0) {
-          this.wageBoost.driver *= 1.1;
-          this.emit('Die Fahrer bekommen 10 % mehr Lohn.', 'info');
+          this.wageBoost.driver = Math.min(WAGE_BOOST_MAX, this.wageBoost.driver * 1.1);
+          this.emit(
+            this.wageBoost.driver >= WAGE_BOOST_MAX - 0.01 ? 'Die Fahrer bekommen 10 % mehr Lohn. Damit ist der Tarif ausgehandelt, weitere Forderungen kommen nicht.' : 'Die Fahrer bekommen 10 % mehr Lohn.',
+            'info',
+          );
         } else {
           this.strikeLeft = 480;
           this.emit('Streik! Die Fahrer arbeiten 8 Stunden lang nicht.', 'bad');
@@ -5382,6 +5390,7 @@ export class Sim {
     if (d.rivalRate) s.rivalRate = d.rivalRate;
     s.lostToRival = d.lostToRival ?? 0;
     if (d.wageBoost) s.wageBoost = { ...s.wageBoost, ...d.wageBoost };
+    for (const r of Object.keys(s.wageBoost) as Role[]) s.wageBoost[r] = Math.min(WAGE_BOOST_MAX, s.wageBoost[r]);
     s.strikeLeft = d.strikeLeft ?? 0;
     s.pending = d.pending ?? null;
     s.stock.set(d.stock);

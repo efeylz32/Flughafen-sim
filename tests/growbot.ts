@@ -76,9 +76,10 @@ export class GrowBot {
     // Verträge: Feeder immer, große nur mit passendem Kai
     // Höchstens ein Vertrag pro Kran, sonst stauen sich die Schiffe
     if ((s.myRate ?? 1) >= 0.4 && s.contracts.length < Math.min(s.maxContracts, s.cranes.length)) {
+      const good = (s.myRate ?? 1) >= 0.8;
       const o =
-        s.offers.find((o) => o.ship === 'mega' && s.hasDeepBerth(8)) ??
-        s.offers.find((o) => o.ship === 'panamax' && s.hasDeepBerth(6)) ??
+        (good ? s.offers.find((o) => o.ship === 'mega' && s.hasDeepBerth(8)) : undefined) ??
+        (good ? s.offers.find((o) => o.ship === 'panamax' && s.hasDeepBerth(6)) : undefined) ??
         s.offers.find((o) => o.ship === 'feeder' && (!o.reefer || s.reeferCapacity >= 12));
       if (o) s.acceptContract(o.id);
     }

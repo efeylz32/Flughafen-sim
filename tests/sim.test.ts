@@ -1891,3 +1891,18 @@ describe('Sonderfracht blockiert den Hafen nicht', () => {
     expect(sim.craneWhy(c)).not.toMatch(/zu langsam/);
   });
 });
+
+describe('Löhne im Endlosspiel', () => {
+  it('Streik-Forderungen erhöhen den Lohn höchstens um 50 %, danach kommen keine mehr', () => {
+    const sim = bigPort(3, 4);
+    for (let i = 0; i < 20; i++) {
+      sim.pending = { id: 'strike', title: '', text: '', options: ['', ''] };
+      sim.resolveDecision(0);
+    }
+    expect(sim.wageBoost.driver).toBeLessThanOrEqual(1.5);
+    // Alte Spielstände mit zu hohem Aufschlag werden gekappt
+    const d = JSON.parse(JSON.stringify(sim.serialize()));
+    d.wageBoost.driver = 6;
+    expect(Sim.deserialize(d).wageBoost.driver).toBe(1.5);
+  });
+});

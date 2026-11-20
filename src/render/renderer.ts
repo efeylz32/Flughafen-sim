@@ -900,7 +900,13 @@ export class Renderer {
           case T.Hazmat: {
             // Gefahrgut: Warnstreifen, rote Umrandung
             g.rect(px, py, TILE, TILE).fill(0xe9d8b4);
-            for (let sx = -TILE; sx < TILE; sx += 10) g.poly([px + sx, py + TILE, px + sx + 5, py + TILE, px + sx + 5 + TILE, py, px + sx + TILE, py]).fill({ color: 0xf2c230, alpha: 0.55 });
+            // Diagonale Warnstreifen, auf das Feld zugeschnitten
+            for (let c = -TILE; c < TILE; c += 10) {
+              const t0 = Math.max(0, -c / TILE);
+              const t1 = Math.min(1, (TILE - c) / TILE);
+              if (t1 <= t0) continue;
+              g.moveTo(px + c + t0 * TILE, py + TILE - t0 * TILE).lineTo(px + c + t1 * TILE, py + TILE - t1 * TILE).stroke({ width: 3.5, color: 0xf2c230, alpha: 0.55 });
+            }
             g.rect(px + 2, py + 2, TILE - 4, TILE - 4).stroke({ width: 2, color: 0xd9473f });
             g.poly([px + TILE - 9, py + 3, px + TILE - 3, py + 3, px + TILE - 6, py + 9]).fill(0xd9473f);
             break;
