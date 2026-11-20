@@ -7,7 +7,7 @@ import { DiffId, GRID_H, GRID_W, LEVELS, MapId, setGridSize } from '../src/sim/d
 import { completion } from '../src/sim/progression';
 import { Sim } from '../src/sim/sim';
 import { GrowBot, helpMilestones } from './growbot';
-import { checkState } from './invariants';
+import { StuckWatch, checkState } from './invariants';
 
 const FULL = (globalThis as unknown as { process?: { env: Record<string, string | undefined> } }).process?.env.PLAYFULL;
 
@@ -32,6 +32,7 @@ function playthrough(map: MapId, diff: DiffId, days: number, opts: { rich?: bool
   const run: Run = { bot, report: [], levels: [], money: [] };
   let last = bot.s.level;
   const saveEvery = opts.saveEvery ?? 30;
+  const watch = new StuckWatch();
   for (let h = 0; h < days * 24; h++) {
     const s = bot.s;
     for (let i = 0; i < 150; i++) s.tick();
@@ -47,7 +48,10 @@ function playthrough(map: MapId, diff: DiffId, days: number, opts: { rich?: bool
       last = bot.s.level;
       run.levels.push(`${last}:T${bot.s.day}`);
     }
-    if (h % 24 === 0) checkState(bot.s, `${map}/${diff} Tag ${bot.s.day}`);
+    if (h % 24 === 0) {
+      checkState(bot.s, `${map}/${diff} Tag ${bot.s.day}`);
+      watch.check(bot.s, `${map}/${diff} Tag ${bot.s.day}`);
+    }
     // Speichern und laden, mit dem geladenen Stand weiterspielen
     if (h % (24 * saveEvery) === 0 && h > 0) {
       const d = JSON.parse(JSON.stringify(bot.s.serialize()));

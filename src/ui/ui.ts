@@ -254,6 +254,12 @@ export class UI {
   private levelEl!: HTMLElement;
   private progModal!: HTMLElement;
   private progBody!: HTMLElement;
+  private progHtml = '';
+  /** Bis wann Fenster nicht automatisch neu gezeichnet werden (Finger liegt auf einem Knopf) */
+  private holdUntil = 0;
+  private get holding(): boolean {
+    return performance.now() < this.holdUntil;
+  }
   private levelBar!: HTMLElement;
   private levelName!: HTMLElement;
   private weatherEl!: HTMLElement;
@@ -346,6 +352,10 @@ export class UI {
   private build() {
     const root = this.root;
     const click = () => this.game.sound.play('click');
+    // Solange gedrückt wird (und kurz danach), Fenster nicht neu zeichnen: sonst verschwindet der Knopf unter dem Finger
+    root.addEventListener('pointerdown', () => (this.holdUntil = performance.now() + 1500), { capture: true });
+    root.addEventListener('pointerup', () => (this.holdUntil = performance.now() + 350), { capture: true });
+    root.addEventListener('pointercancel', () => (this.holdUntil = performance.now() + 350), { capture: true });
 
     // Obere Leiste
     const top = el('div', 'topbar');
@@ -1026,7 +1036,7 @@ export class UI {
     const m = metaOfSlot(slot);
     const name = slot === 'auto' ? 'Autosave' : `Spielstand ${slot}`;
     const info = m
-      ? `Tag ${m.day} · ${m.scenario ? 'Szenario' : DIFFS[m.diff as DiffId]?.name ?? m.diff} · ${m.levelName} · ${eur(m.money)}${m.t ? ` · ${new Date(m.t).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ''}`
+      ? `Tag ${m.day} · ${m.scenario ? 'Szenario' : DIFFS[m.diff as DiffId]?.name ?? m.diff} · ${m.levelName}${m.size ? ` · Karte ${m.size + 1}` : ''} · ${eur(m.money)}${m.t ? ` · ${new Date(m.t).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ''}`
       : 'Leer';
     const c = this.menuConfirm;
     const btns: string[] = [];
@@ -1227,7 +1237,7 @@ export class UI {
     const next = LEVELS[sim.level];
     const ms = MILESTONES[sim.level + 1];
     const comp = completion(sim);
-    this.progBody.innerHTML = `
+    const html = `
       ${
         next
           ? `<h3>Nächste Stufe: ${next.name}</h3>
@@ -1241,6 +1251,14 @@ export class UI {
       <h3>Vollendung ${Math.round(comp.share * 100)} %</h3>
       <p class="sub">Es gibt keinen Sieg. Dein Hafen ist vollendet, wenn alles ausgebaut ist.${sim.completedDay ? ` Geschafft an Tag ${sim.completedDay}.` : ''}</p>
       ${comp.items.map((it) => `<div class="pgrow ${it.value >= it.goal ? 'ok' : ''}"><span>${it.label}</span><b>${num(it.value)} / ${num(it.goal)}</b></div>${bar(it.value, it.goal)}`).join('')}`;
+    // Nur neu zeichnen, wenn sich etwas geändert hat, und die Scroll-Position behalten
+    if (html !== this.progHtml) {
+      const box = this.progModal.querySelector<HTMLElement>('.dialog');
+      const top = box?.scrollTop ?? 0;
+      this.progBody.innerHTML = html;
+      this.progHtml = html;
+      if (box) box.scrollTop = top;
+    }
     this.progModal.classList.remove('hidden');
   }
 
@@ -1611,6 +1629,8 @@ export class UI {
     if (!this.staffModal.classList.contains('hidden')) this.renderStaff(false);
     if (!this.techModal.classList.contains('hidden')) this.renderTech(false);
     if (!this.ctlModal.classList.contains('hidden')) this.renderCtl(false);
+    // Fortschritt live nachführen (Container zählen mit), etwa jede Sekunde
+    if (this.progModal && !this.progModal.classList.contains('hidden') && sim.tickCount % 10 < 2 && !this.holding) this.showProgress();
     this.techBadge.classList.toggle('hidden', !TECH_IDS.some((id) => sim.canBuyTech(id).ok && sim.money > 2 * sim.canBuyTech(id).cost));
 
     // Mission
@@ -1652,7 +1672,7 @@ export class UI {
     setText(sum, b ? `${STAGES.find((s) => s.key === b)!.label} ${Math.round(sim.stats[b] * 100)} %` : 'keiner');
     sum.className = `bnsum ${b ? 'alert' : ''}`;
 
-    if (!this.finCard.classList.contains('hidden')) this.renderFinance(sim);
+    if (!this.finCard.classList.contains('hidden') && !this.holding) this.renderFinance(sim);
     this.updateSheet();
   }
 
@@ -1757,6 +1777,7 @@ export class UI {
   }
 
   private renderStaff(force: boolean) {
+    if (!force && this.holding) return;
     const sim = this.game.sim;
     const roles = Object.keys(ROLES) as Role[];
     const tr = sim.trucks;
@@ -1864,6 +1885,7 @@ export class UI {
   }
 
   private renderCtl(force: boolean) {
+    if (!force && this.holding) return;
     const sim = this.game.sim;
     const fleetKey = this.ctlTab === 'fleet' ? sim.trucks.map((t) => `${t.id}${t.role}${t.agv}${Math.round(t.wear * 10)}${Math.round(t.cap * 10)}${t.build ? 1 : 0}${t.job ? 1 : 0}`).join() + Math.floor(sim.money / 10000) : '';
     const live = this.ctlTab === 'rules' || this.ctlTab === 'fleet' ? fleetKey : sim.tickCount >> 6;
@@ -1955,6 +1977,7 @@ export class UI {
   }
 
   private renderTech(force: boolean) {
+    if (!force && this.holding) return;
     const sim = this.game.sim;
     const key = `${sim.level}|${Math.floor(sim.money / 5000)}|${TECH_IDS.map((id) => sim.tech[id]).join(',')}|${sim.projects.join()}|${sim.projBuild ? Math.ceil(sim.projBuild.left / 60) : ''}|${sim.size}|${this.lawConfirm}`;
     if (!force && key === this.lastTech) return;
@@ -2007,6 +2030,7 @@ export class UI {
   }
 
   private renderDeals(force: boolean) {
+    if (!force && this.holding) return;
     const sim = this.game.sim;
     const key = `${sim.level}|${sim.contracts.map((c) => `${c.id}:${c.calls}:${c.missed ?? 0}:${Math.round(c.next / 6)}`)}|${sim.offers.map((o) => o.id)}|${this.confirmCancel}|${sim.orders.map((o) => `${o.id}:${o.done}`)}|${sim.orderOffers.map((o) => o.id)}`;
     if (!force && key === this.lastDeals) return;
@@ -2228,7 +2252,7 @@ export class UI {
       this.sheetBody.innerHTML = html;
       this.lastSheet = html;
     }
-    if (actions !== this.lastActions) {
+    if (actions !== this.lastActions && !this.holding) {
       this.sheetActions.innerHTML = actions;
       this.lastActions = actions;
     }

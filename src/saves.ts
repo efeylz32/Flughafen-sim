@@ -18,6 +18,8 @@ export interface Meta {
   map: string;
   scenario: string | null;
   status: string;
+  /** Kartengröße 0..2 (fehlt bei alten Spielständen) */
+  size?: number;
 }
 
 interface Stored {
@@ -47,7 +49,7 @@ function read(slot: Slot): Stored | null {
 }
 
 export function metaOf(sim: Sim): Meta {
-  return { t: Date.now(), day: sim.day, level: sim.level, levelName: sim.levelName, money: Math.round(sim.money), diff: sim.sandbox ? 'Sandbox' : sim.diff, map: sim.map, scenario: sim.scenario, status: sim.status };
+  return { t: Date.now(), day: sim.day, level: sim.level, levelName: sim.levelName, money: Math.round(sim.money), diff: sim.sandbox ? 'Sandbox' : sim.diff, map: sim.map, scenario: sim.scenario, status: sim.status, size: sim.size };
 }
 
 export function writeSlot(slot: Slot, sim: Sim): boolean {

@@ -1947,7 +1947,7 @@ export class Sim {
   private takeTruck(t: Truck, factor: number, out: Removed[]) {
     if (t.job) this.cancelJob(t);
     this.trucks = this.trucks.filter((x) => x !== t);
-    if (!t.agv) this.staff.driver = Math.max(0, this.staff.driver - 1);
+    if (!t.agv) this.dropStaff('driver');
     out.push({
       tool: 'truck',
       x: t.tile % GRID_W,
@@ -1962,13 +1962,13 @@ export class Sim {
 
   private takeRtg(r: Rtg, factor: number, out: Removed[]) {
     this.rtgs = this.rtgs.filter((q) => q !== r);
-    this.staff.crane = Math.max(0, this.staff.crane - 1);
+    this.dropStaff('crane');
     out.push({ tool: 'rtg', x: r.x, y: r.y, refund: this.give(this.costOf('rtg'), factor) });
   }
 
   private takeCrane(c: Crane, factor: number, out: Removed[]) {
     this.cranes = this.cranes.filter((x) => x !== c);
-    this.staff.crane = Math.max(0, this.staff.crane - 1);
+    this.dropStaff('crane');
     out.push({ tool: 'crane', x: c.x, y: c.y, refund: this.give(c.paid, factor), upgraded: c.big, model: c.model, paid: c.paid, cap: c.cap, wear: c.wear });
   }
 
@@ -2036,7 +2036,7 @@ export class Sim {
         if (!g) return;
         out.push({ tool: 'gate', x: g.x, y: g.y, refund: this.give(this.costOf('gate'), factor), served: g.served, rot: g.h > g.w });
         this.gates = this.gates.filter((q) => q !== g);
-        this.staff.gate = Math.max(0, this.staff.gate - 1);
+        this.dropStaff('gate');
         for (const f of this.footprintOf(g)) this.kind[f] = T.Land;
         break;
       }
@@ -2045,7 +2045,7 @@ export class Sim {
         if (!sh) return;
         out.push({ tool: 'workshop', x: sh.x, y: sh.y, refund: this.give(this.costOf('workshop'), factor) });
         this.shops = this.shops.filter((q) => q !== sh);
-        this.staff.mech = Math.max(0, this.staff.mech - 1);
+        this.dropStaff('mech');
         for (const f of this.footprintOf(sh)) this.kind[f] = T.Land;
         break;
       }
@@ -3642,6 +3642,11 @@ export class Sim {
   /** Zinsfaktor: Guter Ruf und Pünktlichkeit machen Kredit billiger */
   get rateMul(): number {
     return clamp(1.7 - this.rep / 100 - (this.myRate ?? 0.5) * 0.4, 0.7, 1.6);
+  }
+  /** Eine Arbeitskraft geht mit ihrem Gerät (Abriss). Kranke zählen dann nicht mehr. */
+  private dropStaff(role: Role) {
+    this.staff[role] = Math.max(0, this.staff[role] - 1);
+    while (this.sick[role].length > this.staff[role]) this.sick[role].pop();
   }
   fire(role: Role): BuildCheck {
     if (this.staff[role] <= 0) return { ok: false, reason: 'Niemand angestellt', cost: 0 };
@@ -5503,6 +5508,7 @@ export class Sim {
     if (d.staff) s.staff = { ...s.staff, ...d.staff };
     else s.staff.driver = s.trucks.filter((t) => !t.agv).length;
     if (d.sick) s.sick = { driver: [...d.sick.driver], crane: [...d.sick.crane], gate: [...d.sick.gate], mech: [...(d.sick.mech ?? [])] };
+    for (const r of Object.keys(s.sick) as Role[]) s.sick[r] = s.sick[r].slice(0, s.staff[r]);
     s.nextId = Math.max(s.nextId, ...s.contracts.map((c) => c.id + 1), ...s.offers.map((c) => c.id + 1));
     s.today = { ...emptyBook(), ...d.today };
     s.history = d.history.map((h) => ({ ...emptyBook(), ...h }));

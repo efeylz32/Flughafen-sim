@@ -30,6 +30,31 @@ export function checkState(s: Sim, step: string) {
   for (const g of s.gates) if (g.inApron < 0 || g.emptyIn < 0) bad.push('gate neg');
   for (const r of s.rails) if (r.platform < 0 || r.goods < 0 || r.emptyIn < 0) bad.push('rail neg');
   for (const sh of s.ships) if (!Number.isFinite(sh.x) || !Number.isFinite(sh.y) || sh.containers < 0 || sh.exportLeft < 0) bad.push(`Schiff kaputt ${sh.name}`);
+  // Aufträge zeigen nur auf Dinge, die es noch gibt
+  const has = (kind: string, id: number) =>
+    kind === 'store' ? store.has(s.kind[id]) : kind === 'crane' ? s.cranes.some((c) => c.id === id) : kind === 'gate' ? s.gates.some((g) => g.id === id) : kind === 'plant' ? s.plants.some((p) => p.id === id) : kind === 'rail' ? s.rails.some((r) => r.id === id) : false;
+  for (const t of s.trucks) {
+    const j = t.job;
+    if (!j) continue;
+    if (!has(j.srcKind, j.src) && j.stage === 0) bad.push(`Auftrag von ${j.srcKind} ${j.src}, das es nicht gibt`);
+    if (!has(j.dstKind, j.dst)) bad.push(`Auftrag zu ${j.dstKind} ${j.dst}, das es nicht gibt`);
+    if (j.n <= 0) bad.push('Auftrag ohne Container');
+  }
+  // Gebäude stehen auf ihren Feldern, Schiffe überlappen nicht
+  for (const g of s.gates) for (const f of s.footprintOf(g)) if (s.kind[f] !== T.Gate) bad.push('Gate ohne Feld');
+  for (const p of s.plants) for (const f of s.footprintOf(p)) if (s.kind[f] !== T.Plant) bad.push('Halle ohne Feld');
+  const moored = s.ships.filter((x) => x.state === 'unloading' && x.berthX >= 0);
+  for (let i = 0; i < moored.length; i++)
+    for (let j = i + 1; j < moored.length; j++) {
+      const a1 = moored[i];
+      const b1 = moored[j];
+      if (a1.berthX < b1.berthX + b1.len && b1.berthX < a1.berthX + a1.len) bad.push(`Schiffe überlappen ${a1.name}/${b1.name}`);
+    }
+  for (const r of ['driver', 'crane', 'gate', 'mech'] as const) {
+    if (s.staff[r] < 0) bad.push(`Personal ${r} negativ`);
+    if (s.sick[r].length > s.staff[r]) bad.push(`mehr Kranke als Personal (${r})`);
+  }
+  if (s.contracts.length > Math.max(s.maxContracts, 7)) bad.push('zu viele Verträge');
   const arr = s as unknown as Record<string, Int16Array | Uint16Array | Int32Array>;
   for (const k of ['resOut', 'resIn', 'resOutRail', 'resInExp', 'resOutExp']) {
     const a = arr[k];
@@ -37,4 +62,17 @@ export function checkState(s: Sim, step: string) {
     if (a && a.length !== GRID_W * GRID_H) bad.push(`${k} falsche Länge`);
   }
   if (bad.length) throw new Error(`${step}: ${[...new Set(bad)].slice(0, 8).join('; ')}`);
+}
+
+/** Merkt sich, seit wann ein Truck denselben Auftrag hat. Meldet Trucks, die tagelang festhängen. */
+export class StuckWatch {
+  private since = new WeakMap<object, number>();
+  check(s: Sim, step: string, maxDays = 2) {
+    for (const t of s.trucks) {
+      if (!t.job || t.wear >= 1 || t.build || !t.staffed) continue;
+      const first = this.since.get(t.job);
+      if (first === undefined) this.since.set(t.job, s.gm);
+      else if (s.gm - first > maxDays * 1440) throw new Error(`${step}: Truck ${t.id} hängt seit ${Math.round((s.gm - first) / 1440)} Tagen am selben Auftrag (${t.job.srcKind}→${t.job.dstKind}, Feld ${t.tile}, Stau ${t.stuck.toFixed(0)})`);
+    }
+  }
 }
