@@ -124,6 +124,8 @@ Der Aufstiegsbonus ist klein (30.000 € bis 500.000 €). Löhne steigen je Stu
 - **Szenarien:** Marode übernommen, Insel-Express, Kühlkette, Sturmsaison (25 Schiffe pünktlich an der Sturmküste) und Zollrazzia (400 Container durch den Zoll).
 - **Musik und Feiern:** Ruhige Hintergrundmusik, im Browser erzeugt (Optionen: Musik an/aus). Konfetti beim Aufstieg, bei der Vollendung und bei erfüllten Verträgen und Missionen.
 - **Einstieg:** Die ersten Missionen zeigen mit goldenen Feldern und Pfeil auf der Karte, wo gebaut wird. Gesperrte Werkzeuge erscheinen erst kurz bevor sie frei werden.
+- **Lager ohne Straße:** Lagerfelder, an deren Block keine Straße grenzt, bekommen ein rotes Warnzeichen und zählen nicht als Platz. Kühl- und Gefahrgut belegen höchstens den halben Kranpuffer, damit normale Container immer weiterlaufen.
+- **Endlosspiel fair gehalten:** Lohnerhöhungen aus Streiks höchstens +50 %, die Konkurrenz wird höchstens 88 % pünktlich, Verschleiß so, dass ein Kran im Dauerbetrieb etwa 2,5 Tage hält.
 - **Sturmschäden:** Bei Sturm kann es Kräne treffen. Die Versicherung übernimmt einen Teil.
 - **Erfolge und Bestenliste:** Erfolge und eine lokale Bestenliste der Vollendungen, Szenarien und Tagesaufgaben, gespeichert nur im Browser.
 
@@ -153,6 +155,11 @@ Wenn das Projekt in Cloudflare als **Worker** angelegt ist (Deploy-Befehl `npx w
 4. Node-Version kommt aus `.nvmrc` (22). Speichern und bereitstellen.
 
 Jeder Push baut die Seite neu. `public/_headers` sorgt dafür, dass `sw.js` und `index.html` nicht zwischengespeichert werden, damit Updates ankommen. Beim nächsten Öffnen mit Netz lädt die App die neue Version im Hintergrund, beim übernächsten Start ist sie aktiv.
+
+## Tests
+
+`npm test` prüft Logik, Speichern und Laden, Zufalls-Stresstests und einen kurzen Durchlauf mit beiden Gesetzen auf allen Kartentypen.
+`PLAYFULL=coast,normal,900 npx vitest run tests/fullgame.test.ts -t "Ganzes Spiel"` spielt mit einem Bot bis zu 900 Tage über alle drei Kartengrößen, prüft jeden Tag den Zustand und speichert und lädt regelmäßig.
 
 ## Starten
 
