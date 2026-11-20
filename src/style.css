@@ -28,7 +28,7 @@
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); overscroll-behavior: none; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #0f2747; overscroll-behavior: none; }
 #app { position: fixed; inset: 0; }
 #game { position: absolute; inset: 0; }
 #game canvas { display: block; width: 100%; height: 100%; }
@@ -579,4 +579,11 @@ html, body { touch-action: none; overscroll-behavior: none; }
 @media (max-width: 759px) {
   .toasts { top: auto; bottom: calc(var(--safe-b) + 172px); flex-direction: column-reverse; width: calc(100vw - 32px); }
   #hud:has(.ghostbar:not(.hidden)) .toasts, #hud:has(.tipcard:not(.hidden)) .toasts { bottom: calc(var(--safe-b) + 290px); }
+}
+
+/* Als installierte App (iPhone): bis ganz nach unten über den Home-Balken reichen.
+   Ohne Browserleisten ist die große Viewport-Höhe genau der ganze Bildschirm. */
+@media (display-mode: standalone), (display-mode: fullscreen) {
+  html, body { height: 100vh; height: 100lvh; }
+  #app { bottom: auto; height: 100vh; height: 100lvh; }
 }

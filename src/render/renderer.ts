@@ -256,6 +256,12 @@ export class Renderer {
       autoDensity: true,
     });
     host.appendChild(this.app.canvas);
+    // Größe folgt dem Spielbereich, nicht nur dem Fenster: Als App auf dem iPhone ändert sich die
+    // Höhe beim Start oft ohne Fenster-Ereignis, sonst bleibt unten ein leerer Streifen
+    const refit = () => this.app.resize();
+    new ResizeObserver(refit).observe(host);
+    window.visualViewport?.addEventListener('resize', refit);
+    window.addEventListener('orientationchange', () => setTimeout(refit, 250));
     this.app.canvas.style.touchAction = 'none';
 
     this.makeTextures();
