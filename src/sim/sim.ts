@@ -4803,7 +4803,8 @@ export class Sim {
   /** Hafen Nordstadt wird langsam besser und wirbt Reedereien ab, wenn du schlechter bist. */
   private updateRival() {
     if (this.level < 2) return;
-    this.rivalRate = Math.min(0.95, this.rivalRate + 0.004);
+    // Die Konkurrenz wird besser, aber nicht unschlagbar: Im Endlosspiel reichen dauerhaft 78 % Pünktlichkeit
+    this.rivalRate = Math.min(0.88, this.rivalRate + 0.004);
     const mine = this.myRate;
     if (mine === null || mine >= this.rivalRate - 0.1 || !this.contracts.length) return;
     if (this.rnd() > 0.5) return;
@@ -5387,7 +5388,7 @@ export class Sim {
     if (d.railX) s.railX.set(d.railX);
     if (d.owned) s.owned.set(d.owned);
     s.plotsBought = d.plotsBought ?? 0;
-    if (d.rivalRate) s.rivalRate = d.rivalRate;
+    if (d.rivalRate) s.rivalRate = Math.min(0.88, d.rivalRate);
     s.lostToRival = d.lostToRival ?? 0;
     if (d.wageBoost) s.wageBoost = { ...s.wageBoost, ...d.wageBoost };
     for (const r of Object.keys(s.wageBoost) as Role[]) s.wageBoost[r] = Math.min(WAGE_BOOST_MAX, s.wageBoost[r]);
