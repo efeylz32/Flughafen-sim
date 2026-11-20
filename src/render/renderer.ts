@@ -121,6 +121,7 @@ interface ShipView {
   body: Container;
   cargo: Sprite[];
   alert: Graphics;
+  label: Container;
   filled: number;
   len: number;
 }
@@ -242,6 +243,8 @@ export class Renderer {
   }
 
   private terrainAt = -1;
+  /** Menü-Hintergrund: nur der Hafen, keine Markierungen */
+  private calm = false;
 
   async init(host: HTMLElement) {
     this.app = new Application();
@@ -924,7 +927,7 @@ export class Renderer {
     // Lagerzweck: farbiges Band unten am Stapelfeld
     for (let i = 0; i < sim.yardUse.length; i++) {
       const u = sim.yardUse[i];
-      if (!u || sim.kind[i] !== T.Yard) continue;
+      if (this.calm || !u || sim.kind[i] !== T.Yard) continue;
       const px = (i % GRID_W) * TILE;
       const py = ((i / GRID_W) | 0) * TILE;
       g.rect(px + 2, py + TILE - 5, TILE - 4, 3).fill(YARD_USES[u].color);
@@ -932,7 +935,7 @@ export class Renderer {
     // Zonen: Lagerfelder mit farbigem Rand, Gebäude mit farbiger Ecke
     for (let i = 0; i < sim.zone.length; i++) {
       const z = sim.zone[i];
-      if (!z || (sim.kind[i] !== T.Yard && sim.kind[i] !== T.Reefer && sim.kind[i] !== T.Hazmat && sim.kind[i] !== T.Empty)) continue;
+      if (this.calm || !z || (sim.kind[i] !== T.Yard && sim.kind[i] !== T.Reefer && sim.kind[i] !== T.Hazmat && sim.kind[i] !== T.Empty)) continue;
       const px = (i % GRID_W) * TILE;
       const py = ((i / GRID_W) | 0) * TILE;
       g.rect(px + 2.5, py + 2.5, TILE - 5, TILE - 5).stroke({ width: 2.2, color: ZONES[z].color });
@@ -943,7 +946,7 @@ export class Renderer {
       g.roundRect(x * TILE + 1, y * TILE + 1, 11, 11, 2.5).fill(0xffffff);
       g.roundRect(x * TILE + 2.5, y * TILE + 2.5, 8, 8, 2).fill(ZONES[z].color);
     };
-    for (const e of [...sim.gates, ...sim.plants, ...sim.rails]) tag(e.x, e.y, e.zone);
+    if (!this.calm) for (const e of [...sim.gates, ...sim.plants, ...sim.rails]) tag(e.x, e.y, e.zone);
 
     // Überführungen: helles Deck mit Schatten und Geländer über der Kreuzung
     for (let i = 0; i < sim.overpass.length; i++) {
@@ -975,7 +978,7 @@ export class Renderer {
 
     // Land, das dir noch nicht gehört: abgedunkelt mit Grenzlinie
     for (let x = 0; x < GRID_W; x++) {
-      if (sim.owned[x]) continue;
+      if (this.calm || sim.owned[x]) continue;
       g.rect(x * TILE, COAST, TILE, H - COAST).fill({ color: 0x14263d, alpha: 0.28 });
       if (x === 0 || sim.owned[x - 1]) {
         for (let y = COAST; y < H; y += 14) g.rect(x * TILE - 1, y, 2.5, 8).fill({ color: 0xffffff, alpha: 0.85 });
@@ -984,7 +987,7 @@ export class Renderer {
 
     // Ausgebaggerte Fahrrinne vor dem Kai: dunkleres Wasser mit Bojen an den Rändern
     for (let q = 0; q < Q_MAX; q++) {
-      if (!sim.depth[q]) continue;
+      if (this.calm || !sim.depth[q]) continue;
       const r = this.channelRect(q);
       if (!r) continue;
       g.rect(r.x, r.y, r.w, r.h).fill({ color: 0x0c3560, alpha: 0.4 });
@@ -1341,7 +1344,7 @@ export class Renderer {
     const rotor = new Container();
     rotor.addChild(wake, body);
     root.addChild(rotor, label, alert);
-    return { root, rotor, wake, body, cargo, alert, filled: -1, len: L };
+    return { root, rotor, wake, body, cargo, alert, label, filled: -1, len: L };
   }
 
   private syncShips(sim: Sim, a: number, view: View) {
@@ -1385,6 +1388,7 @@ export class Renderer {
       // Leichtes Schaukeln am Liegeplatz, stärker bei Sturm
       v.body.position.y = moving ? 0 : Math.sin(view.time * 1.4 + s.id) * (0.5 + this.stormA * 1.5);
       v.alert.visible = s.blocked && !view.calm;
+      v.label.visible = !view.calm;
       if (s.blocked) v.alert.scale.set(1 + Math.sin(view.time * 6) * 0.12);
     }
     for (const [id, v] of this.ships) {
@@ -1484,6 +1488,7 @@ export class Renderer {
           (t.py + (t.fy - t.py) * a + 0.5) * TILE + Math.cos(v.rot) * v.lat,
         );
       v.brake.visible = t.stuck > 0;
+      v.badge.visible = !view.calm;
       const key = t.load + t.cargo + t.role + t.zone;
       if (key !== v.key) {
         v.key = key;
@@ -1747,6 +1752,11 @@ export class Renderer {
     if (this.baseMap !== sim.map) this.drawBase(sim.map);
     // Beim Malen (Straße ziehen) höchstens alle 60 ms neu zeichnen, sonst ruckelt es am Handy
     const throttle = view.painting && view.time - this.terrainAt < 0.06;
+    // Menü-Hintergrund an/aus: Karte ohne bzw. mit Spielmarkierungen neu zeichnen
+    if (!!view.calm !== this.calm) {
+      this.calm = !!view.calm;
+      this.version = -1;
+    }
     if (this.version !== sim.version && !throttle) {
       this.terrainAt = view.time;
       this.drawTerrain(sim);

@@ -143,8 +143,8 @@ export class Game {
       // Drohnenflug: langsames Gleiten und leichtes Zoomen
       const t = this.time;
       const r = this.renderer;
-      r.panBy(Math.cos(t * 0.11) * 30 * dtSec, Math.sin(t * 0.17) * 9 * dtSec);
-      r.zoomAt(window.innerWidth / 2, window.innerHeight / 2, Math.exp(Math.cos(t * 0.07) * 0.018 * dtSec * 6));
+      r.panBy(Math.cos(t * 0.06) * 14 * dtSec, Math.sin(t * 0.09) * 5 * dtSec);
+      r.zoomAt(window.innerWidth / 2, window.innerHeight / 2, Math.exp(Math.cos(t * 0.04) * 0.012 * dtSec * 6));
     }
     if (this.speed > 0) {
       this.acc += dtSec * TICKS_PER_SEC * this.speed;
@@ -444,7 +444,8 @@ export class Game {
     this.resetTransient();
     this.setTool('view');
     this.fitCamera();
-    this.setSpeed(2);
+    // Gemächlich: halbes Spieltempo, damit der Hafen im Hintergrund ruhig wirkt
+    this.setSpeed(0.5);
   }
   endShowcase() {
     this.showcase = false;
