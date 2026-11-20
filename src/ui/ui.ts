@@ -13,6 +13,7 @@ import { INSURANCE, OVERPASS_LEVEL, PLANT_LEVELS, MAX_ORDERS, ORDER_KINDS,
   Role,
   GATE_APRON_CAP,
   LEVELS,
+  LAWS,
   LEVEL_NEWS,
   PLANTS,
   ROLE_NAMES,
@@ -321,6 +322,8 @@ export class UI {
   private ghostKey = '';
   private usedPick!: HTMLElement;
   private techModal!: HTMLElement;
+  /** Reiter im Ausbau-Fenster */
+  private techTab: 'tech' | 'proj' | 'law' = 'tech';
   private lawConfirm = false;
   private techBody!: HTMLElement;
   private techBadge!: HTMLElement;
@@ -772,12 +775,28 @@ export class UI {
 
     // Verbesserungen
     this.techModal = el('div', 'modal hidden');
-    this.techModal.innerHTML = `<div class="dialog deals"><div class="dhead"><h2>Ausbau</h2><button class="x" aria-label="Schließen">${ICONS.close}</button></div><div class="body"></div></div>`;
+    this.techModal.innerHTML = `<div class="dialog deals ausbau"><div class="dhead"><h2>Ausbau</h2><button class="x" aria-label="Schließen">${ICONS.close}</button></div><div class="atabs">${[
+      ['tech', 'Technik'],
+      ['proj', 'Großprojekte'],
+      ['law', 'Erweiterung'],
+    ]
+      .map(([k, n]) => `<button data-atab="${k}">${n}<i class="adot"></i></button>`)
+      .join('')}</div><div class="body"></div></div>`;
     this.techBody = this.techModal.querySelector('.body')!;
     this.techModal.querySelector('.x')!.addEventListener('click', () => this.techModal.classList.add('hidden'));
     this.techModal.addEventListener('click', (e) => {
       const t = e.target as HTMLElement;
       if (t === this.techModal) return this.techModal.classList.add('hidden');
+      const at = t.closest<HTMLElement>('[data-atab]');
+      if (at) {
+        this.techTab = at.dataset.atab as typeof this.techTab;
+        this.lawConfirm = false;
+        this.renderTech(true);
+        this.techBody.scrollTop = 0;
+        (this.techBody.closest('.dialog') as HTMLElement).scrollTop = 0;
+        click();
+        return;
+      }
       const b = t.closest<HTMLElement>('[data-tech]');
       if (b) {
         this.game.buyTech(b.dataset.tech as TechId);
@@ -1984,54 +2003,89 @@ export class UI {
   private renderTech(force: boolean) {
     if (!force && this.holding) return;
     const sim = this.game.sim;
-    const key = `${sim.level}|${Math.floor(sim.money / 5000)}|${TECH_IDS.map((id) => sim.tech[id]).join(',')}|${sim.projects.join()}|${sim.projBuild ? Math.ceil(sim.projBuild.left / 60) : ''}|${sim.size}|${this.lawConfirm}`;
+    const pb = sim.projBuild;
+    const key = `${this.techTab}|${sim.level}|${Math.floor(sim.money / 5000)}|${TECH_IDS.map((id) => sim.tech[id]).join(',')}|${sim.projects.join()}|${pb ? Math.ceil(pb.left / 60) : ''}|${sim.size}|${this.lawConfirm}`;
     if (!force && key === this.lastTech) return;
     this.lastTech = key;
-    // Großprojekte: einmalig, teuer, mit Bauzeit
-    const pb = sim.projBuild;
-    const projects = PROJECT_IDS.map((id) => {
-      const p = PROJECTS[id];
-      const done = sim.hasProject(id);
-      const building = pb?.id === id;
-      const chk = sim.canStartProject(id);
-      const btn = done
-        ? '<span class="tag good">gebaut</span>'
-        : building
-          ? `<div class="progress"><span style="width:${Math.round((1 - pb!.left / (p.days * 1440)) * 100)}%"></span></div><div class="sub">Im Bau, noch ${Math.ceil(pb!.left / 1440 * 10) / 10} Tage</div>`
-          : sim.level < p.level
-            ? `<div class="locknote">${ICONS.lock}<span>Ab Hafenstufe ${p.level} (${LEVELS[p.level - 1].name})</span></div>`
-            : `<button class="primary" data-proj="${id}" ${chk.ok ? '' : 'disabled'}>Bauen · ${eur(sim.projectCost(id))} · ${p.days} Tage</button>${chk.ok ? '' : `<div class="sub">${chk.reason}</div>`}`;
-      return `<div class="deal tech ${done ? 'done' : ''}"><div class="dl"><b>${p.name}</b></div><div class="sub">${p.text}</div>${btn}</div>`;
-    }).join('');
-    // Hafenerweiterungsgesetz: größere Karte, der alte Hafen wird verkauft
-    const law = sim.nextLaw;
-    const lawChk = sim.canExpand();
-    const sale = Math.round(sim.portValue() * 0.5);
-    const lawHtml = law
-      ? `<div class="deal tech law"><div class="dl wrap"><b>${law.name}</b><span class="tag">Karte ${sim.size + 1} → ${sim.size + 2} von ${MAP_SIZES.length}</span></div>
-        <div class="sub">Neue, größere Karte vom selben Typ: ${MAP_SIZES[sim.size + 1].join(' × ')} statt ${MAP_SIZES[sim.size].join(' × ')} Felder, Hügel und Küste neu gewürfelt. Dein jetziger Hafen wird für etwa ${eur(sale)} verkauft. Stufe, Geld, Verbesserungen, Großprojekte, Ruf und alle Zähler bleiben. Verträge enden ohne Strafe, Personal stellst du beim Bauen neu ein.</div>
+    // Reiter: markiert, wo man gerade etwas kaufen kann
+    const can = {
+      tech: TECH_IDS.some((id) => sim.canBuyTech(id).ok),
+      proj: !pb && PROJECT_IDS.some((id) => sim.canStartProject(id).ok),
+      law: sim.canExpand().ok,
+    };
+    for (const b of this.techModal.querySelectorAll<HTMLElement>('[data-atab]')) {
+      const k = b.dataset.atab as keyof typeof can;
+      b.classList.toggle('on', k === this.techTab);
+      b.classList.toggle('can', can[k]);
+    }
+    const lock = (lv: number) => `<span class="tlock" title="${LEVELS[lv - 1].name}">${ICONS.lock}<span>ab Hafenstufe ${lv}</span></span>`;
+    const short = (v: number) => (v >= 1_000_000 ? `${(v / 1_000_000).toLocaleString('de-DE', { maximumFractionDigits: 1 })} Mio. €` : eur(v));
+    let html = '';
+    if (this.techTab === 'tech') {
+      const row = (id: TechId) => {
+        const t = TECH[id];
+        const n = sim.tech[id];
+        const max = t.cost.length;
+        const dots = max > 1 ? `<span class="dots">${Array.from({ length: max }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('')}</span>` : '';
+        const chk = sim.canBuyTech(id);
+        const act =
+          n >= max
+            ? `<span class="tdone">${max > 1 ? 'voll' : 'aktiv'}</span>`
+            : sim.level < t.level[n]
+              ? lock(t.level[n])
+              : `<button class="primary tbuy" data-tech="${id}" ${chk.ok ? '' : 'disabled'}><span>${max > 1 ? `Stufe ${n + 1}` : 'Kaufen'}</span><small>${short(sim.techCost(id))}</small></button>`;
+        return `<div class="trow ${n >= max ? 'max' : ''}"><div class="ti"><div class="tn"><b>${t.name}</b>${dots}</div><small class="tper">${max > 1 ? `Pro Stufe ${t.per}` : t.per}</small><small>${t.text}</small></div><div class="ta">${act}</div></div>`;
+      };
+      const main = TECH_IDS.filter((id) => id !== 'akkord' && id !== 'diesel');
+      const bought = main.reduce((n, id) => n + Math.min(sim.tech[id], TECH[id].cost.length), 0);
+      const total = main.reduce((n, id) => n + TECH[id].cost.length, 0);
+      html = `<p class="sub">Gilt für den ganzen Hafen. Jede Stufe kostet mehr und kommt mit der Hafenstufe. <b>${bought} von ${total}</b> Stufen gekauft.</p>
+        <div class="tlist">${main.map(row).join('')}</div>
+        <h3>Tauschgeschäfte</h3><p class="sub">Bringen etwas, kosten aber an anderer Stelle. Zählen nicht zur Vollendung.</p>
+        <div class="tlist">${(['akkord', 'diesel'] as TechId[]).map(row).join('')}</div>`;
+    } else if (this.techTab === 'proj') {
+      const built = PROJECT_IDS.filter((id) => sim.hasProject(id)).length;
+      const cur = pb
+        ? `<div class="deal tech building"><div class="dl"><b>Im Bau: ${PROJECTS[pb.id].name}</b></div><div class="progress"><span style="width:${Math.round((1 - pb.left / (PROJECTS[pb.id].days * 1440)) * 100)}%"></span></div><div class="sub">Noch ${Math.ceil((pb.left / 1440) * 10) / 10} Tage. Erst danach kann das nächste Projekt starten.</div></div>`
+        : '';
+      html = `<p class="sub">Einmalig und teuer, dafür dauerhaft. Es wird immer nur ein Projekt gleichzeitig gebaut. <b>${built} von ${PROJECT_IDS.length}</b> gebaut.</p>${cur}
+        <div class="tlist">${PROJECT_IDS.map((id) => {
+          const p = PROJECTS[id];
+          const done = sim.hasProject(id);
+          const chk = sim.canStartProject(id);
+          const act = done
+            ? '<span class="tdone">gebaut</span>'
+            : pb?.id === id
+              ? '<span class="tdone busy">im Bau</span>'
+              : sim.level < p.level
+                ? lock(p.level)
+                : `<button class="primary tbuy" data-proj="${id}" ${chk.ok ? '' : 'disabled'}><span>Bauen</span><small>${short(sim.projectCost(id))}</small></button>`;
+          const why = !done && pb?.id !== id && sim.level >= p.level && !chk.ok && chk.reason && !pb ? `<small class="twhy">${chk.reason}</small>` : '';
+          return `<div class="trow ${done ? 'max' : ''}"><div class="ti"><div class="tn"><b>${p.name}</b></div><small>${p.text}</small><small class="tper">${p.days} Tage Bauzeit</small>${why}</div><div class="ta">${act}</div></div>`;
+        }).join('')}</div>`;
+    } else {
+      const law = sim.nextLaw;
+      const lawChk = sim.canExpand();
+      const sale = Math.round(sim.portValue() * 0.5);
+      const steps = MAP_SIZES.map((sz, i) => {
+        const st = i < sim.size ? 'past' : i === sim.size ? 'now' : 'next';
+        const need = i > 0 ? LAWS[i - 1].level : 0;
+        return `<div class="mstep ${st}"><b>Karte ${i + 1}</b><span>${sz.join(' × ')} Felder</span><small>${st === 'now' ? 'du bist hier' : st === 'past' ? 'hinter dir' : `ab Hafenstufe ${need}`}</small></div>`;
+      }).join('<span class="marrow">›</span>');
+      html = `<p class="sub">Per Gesetz auf eine größere Karte vom selben Typ ziehen. Der alte Hafen wird verkauft, du baust neu und größer.</p><div class="msteps">${steps}</div>${
+        law
+          ? `<div class="deal tech law"><div class="dl"><b>${law.name}</b></div>
+        <div class="sub">${MAP_SIZES[sim.size + 1].join(' × ')} statt ${MAP_SIZES[sim.size].join(' × ')} Felder, Hügel und Küste neu gewürfelt. Dein jetziger Hafen wird für etwa ${eur(sale)} verkauft.</div>
+        <ul class="lawkeep"><li><b>Bleibt:</b> Stufe, Geld, Technik, Großprojekte, Ruf, alle Zähler</li><li><b>Endet:</b> Verträge (ohne Strafe), Personal stellst du beim Bauen neu ein</li></ul>
         ${
           sim.level < law.level
             ? `<div class="locknote">${ICONS.lock}<span>Ab Hafenstufe ${law.level} (${LEVELS[law.level - 1].name})</span></div>`
             : `<button class="${this.lawConfirm ? 'danger' : 'primary'}" data-law="1" ${lawChk.ok ? '' : 'disabled'}>${this.lawConfirm ? `Wirklich beschließen? Der Hafen wird verkauft` : `Beschließen · ${eur(law.cost)}`}</button>${lawChk.ok ? '' : `<div class="sub">${lawChk.reason}</div>`}`
         }</div>`
-      : `<p class="sub">Du baust schon auf der größten Karte (${MAP_SIZES[sim.size].join(' × ')} Felder).</p>`;
-    this.techBody.innerHTML =
-      `<h3>Hafenerweiterung</h3>${lawHtml}<h3>Großprojekte</h3><p class="sub">Einmalig und teuer, dafür dauerhaft. Es wird immer nur ein Projekt gleichzeitig gebaut.</p>${projects}<h3>Verbesserungen</h3><p class="sub">Kleine Verbesserungen für den ganzen Hafen. Jede Stufe kostet mehr und wird mit der Hafenstufe freigeschaltet.</p>` +
-      TECH_IDS.map((id) => {
-        const t = TECH[id];
-        const n = sim.tech[id];
-        const max = t.cost.length;
-        const dots = Array.from({ length: max }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('');
-        const chk = sim.canBuyTech(id);
-        const btn =
-          n >= max
-            ? '<span class="tag">voll ausgebaut</span>'
-            : sim.level < t.level[n]
-              ? `<div class="locknote">${ICONS.lock}<span>Stufe ${n + 1} ab Hafenstufe ${t.level[n]}</span></div>`
-              : `<button class="primary" data-tech="${id}" ${chk.ok ? '' : 'disabled'}>Stufe ${n + 1} · ${eur(sim.techCost(id))}</button>`;
-        return `<div class="deal tech"><div class="dl"><b>${t.name}</b><span class="dots">${dots}</span></div><div class="sub">${t.text} Pro Stufe ${t.per}.</div>${btn}</div>`;
-      }).join('');
+          : `<p class="sub">Du baust schon auf der größten Karte.</p>`
+      }`;
+    }
+    this.techBody.innerHTML = html;
   }
 
   private renderDeals(force: boolean) {
