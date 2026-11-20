@@ -648,3 +648,61 @@ html, body { touch-action: none; overscroll-behavior: none; }
 .deal .progress { height: 10px; border-radius: 5px; background: #e6ebf2; overflow: hidden; }
 .deal .progress span { display: block; height: 100%; background: linear-gradient(90deg, #f6b42c, #ffd25a); }
 #hud .dialog:not(.menu) .danger { background: linear-gradient(180deg, #e65a52, #c43c35); color: #fff; box-shadow: 0 4px 0 #7c1e1a; border: 0; border-radius: 12px; padding: 12px; font-family: var(--display); font-weight: 800; }
+
+/* Alles, was über der Werkzeugleiste schwebt, richtet sich nach ihrer gemessenen Höhe (--bar-h) */
+#hud .sheet { bottom: calc(var(--bar-h, 160px) + 10px); max-height: calc(100% - var(--bar-h, 160px) - 150px); }
+#hud .ghostbar { bottom: calc(var(--bar-h, 160px) + 10px); }
+#hud .tipcard { bottom: calc(var(--bar-h, 160px) + 120px); }
+@media (max-width: 759px) {
+  #hud .toasts { bottom: calc(var(--bar-h, 160px) + 12px); }
+  #hud:has(.ghostbar:not(.hidden)) .toasts, #hud:has(.tipcard:not(.hidden)) .toasts, #hud:has(.sheet:not(.hidden)) .toasts { bottom: auto; top: calc(var(--safe-t) + 110px); }
+}
+
+.deal.tech .dl.wrap { flex-wrap: wrap; row-gap: 4px; }
+.deal.tech .dl.wrap b { flex: 1 1 auto; min-width: 0; }
+
+/* Handy quer: wenig Höhe. Werkzeugleiste in einer Zeile, Karten zugeklappt, Seitenknöpfe zweispaltig, Infoblatt rechts. */
+@media (max-height: 500px) and (orientation: landscape) {
+  #hud .toolbar { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 10px; row-gap: 6px; align-items: center; padding-top: 6px; padding-bottom: calc(var(--safe-b) + 6px); border-radius: 18px 18px 0 0; }
+  #hud .toolbar > :not(.tabs):not(.tools) { grid-column: 1 / -1; }
+  #hud .tabs { display: grid; grid-template-columns: repeat(3, auto); gap: 4px; justify-content: start; overflow: visible; }
+  #hud .tab { padding: 5px 9px; font-size: 12px; border-radius: 9px; }
+  #hud .tools { justify-content: flex-start; gap: 6px; }
+  #hud .tool { width: 60px; padding: 4px 2px 3px; border-radius: 12px; gap: 1px; }
+  #hud .tool .ico { width: 32px; height: 32px; border-radius: 10px; }
+  #hud .tool .ico svg { width: 19px; height: 19px; }
+  #hud .tool b { font-size: 11px; line-height: 1.1; text-align: center; }
+  #hud .tool small { font-size: 10px; }
+  #hud .topbar { top: calc(var(--safe-t) + 6px); }
+  #hud .pill { height: 36px; font-size: 14px; }
+  #hud .pill.small { height: 26px; font-size: 12px; }
+  #hud .spd { height: 28px; }
+  #hud .left { top: calc(var(--safe-t) + 48px); width: min(300px, 40vw); gap: 6px; max-height: calc(100% - var(--bar-h, 110px) - var(--safe-t) - 56px); overflow-y: auto; scrollbar-width: none; }
+  #hud .mission { cursor: pointer; padding: 7px 10px; }
+  #hud .mission .mtext, #hud .mission .skip { display: none; }
+  #hud .mission.open .mtext, #hud .mission.open .skip { display: block; }
+  #hud .mission .flag { width: 26px; height: 26px; border-radius: 8px; }
+  #hud .mission .mtitle { font-size: 13.5px; }
+  #hud .bn { padding: 6px 10px; }
+  #hud .bn .ctitle { margin: 0; }
+  #hud .bn:not(.open) .rows, #hud .bn:not(.open) .hint { display: none; }
+  #hud .side { top: calc(var(--safe-t) + 50px); gap: 6px; flex-wrap: wrap-reverse; align-content: flex-start; max-height: calc(100% - var(--bar-h, 110px) - var(--safe-t) - 58px); }
+  #hud .roundbtn { width: 38px; height: 38px; border-radius: 11px; }
+  #hud .roundbtn svg { width: 20px; height: 20px; }
+  #hud .sheet { left: auto; right: calc(var(--safe-r) + 104px); transform: none; top: calc(var(--safe-t) + 48px); bottom: calc(var(--bar-h, 110px) + 8px); max-height: none; width: min(400px, calc(100vw - var(--safe-l) - var(--safe-r) - 124px)); }
+  #hud .ghostbar { padding: 8px 10px; gap: 6px; }
+  #hud .tipcard { bottom: calc(var(--bar-h, 110px) + 10px); left: auto; right: calc(var(--safe-r) + 104px); transform: none; width: min(380px, calc(100vw - 140px)); }
+  #hud .toasts { top: calc(var(--safe-t) + 50px); bottom: auto; flex-direction: column; width: min(380px, calc(100vw - 440px)); }
+  #hud:has(.ghostbar:not(.hidden)) .toasts, #hud:has(.tipcard:not(.hidden)) .toasts, #hud:has(.sheet:not(.hidden)) .toasts { top: calc(var(--safe-t) + 50px); bottom: auto; }
+  #hud .modal { padding: 8px calc(var(--safe-r) + 8px) 8px calc(var(--safe-l) + 8px); }
+  #hud .modal .dialog { max-height: 100%; }
+  /* Hauptmenü: links das Logo, rechts die Knöpfe, scrollt bei Bedarf */
+  #hud .dialog.menu.mainmenu { width: min(640px, 100%); display: grid; grid-template-columns: minmax(180px, 230px) minmax(0, 1fr); column-gap: 18px; row-gap: 0; align-content: center; overflow: auto; max-height: 100%; padding: 14px 18px; }
+  #hud .dialog.menu.mainmenu > .brand { grid-column: 1; grid-row: 1 / span 12; align-self: center; margin: 0; }
+  #hud .dialog.menu.mainmenu > :not(.brand) { grid-column: 2; margin-bottom: 8px; }
+  #hud .dialog.menu.mainmenu > .mfoot { margin: 0; }
+  #hud .dialog.menu.mainmenu .hero { padding: 9px 12px 8px; font-size: 19px; }
+  #hud .dialog.menu.mainmenu .mgrid { gap: 8px; }
+  #hud .dialog.menu.mainmenu .mgrid .mbtn { flex-direction: row; gap: 8px; padding: 9px 8px; font-size: 15px; }
+  #hud .dialog.menu.mainmenu .mgrid .mbtn .mi svg { width: 20px; height: 20px; }
+}

@@ -635,7 +635,7 @@ export const EMPTY_IN_COST = 40;
 export const RAIL_EMPTIES = 10;
 
 /** Stellplätze pro Parkplatz-Feld */
-export const PARK_SLOTS = 4;
+export const PARK_SLOTS = 3;
 
 /** Hafenerweiterungsgesetze: neue, größere Karte vom selben Typ. Index = Zielgröße − 1. */
 export const LAWS = [

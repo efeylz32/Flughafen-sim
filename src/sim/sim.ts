@@ -2974,6 +2974,11 @@ export class Sim {
   }
 
   /** Ein Schritt Richtung Zielfeld: Weg suchen, Spur prüfen, fahren. 'lost' heißt: kein Weg. */
+  /** Richtung eines Schritts zwischen zwei Nachbarfeldern: 0 Ost, 1 Süd, 2 West, 3 Nord */
+  static stepDir(a: number, b: number): number {
+    return b === a + 1 ? 0 : b === a + GRID_W ? 1 : b === a - 1 ? 2 : 3;
+  }
+
   private driveTo(t: Truck, tgt: number, dt: number): 'ok' | 'lost' {
     if (t.next < 0) {
       const d = this.distMap(tgt);
@@ -3015,11 +3020,16 @@ export class Sim {
         this.roadJam[t.tile] += dt;
         return 'ok';
       }
-      // Auf Einbahnstraßen gibt es zwei Spuren: der zweite Truck nimmt die linke
+      // Mehrspurig (Doppelspur, Autobahn, Einbahnstraße): der nächste Truck nimmt die freie Spur daneben
       t.slot = 0;
-      if (this.oneway[pick] === pickDir && this.lane[pick * 4 + pickDir] > 0) {
-        const taken = this.trucks.some((o) => o !== t && o.slot === 0 && (o.next === pick || (o.tile === pick && o.dir === pickDir)));
-        t.slot = taken ? 1 : 0;
+      const cap = this.laneCap(pick, pickDir);
+      if (cap > 1 && this.lane[pick * 4 + pickDir] > 0) {
+        let used = 0;
+        for (const o of this.trucks) {
+          if (o === t) continue;
+          if ((o.tile === pick && o.dir === pickDir) || (o.next === pick && Sim.stepDir(o.tile, pick) === pickDir)) used |= 1 << o.slot;
+        }
+        while (t.slot < cap - 1 && used & (1 << t.slot)) t.slot++;
       }
       this.lane[pick * 4 + pickDir]++;
       t.next = pick;
@@ -3291,7 +3301,14 @@ export class Sim {
       if (this.trucks.every((t) => t.job || t.wear >= 1 || !t.staffed)) return 'Puffer voll: Kein freier Truck holt ab. Kaufe Trucks oder gib welchen die Rolle „Kran räumen“.';
       return 'Puffer voll: Trucks sind unterwegs, aber zu langsam. Prüfe Wege und Staus.';
     }
-    if (c.state === 'working') return 'Arbeitet am Schiff.';
+    const ship = this.shipAtBerth(q);
+    if (c.state === 'working') {
+      if (!ship) return 'Arbeitet am Schiff.';
+      const imp = ship.containers + ship.reefers + ship.haz;
+      const parts = [imp ? `noch ${imp} zum Entladen` : '', ship.exportLeft ? `${ship.exportLeft} Export zum Laden` : ''].filter(Boolean);
+      return `${ship.name}: ${parts.join(', ') || 'gleich fertig'}.`;
+    }
+    if (ship && ship.exportLeft > 0) return `${ship.name} wartet auf Export-Container. Sie kommen über das Gate, Trucks bringen sie zum Kran.`;
     return 'Wartet auf ein Schiff.';
   }
   gateWhy(g: Gate): string {

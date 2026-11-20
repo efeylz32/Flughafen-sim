@@ -149,8 +149,8 @@ export const MISSIONS: Mission[] = [
 
 /** Was der „Los“-Knopf der Mission öffnet: ein Werkzeug oder ein Fenster */
 export const MISSION_GO: (string | null)[] = [
-  'berth', 'crane', 'road', 'yard', 'gate', 'truck', 'view', 'view', null, 'workshop', 'assign', null, 'deals', 'view', 'unpack', 'buyland',
-  null, 'rail', null, 'reefer', 'dredge', null, 'customs', null, 'view', 'deals', null,
+  'berth', 'crane', 'road', 'yard', 'gate', 'truck', 'show:ship', 'show:ship', null, 'workshop', 'assign', null, 'deals', 'show:crane', 'unpack', 'buyland',
+  null, 'rail', null, 'reefer', 'dredge', null, 'customs', null, 'show:truck', 'deals', null,
 ];
 
 /**

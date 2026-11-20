@@ -863,6 +863,11 @@ export class UI {
       this.game.setSpeed(this.speedBeforeModal);
     });
 
+    // Höhe der Werkzeugleiste messen: Info-Blatt, Bauleiste, Meldungen und Tipps sitzen immer darüber
+    const barH = () => root.style.setProperty('--bar-h', `${Math.ceil(window.innerHeight - bar.getBoundingClientRect().top)}px`);
+    new ResizeObserver(barH).observe(bar);
+    window.addEventListener('resize', barH);
+    requestAnimationFrame(barH);
     root.append(top, left, side, this.sheet, bar, this.ghostBar, this.toasts, this.menu, this.deals, this.ctlModal, this.techModal, this.staffModal, this.finCard, this.endModal, this.decision, this.levelUp, this.buildAchModal(), this.buildProgModal());
     this.refreshSpeed();
     this.refreshTools();
@@ -1296,9 +1301,9 @@ export class UI {
         pr.records.length
           ? `<div class="board">${pr.records
               .slice(0, 12)
-              .map((r, i) => `<div><span class="rk">${i + 1}</span><span><b>${r.title}</b><small>${r.date}, ${num(r.handled)} Container, Vermögen ${eur(r.money)}</small></span><b>Tag ${r.day}</b></div>`)
+              .map((r, i) => `<div><span class="rk">${i + 1}</span><span><b>${r.title}</b><small>${r.date}, ${num(r.handled)} ${r.title.startsWith('Tagesaufgabe') ? 'Punkte' : 'Container'}, Vermögen ${eur(r.money)}</small></span><b>${r.title.startsWith('Tagesaufgabe') ? '1 Tag' : `Tag ${r.day}`}</b></div>`)
               .join('')}</div>`
-          : '<p class="sub">Noch kein Sieg. Gewinne ein Spiel oder ein Szenario, dann steht es hier.</p>'
+          : '<p class="sub">Noch kein Eintrag. Hier stehen vollendete Häfen, geschaffte Szenarien und Tagesaufgaben.</p>'
       }`;
     this.achModal.classList.remove('hidden');
   }
@@ -1641,7 +1646,7 @@ export class UI {
       setText(this.missionTitle, m.title);
       setText(this.missionText, m.text);
       this.missionGo.classList.toggle('hidden', !MISSION_GO[sim.mission] || (MISSION_GO[sim.mission] === this.game.tool && this.game.tool !== 'view'));
-      setText(this.missionGo, MISSION_GO[sim.mission] === 'view' ? 'Ansehen' : MISSION_GO[sim.mission] === 'deals' ? 'Verträge' : 'Los');
+      setText(this.missionGo, MISSION_GO[sim.mission]?.startsWith('show:') ? 'Zeigen' : MISSION_GO[sim.mission] === 'deals' ? 'Verträge' : 'Los');
     } else {
       this.missionCard.classList.add('hidden');
     }
@@ -1736,7 +1741,7 @@ export class UI {
       <div class="fl"><b>Ausgaben</b><b>${eur(exp)}</b></div>
       ${row('Löhne', d.wages)}${row('Bau und Aufrüstung', d.building)}${row('Strafen', d.penalty)}${row('Wartung (Tagesabschluss)', d.running)}${row('Zinsen (Tagesabschluss)', d.interest)}${row('Strom aus dem Netz', d.power ?? 0)}${row('Wartungsfenster', d.repair ?? 0)}${row('Versicherung (Tagesabschluss)', d.insurance ?? 0)}
       <div class="fl total"><b>Ergebnis heute</b><b class="${inc - exp >= 0 ? 'pos' : 'neg'}">${eur(inc - exp)}</b></div>
-      <div class="fl sub"><span>Laufend pro Tag: Wartung / Löhne</span><span>${eur(sim.runningCost())} / ${eur((Object.keys(ROLES) as Role[]).reduce((n, r) => n + sim.staff[r] * sim.wagePerHour(r) * 24, 0))}</span></div>
+      <div class="fl sub"><span>Wartung pro Tag</span><span>${eur(sim.runningCost())}</span></div><div class="fl sub"><span>Löhne pro Tag</span><span>${eur((Object.keys(ROLES) as Role[]).reduce((n, r) => n + sim.staff[r] * sim.wagePerHour(r) * 24, 0))}</span></div>
       ${sim.level >= 2 ? `<h3>Konkurrenz</h3><div class="fl sub"><span>${RIVAL_NAME}: pünktlich</span><span>${Math.round(sim.rivalRate * 100)} %</span></div><div class="fl sub"><span>Du gestern</span><span class="${sim.myRate !== null && sim.myRate < sim.rivalRate - 0.1 ? 'neg' : ''}">${sim.myRate === null ? '–' : `${Math.round(sim.myRate * 100)} %`}</span></div><p class="sub">Liegst du mehr als 10 Punkte darunter, wechseln Reedereien und es kommen weniger freie Schiffe.${sim.lostToRival ? ` Bisher verloren: ${sim.lostToRival} Verträge.` : ''}</p>` : ''}
       ${avgHtml}${potHtml}
       <h3>Lage</h3>
@@ -2003,7 +2008,7 @@ export class UI {
     const lawChk = sim.canExpand();
     const sale = Math.round(sim.portValue() * 0.5);
     const lawHtml = law
-      ? `<div class="deal tech law"><div class="dl"><b>${law.name}</b><span class="tag">Karte ${sim.size + 1} → ${sim.size + 2} von ${MAP_SIZES.length}</span></div>
+      ? `<div class="deal tech law"><div class="dl wrap"><b>${law.name}</b><span class="tag">Karte ${sim.size + 1} → ${sim.size + 2} von ${MAP_SIZES.length}</span></div>
         <div class="sub">Neue, größere Karte vom selben Typ: ${MAP_SIZES[sim.size + 1].join(' × ')} statt ${MAP_SIZES[sim.size].join(' × ')} Felder, Hügel und Küste neu gewürfelt. Dein jetziger Hafen wird für etwa ${eur(sale)} verkauft. Stufe, Geld, Verbesserungen, Großprojekte, Ruf und alle Zähler bleiben. Verträge enden ohne Strafe, Personal stellst du beim Bauen neu ein.</div>
         ${
           sim.level < law.level
@@ -2037,7 +2042,7 @@ export class UI {
     this.lastDeals = key;
     const free = sim.contracts.length < sim.maxContracts;
     this.dealsBody.innerHTML = `
-      <p class="sub">Ohne Vertrag kommen nur kleine Küstenfrachter mit 60 Containern. Größere Schiffe kommen nur als Dauerauftrag nach Fahrplan. Pünktlich gibt es den Bonus, sonst die Strafe. Wer zweimal in Folge zu spät ist, verliert den Vertrag. Bei Sturm läuft die Liegezeit nicht.</p>
+      <p class="sub">Ohne Vertrag kommen nur kleine Küstenfrachter mit ${SHIP_TYPES.coaster.containers} Containern. Größere Schiffe kommen nur als Dauerauftrag nach Fahrplan. Pünktlich gibt es den Bonus, sonst die Strafe. Wer zweimal in Folge zu spät ist, verliert den Vertrag. Bei Sturm läuft die Liegezeit nicht.</p>
       <h3>Laufende Verträge (${sim.contracts.length} von ${sim.maxContracts})</h3>
       ${sim.contracts.length ? sim.contracts.map((c) => this.contractCard(c, true, false)).join('') : '<p class="sub">Noch kein Vertrag.</p>'}
       <h3>Angebote</h3>
@@ -2109,7 +2114,7 @@ export class UI {
         <div class="progress"><span style="width:${Math.round((done / s.total) * 100)}%"></span></div>
         <div class="meta">${done} von ${s.total} Containern abgeladen${s.reefers ? `, noch ${s.reefers} Kühlcontainer an Bord` : ''}</div>
         ${s.exportTotal ? `<div class="progress exp"><span style="width:${Math.round((s.loaded / s.exportTotal) * 100)}%"></span></div><div class="meta">${s.loaded} von ${s.exportTotal} Export-Containern geladen</div>` : ''}
-        <div class="why ${s.blocked ? 'alert' : ''}"><b>Warum steht das Schiff?</b><br>${s.reason || '–'}</div>
+        <div class="why ${s.blocked ? 'alert' : ''}"><b>${s.blocked ? 'Warum steht das Schiff?' : 'Was passiert gerade?'}</b><br>${s.reason || '–'}</div>
         ${s.state === 'unloading' ? `<div class="meta ${late ? 'neg' : ''}">Liegezeit ${hours(s.atBerth)} (zugesagt: ${hours(s.dwellTarget)})</div>` : ''}
         ${s.vip ? '<div class="meta pos">Vorgezogen: bekommt den nächsten freien Liegeplatz</div>' : ''}
         ${s.state === 'queued' && s.queuedFor > 0 ? `<div class="meta ${s.queuedFor > SHIP_PATIENCE_GM * DIFFS[sim.diff].patience * 0.6 ? 'neg' : ''}">Wartet seit ${hours(s.queuedFor)}, sagt nach ${hours(SHIP_PATIENCE_GM * DIFFS[sim.diff].patience)} ab</div>` : ''}`;
@@ -2128,9 +2133,16 @@ export class UI {
                 ? 'Wartung'
               : c.state === 'power'
                 ? 'Stromausfall: steht still'
+              : c.state === 'broken' || c.wear >= 1
+                ? 'Ausgefallen'
+              : !c.staffed
+                ? 'Kein Kranführer'
+              : sim.shipAtBerth(sim.cq(c))?.exportLeft
+                ? 'Wartet auf Export'
               : 'Wartet auf ein Schiff';
+      const cwhy = sim.craneWhy(c);
       html = `<h3>${CRANE_MODELS[c.model].name} <span class="tag">${Math.round(movesPerHour(c.model) * (1 + 0.1 * sim.tech.spreader) * (sim.tech.akkord ? 1.2 : 1) * (sim.spec === 'hub' ? 1.15 : sim.spec === 'logi' ? 0.95 : 1))} Moves pro Stunde</span></h3>
-        ${c.build ? buildRow(c.build, 'Im Bau oder Umbau') : `<div class="why ${c.state === 'working' ? '' : 'alert'}"><b>${st}</b><br>${sim.craneWhy(c)}</div>`}
+        ${c.build ? buildRow(c.build, 'Im Bau oder Umbau') : `<div class="why ${c.state === 'working' || st.startsWith('Wartet auf') ? '' : 'alert'}"><b>${st}</b>${cwhy.replace(/\.$/, '') === st ? '' : `<br>${cwhy}`}</div>`}
         ${wearRow(c.wear, c.cap)}
         <div class="meta">Entladen am Kran: ${c.buffer + c.bufReef + c.bufHaz} von ${sim.bufCap(c)}${sim.level >= 2 ? ` · Export am Kran: ${c.expBuf} von ${sim.bufCap(c, true)}` : ''}</div>`;
       const ui = sim.upgradeInfo('crane', c.id);

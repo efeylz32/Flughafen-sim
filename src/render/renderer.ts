@@ -846,9 +846,9 @@ export class Renderer {
             break;
           }
           case T.Parking: {
-            // Stellplatz: Asphalt, vier Buchten, P-Schild
+            // Stellplatz: Asphalt, drei Buchten, P-Schild
             g.rect(px, py, TILE, TILE).fill(0x6b737c);
-            for (let k = 0; k <= 4; k++) g.rect(px + 1.5 + k * 7.3, py + 9, 1.2, 21).fill({ color: 0xffffff, alpha: 0.85 });
+            for (let k = 0; k <= 3; k++) g.rect(px + 0.4 + k * 10.4, py + 9, 1.2, 21).fill({ color: 0xffffff, alpha: 0.85 });
             g.roundRect(px + 2, py + 1.5, 9, 7, 1.5).fill(0x2f6db0);
             g.rect(px + 5, py + 2.8, 1.4, 4.6).fill(0xffffff);
             g.rect(px + 5, py + 2.8, 3, 1.3).fill(0xffffff);
@@ -1473,16 +1473,29 @@ export class Renderer {
     return { root, load, brake, badge, lat: 7, key: '', agv: t.agv, rot: t.angle };
   }
 
+  private parkBays = new Map<number, { lot: number; slot: number }>();
   private syncTrucks(sim: Sim, a: number, view: View) {
     // Buchten auf den Stellplätzen verteilen
-    const parkedSlot = new Map<number, number>();
-    const perLot = new Map<number, number>();
+    // Feste Bucht je Truck, damit die anderen nicht umspringen, wenn einer wegfährt
+    const bays = this.parkBays;
+    const used = new Map<number, number>();
     for (const t of sim.trucks) {
-      if (!t.parked || t.parkAt === undefined || t.parkAt < 0) continue;
-      const n = perLot.get(t.parkAt) ?? 0;
-      parkedSlot.set(t.id, n);
-      perLot.set(t.parkAt, n + 1);
+      const b = bays.get(t.id);
+      if (!b) continue;
+      if (!t.parked || t.parkAt !== b.lot || (used.get(b.lot) ?? 0) & (1 << b.slot)) bays.delete(t.id);
+      else used.set(b.lot, (used.get(b.lot) ?? 0) | (1 << b.slot));
     }
+    for (const id of bays.keys()) if (!sim.trucks.some((t) => t.id === id)) bays.delete(id);
+    for (const t of sim.trucks) {
+      if (!t.parked || t.parkAt === undefined || t.parkAt < 0 || bays.has(t.id)) continue;
+      const m = used.get(t.parkAt) ?? 0;
+      let slot = 0;
+      while (slot < 2 && m & (1 << slot)) slot++;
+      bays.set(t.id, { lot: t.parkAt, slot });
+      used.set(t.parkAt, m | (1 << slot));
+    }
+    const parkedSlot = new Map<number, number>();
+    for (const [id, b] of bays) parkedSlot.set(id, b.slot);
     const seen = new Set<number>();
     for (const t of sim.trucks) {
       seen.add(t.id);
@@ -1503,21 +1516,37 @@ export class Renderer {
       v.root.rotation = v.rot;
       // Rechtsverkehr: in Fahrtrichtung rechts von der Mittellinie
       const idle = !t.job && t.wait <= 0;
-      // Einbahnstraße: zwei Spuren, die zweite links der Mitte
-      const ow = sim.oneway[t.tile] >= 0 || (t.next >= 0 && sim.oneway[t.next] >= 0);
-      const want = idle ? 10.5 : ow ? (t.slot ? -6.5 : 6.5) : 7;
+      // Spur: Einbahnstraße über die ganze Breite, Doppelspur und Autobahn zwei Spuren je Richtung
+      const lt = t.next >= 0 ? t.next : t.tile;
+      const tier = sim.roadTier[lt];
+      const want = idle
+        ? 10.5
+        : sim.oneway[lt] >= 0
+          ? tier > 0
+            ? [9, 0, -9][Math.min(2, t.slot)]
+            : t.slot
+              ? -6.5
+              : 6.5
+          : tier > 0
+            ? t.slot
+              ? 4.5
+              : 11
+            : 7;
       v.lat += (want - v.lat) * Math.min(1, view.dt * 6);
       if (t.parked && t.parkAt !== undefined && t.parkAt >= 0 && t.next < 0) {
-        // Auf dem Stellplatz: in einer der vier Buchten, quer geparkt
-        const slot = parkedSlot.get(t.id) ?? 0;
+        // Auf dem Stellplatz: in einer der drei Buchten, quer geparkt, etwas kleiner, damit Luft dazwischen bleibt
+        const slot = Math.min(2, parkedSlot.get(t.id) ?? 0);
         v.rot = -Math.PI / 2;
         v.root.rotation = v.rot;
-        v.root.position.set((t.parkAt % GRID_W) * TILE + 5 + slot * 7.3, ((t.parkAt / GRID_W) | 0) * TILE + 20);
-      } else
+        v.root.scale.set(0.86);
+        v.root.position.set((t.parkAt % GRID_W) * TILE + 5.6 + slot * 10.4, ((t.parkAt / GRID_W) | 0) * TILE + 19);
+      } else {
+        if (v.root.scale.x !== 1) v.root.scale.set(1);
         v.root.position.set(
           (t.px + (t.fx - t.px) * a + 0.5) * TILE - Math.sin(v.rot) * v.lat,
           (t.py + (t.fy - t.py) * a + 0.5) * TILE + Math.cos(v.rot) * v.lat,
         );
+      }
       v.brake.visible = t.stuck > 0;
       v.badge.visible = !view.calm;
       const key = t.load + t.cargo + t.role + t.zone;

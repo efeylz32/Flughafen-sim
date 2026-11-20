@@ -895,6 +895,30 @@ export class Game {
     const go = MISSION_GO[this.sim.mission];
     if (!go) return;
     if (go === 'deals') return this.ui.showDeals();
+    // Zeigen: passendes Schiff, Kran oder Truck auswählen und hinfahren
+    if (go.startsWith('show:')) {
+      const s = this.sim;
+      this.setTool('view');
+      const what = go.slice(5);
+      if (what === 'ship') {
+        const sh = s.ships.find((x) => x.state === 'unloading') ?? s.ships.find((x) => x.state !== 'leaving');
+        if (!sh) return this.ui.toast('Gerade ist kein Schiff da. Das nächste kommt bald.', 'info');
+        this.selected = { kind: 'ship', id: sh.id };
+        const b = s.shipBox(sh);
+        this.focusTile(b.x + b.w / 2, b.y);
+      } else if (what === 'crane') {
+        const c = s.cranes.find((c) => s.canUpgrade('crane', c.id).ok) ?? s.cranes[0];
+        if (!c) return this.ui.toast('Du hast noch keinen Kran.', 'info');
+        this.selected = { kind: 'crane', id: c.id };
+        this.focusTile(c.x, c.y);
+      } else if (what === 'truck') {
+        const t = s.trucks.find((t) => !t.agv && !t.job) ?? s.trucks.find((t) => !t.agv);
+        if (!t) return this.ui.toast('Du hast keinen Truck zum Aufrüsten.', 'info');
+        this.selected = { kind: 'truck', id: t.id };
+        this.focusTile(Math.round(t.fx), Math.round(t.fy));
+      }
+      return;
+    }
     this.setTool(go as Tool);
   }
 
