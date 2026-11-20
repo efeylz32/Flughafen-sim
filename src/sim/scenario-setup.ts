@@ -1,4 +1,4 @@
-import { COAST_ROW } from './data';
+import { COAST_ROW, setGridSize } from './data';
 import { buildDemo } from './demo';
 import { SCENARIOS } from './scenarios';
 import { Sim } from './sim';
@@ -8,6 +8,7 @@ export function setupScenario(id: string, seed: number): Sim {
   const sc = SCENARIOS.find((s) => s.id === id);
   if (!sc) throw new Error(`Unbekanntes Szenario ${id}`);
   const k = COAST_ROW;
+  setGridSize(0);
   let sim: Sim;
   if (id === 'insel') {
     sim = new Sim(seed, 'normal', 'island');
@@ -73,6 +74,7 @@ export function dailyKey(d = new Date()): string {
 /** Tägliche Herausforderung: der Demo-Hafen mit Engpass, ein Spieltag Zeit, so viele Container wie möglich */
 export function setupDaily(key: string): Sim {
   const seed = Number(key) % 2_147_483_647;
+  setGridSize(0);
   const sim = new Sim(seed, 'normal', 'coast');
   buildDemo(sim);
   sim.level = 2;

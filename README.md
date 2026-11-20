@@ -8,9 +8,19 @@ Schiff → Kran → Trucks → Stapelplatz → Trucks → Gate oder Bahn. Die la
 Das Spielkonzept steht im Doc „Hafen-Imperium: Spielkonzept“.
 
 Es gibt **keinen Sieg und keine Frist**. Der Hafen wächst über 12 Stufen. Jede Stufe braucht genug umgeschlagene
-Container und ab Stufe 3 einen **Meilenstein**. Das Ende ist die **Vollendung**: höchste Stufe, alle Verbesserungen auf
-Maximum, das ganze Land, 8 Super-Brücken, mindestens 4 Hallen auf Stufe 3 und 100 Mega-Frachter. Danach geht es frei
-weiter. Ein Tipp auf die Stufe oben zeigt den Fortschritt.
+Container und ab Stufe 3 einen **Meilenstein**. Das Ende ist die **Vollendung**: höchste Stufe, größte Karte, alle
+Verbesserungen und Großprojekte, das ganze Land der größten Karte, 8 Super-Brücken, mindestens 4 Hallen auf Stufe 3
+und 100 Mega-Frachter. Danach geht es frei weiter. Ein Tipp auf die Stufe oben zeigt den Fortschritt.
+
+**Hafenerweiterungsgesetze:** Ab Stufe 7 (5 Mio. €) und Stufe 10 (20 Mio. €) kann man im Ausbau-Fenster ein Gesetz
+beschließen. Dann geht es auf einer neuen, größeren Karte vom selben Typ weiter (36 × 28 → 48 × 36 → 60 × 44 Felder),
+mit neu gewürfelten Hügeln, Felsen und Flusslauf. Der alte Hafen wird zur Hälfte seines Werts verkauft. Stufe, Geld,
+Verbesserungen, Großprojekte, Ruf und alle Zähler bleiben, Verträge enden ohne Strafe. Land ist auf größeren Karten
+deutlich teurer.
+
+**Großprojekte** (Ausbau-Fenster, eines nach dem anderen, mit Bauzeit): Hafenbahnhof (Stufe 5), Kreuzfahrt-Terminal (6),
+Automatische Leitzentrale (7), Tiefwasserkanal (8), Logistikpark (9), Hafen-Wahrzeichen (10), Freihandelszone (11),
+von 3 bis 40 Mio. € (mal Preissteigerung).
 
 | Stufe | Name | Container | Meilenstein | Neu |
 |---|---|---|---|---|

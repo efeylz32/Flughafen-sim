@@ -1,7 +1,7 @@
 import { Sound } from './audio/sound';
 import { Music } from './audio/music';
 import { Renderer, View } from './render/renderer';
-import { BuildTool, DiffId, GRID_H, GRID_W, MAX_LEVEL, MapId, ProductId, Role, ROLE_NAMES, T, TICKS_PER_SEC, TILE, Tool, TruckRole } from './sim/data';
+import { BuildTool, DiffId, GRID_H, GRID_W, MAX_LEVEL, setGridSize, MapId, ProductId, Role, ROLE_NAMES, T, TICKS_PER_SEC, TILE, Tool, TruckRole } from './sim/data';
 import { Progress } from './achievements';
 import { CRANE_MODELS, PLANTS, TRAITS, DIFFS, dimsOf, MAPS, movesPerHour, sizeOf, TechId } from './sim/data';
 import { buildDemo, buildShowcase } from './sim/demo';
@@ -260,6 +260,10 @@ export class Game {
         this.ui.showEnd();
         break;
       }
+      case 'project':
+        this.sound.play('level');
+        this.ui.celebrate(true);
+        break;
       case 'complete': {
         this.sound.play('level');
         const s = this.sim;
@@ -409,6 +413,20 @@ export class Game {
     this.save();
   }
 
+  /** Hafenerweiterungsgesetz: neue, größere Karte, der alte Hafen wird verkauft */
+  enactLaw(): string | null {
+    const chk = this.sim.canExpand();
+    if (!chk.ok) return chk.reason ?? 'Nicht möglich';
+    this.sim = this.sim.expand();
+    this.resetTransient();
+    this.setTool('view');
+    this.fitCamera();
+    this.save();
+    this.sound.play('level');
+    this.ui.celebrate(true);
+    return null;
+  }
+
   /** Tägliche Herausforderung starten: für alle gleich, ein Spieltag Zeit */
   newDaily() {
     this.sim = setupDaily(dailyKey());
@@ -446,6 +464,7 @@ export class Game {
 
   newGame(mode: 'empty' | 'demo', diff: DiffId = 'normal', map: MapId = 'coast') {
     // Der Demo-Hafen ist für die Küste gebaut
+    setGridSize(0);
     this.sim = new Sim(Math.floor(Math.random() * 1e9), diff, mode === 'demo' ? 'coast' : map);
     if (mode === 'demo') buildDemo(this.sim);
     this.sim.limitLand();
@@ -461,6 +480,7 @@ export class Game {
 
   /** Sandbox: Startgeld frei wählbar, alle Werkzeuge, keine Frist und keine Pleite */
   newSandbox(money: number, map: MapId = 'coast') {
+    setGridSize(0);
     this.sim = new Sim(Math.floor(Math.random() * 1e9), 'easy', map);
     this.sim.sandbox = true;
     this.sim.status = 'free';
@@ -503,6 +523,7 @@ export class Game {
 
   /** Zeigt im Hintergrund einen vollen Hafen mit schwebender Kamera */
   startShowcase() {
+    setGridSize(0);
     this.sim = new Sim(20240607, 'easy', 'coast');
     buildShowcase(this.sim);
     for (let i = 0; i < 4000; i++) this.sim.tick();

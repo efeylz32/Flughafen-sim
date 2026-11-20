@@ -113,6 +113,12 @@ import {
   TechId,
   LV,
   MAX_LEVEL,
+  GRID_SIZE,
+  setGridSize,
+  LAWS,
+  PLOT_MUL,
+  PROJECTS,
+  type ProjectId,
   LOAN_LIMIT_PER_LEVEL,
   LOAN_RATE,
   LOAN_STEP,
@@ -470,6 +476,7 @@ export type EventTag =
   | 'contract'
   | 'won'
   | 'complete'
+  | 'project'
   | 'lost'
   | 'debt'
   | 'decision'
@@ -600,6 +607,9 @@ export interface SaveData {
   overpass?: number[];
   custQueue?: number[];
   completedDay?: number;
+  size?: number;
+  projects?: ProjectId[];
+  projBuild?: { id: ProjectId; left: number } | null;
   daily?: { key: string; start: number; end: number };
   /** Laufender Zustand: Schiffe, Puffer, Wetter. Fehlt in alten Spielständen. */
   live?: {
@@ -746,6 +756,11 @@ export class Sim {
   foodDone = 0;
   /** Laufendes Szenario oder null für ein freies Spiel */
   scenario: string | null = null;
+  /** Kartengröße 0..2 (wächst mit den Hafenerweiterungsgesetzen) */
+  readonly size = GRID_SIZE;
+  /** Großprojekte: fertige und das gerade im Bau (Restzeit in Spielminuten) */
+  projects: ProjectId[] = [];
+  projBuild: { id: ProjectId; left: number } | null = null;
   /** Tägliche Herausforderung: Datum, Startstand und Ende (Spielminute) */
   daily = '';
   dailyStart = 0;
@@ -914,17 +929,22 @@ export class Sim {
         this.kind[y * GRID_W + x] = k;
       }
     }
-    // Hügel (eigene Höhenebene): an der Küste weit hinten, am Fluss überall verteilt
-    if (map === 'coast' || map === 'river') {
+    // Größere Karten bekommen entsprechend mehr Hügel und Felsen
+    const areaF = (GRID_W * GRID_H) / (36 * 28);
+    // Hügel (eigene Höhenebene): an der Küste weit hinten, am Fluss überall verteilt, auf größeren Inseln im Inneren
+    if (map === 'coast' || map === 'river' || (map === 'island' && this.size > 0)) {
       const h = (a: number, b: number) => {
         let v = (a * 374761393 + b * 668265263 + this.seed * 2246822519) >>> 0;
         v = Math.imul(v ^ (v >>> 13), 1274126177) >>> 0;
         return (v ^ (v >>> 16)) / 4294967296;
       };
-      const count = map === 'river' ? 5 : 3;
+      const count = Math.round((map === 'river' ? 5 : map === 'island' ? 2 : 3) * areaF);
       for (let n = 0; n < count; n++) {
         const cx = 3 + Math.floor(h(n, 1) * (GRID_W - 6));
-        const cy = (map === 'river' ? COAST_ROW + 5 : GRID_H - 8) + Math.floor(h(n, 2) * (map === 'river' ? GRID_H - COAST_ROW - 8 : 5));
+        const cy =
+          map === 'island'
+            ? COAST_ROW + 6 + Math.floor(h(n, 2) * (GRID_H - COAST_ROW - 13))
+            : (map === 'river' ? COAST_ROW + 5 : GRID_H - 8) + Math.floor(h(n, 2) * (map === 'river' ? GRID_H - COAST_ROW - 8 : 5));
         const r = 1.6 + h(n, 3) * 1.6;
         for (let y = Math.floor(cy - r); y <= cy + r; y++) {
           for (let x = Math.floor(cx - r); x <= cx + r; x++) {
@@ -938,12 +958,14 @@ export class Sim {
     if (map === 'river') {
       for (let y = COAST_ROW; y < GRID_H; y++) {
         const wob = Math.round(Math.sin(y * 0.55 + (this.seed % 7)) * 1.2);
-        for (const x of [17 + wob, 18 + wob]) this.kind[y * GRID_W + x] = T.Water;
+        // Auf größeren Karten liegt der Fluss nicht immer genau in der Mitte
+        const mid = Math.floor(GRID_W / 2) - 1 + (this.size > 0 ? (this.seed % 7) - 3 : 0);
+        for (const x of [mid + wob, mid + 1 + wob]) this.kind[y * GRID_W + x] = T.Water;
       }
     }
     if (map === 'rocks') {
       // Felsbrocken in Gruppen, die erste Reihe am Wasser bleibt frei
-      for (let n = 0; n < 26; n++) {
+      for (let n = 0; n < Math.round(26 * areaF); n++) {
         const cx = Math.floor(this.rnd() * GRID_W);
         const cy = COAST_ROW + 2 + Math.floor(this.rnd() * (GRID_H - COAST_ROW - 2));
         const r = 1 + this.rnd() * 1.6;
@@ -974,7 +996,7 @@ export class Sim {
   }
 
   get plotPrice(): number {
-    return Math.round((PLOT_PRICE + this.plotsBought * PLOT_PRICE_STEP) * (this.traits.includes('cheapland') ? 0.6 : 1));
+    return Math.round((PLOT_PRICE + this.plotsBought * PLOT_PRICE_STEP) * PLOT_MUL[this.size] * (this.traits.includes('cheapland') ? 0.6 : 1));
   }
   buyPlot(x: number): BuildCheck {
     const cost = this.plotPrice;
@@ -1544,6 +1566,10 @@ export class Sim {
     return this.berths().length > 0;
   }
   /** Gibt es einen ausgebaggerten Liegeplatz für große Schiffe (6 Kai-Felder, Mega-Frachter 8)? */
+  /** Ist das Wasser vor diesem Kai tief genug? Mit dem Tiefwasserkanal überall. */
+  deepAt(q: number): boolean {
+    return !!this.depth[q] || this.hasProject('canal');
+  }
   hasDeepBerth(len = SHIP_TYPES.panamax.len): boolean {
     this.berths();
     return this.berthCache.deep >= len;
@@ -1553,7 +1579,7 @@ export class Sim {
     let best = 0;
     let run = 0;
     for (let x = 0; x < Q_MAX; x++) {
-      run = this.isKai(x) && this.depth[x] ? run + 1 : 0;
+      run = this.isKai(x) && this.deepAt(x) ? run + 1 : 0;
       best = Math.max(best, run);
     }
     return best;
@@ -1589,7 +1615,7 @@ export class Sim {
       let deepTiles = 0;
       for (let k = 0; k < len && ok; k++) {
         if (!this.isKai(x + k) || this.closedQ[x + k]) ok = false;
-        else if (this.depth[x + k]) deepTiles++;
+        else if (this.deepAt(x + k)) deepTiles++;
         else if (deep) ok = false;
       }
       if (!ok || occ.some(([a, b]) => a < x + len && b > x)) continue;
@@ -2739,7 +2765,7 @@ export class Sim {
         }
         for (const r of this.rails) {
           if (r.zone !== p.zone || r.build) continue;
-          const rr = RAIL_CAP - r.platform - r.resIn;
+          const rr = this.railCap - r.platform - r.resIn;
           const a2 = rr > 0 ? this.nearestAccess(r, a1.access) : null;
           if (a2) {
             offer('plant out', 1.8, a1.d + a2.d, { cargo: sold, stage: 0, srcKind: 'plant', src: p.id, dstKind: 'rail', dst: r.id, tgt: [a1.access, a2.access], n: Math.min(TRUCK_CAP, done, rr) });
@@ -2760,7 +2786,7 @@ export class Sim {
     // 5. Import-Container vom Lager zum Gleisanschluss
     for (const r of this.rails) {
       if (!zOk(r.zone) || r.build || !this.railLinked(r)) continue;
-      const room = RAIL_CAP - r.platform - r.resIn;
+      const room = this.railCap - r.platform - r.resIn;
       if (room <= 0) continue;
       // Die Bahn nimmt, was für die Bahn bestimmt ist. Gibt es kein Gate, auch normale Importe.
       const railCargo: Cargo[] = this.gates.length ? ['rimp', 'reef', 'haz'] : ['rimp', 'imp', 'reef', 'haz'];
@@ -2866,7 +2892,7 @@ export class Sim {
     if (j.cargo === 'food') fee = this.price('food');
     // Auf Stufe 1 zahlen Spediteure einem kleinen Anleger weniger
     if (this.level < 2 && (j.cargo === 'imp' || j.cargo === 'rimp' || j.cargo === 'reef' || j.cargo === 'haz')) fee *= 0.6;
-    fee = Math.round(fee * (1 + 0.05 * this.tech.sales) * (this.traits.includes('freezone') ? 1.1 : 1) * (this.world ? WORLD[this.world.id].fee : 1) * CYCLES[this.cycle.kind].fee * (j.cargo === 'reef' && this.spec === 'cold' ? 1.25 : 1));
+    fee = Math.round(fee * (1 + 0.05 * this.tech.sales) * (this.traits.includes('freezone') ? 1.1 : 1) * (this.hasProject('freezone') ? 1.1 : 1) * (this.hasProject('tower') ? 1.05 : 1) * (this.world ? WORLD[this.world.id].fee : 1) * CYCLES[this.cycle.kind].fee * (j.cargo === 'reef' && this.spec === 'cold' ? 1.25 : 1));
     if (j.dstKind === 'gate' || j.dstKind === 'rail') {
       if (j.cargo === 'prem') this.premiumDone += j.n;
       if (j.cargo === 'food') this.foodDone += j.n;
@@ -2993,7 +3019,7 @@ export class Sim {
       t.stuck = 0;
     }
 
-    t.prog += (t.agv ? AGV_SPEED : TRUCK_SPEED) * ROAD_SPEED[this.roadTier[t.next]] * (t.agv ? 1 : this.eff('driver')) * (1 + 0.08 * this.tech.engine) * (t.role === 'auto' ? 1 : ROUTINE_SPEED) * (1 - WEAR_SLOWDOWN * t.wear) * dt;
+    t.prog += (t.agv ? AGV_SPEED : TRUCK_SPEED) * ROAD_SPEED[this.roadTier[t.next]] * (t.agv ? 1 : this.eff('driver')) * (1 + 0.08 * this.tech.engine) * (this.hasProject('control') ? 1.1 : 1) * (t.role === 'auto' ? 1 : ROUTINE_SPEED) * (1 - WEAR_SLOWDOWN * t.wear) * dt;
     if (this.level >= 2) {
       this.addWear(t, WEAR_TRUCK_PER_GM * this.wearMul * (this.tech.diesel ? 1.3 : 1) * dt);
       if (t.wear >= 1) this.noteBroken('Ein Truck', { x: t.px, y: t.py });
@@ -3333,8 +3359,9 @@ export class Sim {
     const day = this.day - 1;
     this.orders = this.orders.filter((o) => {
       if (o.done >= o.qty) {
-        this.money += o.reward;
-        this.today.bonus += o.reward;
+        const pay = Math.round(o.reward * (this.hasProject('logistics') ? 1.3 : 1));
+        this.money += pay;
+        this.today.bonus += pay;
         this.ordersDone++;
         this.rep = Math.min(REP_MAX, this.rep + 2);
         this.emit(`${o.firm}: Lieferauftrag erfüllt. +${eur(o.reward)}, Ruf +2`, 'good', { tag: 'contract' });
@@ -3367,6 +3394,98 @@ export class Sim {
   }
   setInsurance(level: number) {
     this.insurance = Math.max(0, Math.min(INSURANCE.length - 1, level));
+  }
+
+  // ───────────────────────── Großprojekte ─────────────────────────
+
+  /** Plätze im Zug: mit dem Hafenbahnhof 50 % mehr */
+  get railCap(): number {
+    return Math.round(RAIL_CAP * (this.hasProject('bahnhof') ? 1.5 : 1));
+  }
+  hasProject(id: ProjectId): boolean {
+    return this.projects.includes(id);
+  }
+  projectCost(id: ProjectId): number {
+    return Math.round((PROJECTS[id].cost * this.inflation) / 100_000) * 100_000;
+  }
+  canStartProject(id: ProjectId): BuildCheck {
+    const cost = this.projectCost(id);
+    if (this.hasProject(id)) return { ok: false, reason: 'Schon gebaut', cost };
+    if (this.projBuild) return { ok: false, reason: `Es wird schon gebaut: ${PROJECTS[this.projBuild.id].name}`, cost };
+    if (this.level < PROJECTS[id].level) return { ok: false, reason: `Ab Stufe ${PROJECTS[id].level} (${LEVELS[PROJECTS[id].level - 1].name})`, cost };
+    if (this.money < cost) return { ok: false, reason: 'Zu wenig Geld', cost };
+    return { ok: true, cost };
+  }
+  startProject(id: ProjectId): BuildCheck {
+    const chk = this.canStartProject(id);
+    if (!chk.ok) return chk;
+    this.money -= chk.cost;
+    this.today.building += chk.cost;
+    this.projBuild = { id, left: PROJECTS[id].days * MIN_PER_DAY };
+    return chk;
+  }
+
+  // ───────────────────────── Hafenerweiterungsgesetz ─────────────────────────
+
+  /** Grober Wert des Hafens: was Gebäude, Flächen, Kräne und Trucks gekostet haben */
+  portValue(): number {
+    let v = 0;
+    for (const c of this.cranes) v += c.paid;
+    for (const t of this.trucks) v += t.paid;
+    v += this.gates.length * this.costOf('gate') + this.rails.length * this.costOf('rail') + this.rtgs.length * this.costOf('rtg') + this.shops.length * this.costOf('workshop');
+    for (const p of this.plants) v += this.costOf(p.kind);
+    const tile: Partial<Record<T, BuildTool>> = { [T.Kai]: 'kai', [T.Road]: 'road', [T.Yard]: 'yard', [T.Reefer]: 'reefer', [T.Hazmat]: 'hazard', [T.Empty]: 'emptyyard', [T.Solar]: 'solar', [T.Battery]: 'battery', [T.Customs]: 'customs', [T.Track]: 'track', [T.Parking]: 'parking' };
+    for (let i = 0; i < this.kind.length; i++) {
+      const tool = tile[this.kind[i] as T];
+      if (tool) v += this.costOf(tool);
+    }
+    return Math.round(v);
+  }
+  /** Das nächste Gesetz oder null, wenn die Karte schon am größten ist */
+  get nextLaw() {
+    return LAWS[this.size] ?? null;
+  }
+  lawCost(): number {
+    const l = this.nextLaw;
+    return l ? l.cost : 0;
+  }
+  canExpand(): BuildCheck {
+    const l = this.nextLaw;
+    if (!l) return { ok: false, reason: 'Die Karte ist schon am größten', cost: 0 };
+    if (this.scenario || this.daily) return { ok: false, reason: 'Nicht in Szenarien und Tagesaufgaben', cost: l.cost };
+    if (this.level < l.level) return { ok: false, reason: `Ab Stufe ${l.level} (${LEVELS[l.level - 1].name})`, cost: l.cost };
+    if (this.money < l.cost) return { ok: false, reason: 'Zu wenig Geld', cost: l.cost };
+    return { ok: true, cost: l.cost };
+  }
+  /**
+   * Gesetz beschließen: Der alte Hafen wird zur Hälfte seines Werts verkauft, es geht auf einer neuen,
+   * größeren Karte vom selben Typ weiter. Stufe, Geld, Verbesserungen, Projekte, Ruf, Erfahrung und alle
+   * Zähler bleiben. Das Personal bleibt beim alten Hafen, Verträge enden ohne Strafe.
+   */
+  expand(): Sim {
+    const chk = this.canExpand();
+    if (!chk.ok) throw new Error(chk.reason);
+    const sale = Math.round(this.portValue() * 0.5);
+    setGridSize(this.size + 1);
+    const n = new Sim((this.seed ^ Math.imul(this.size + 1, 0x9e3779b9)) >>> 0, this.diff, this.map);
+    const keep = [
+      'money', 'loan', 'rep', 'gm', 'lastDay', 'level', 'handled', 'mission', 'exportsLoaded', 'reefersHandled', 'trainsDone', 'bigShipsDone',
+      'megaDone', 'premiumDone', 'foodDone', 'customsDone', 'ordersDone', 'insuredTotal', 'shipsDone', 'shipsOnTime', 'containersDone', 'contractsDone',
+      'lostToRival', 'rivalRate', 'spec', 'nightShift', 'wagePolicy', 'mood', 'insurance', 'status', 'traits', 'tech', 'xp', 'trainLeft',
+      'market', 'marketPrev', 'cycle', 'world', 'usedMarket', 'rules', 'projects', 'projBuild', 'wageBoost', 'strikeLeft', 'today', 'history', 'debtDays',
+      'nextInspect', 'sandbox', 'nextId',
+    ] as const;
+    const src = this as unknown as Record<string, unknown>;
+    const dst = n as unknown as Record<string, unknown>;
+    for (const k of keep) dst[k] = src[k] && typeof src[k] === 'object' ? JSON.parse(JSON.stringify(src[k])) : src[k];
+    n.money += sale - chk.cost;
+    n.today.building += chk.cost;
+    n.today.bonus += sale;
+    n.limitLand();
+    n.makeOffers();
+    n.nextShipIn = 30;
+    n.emit(`${LAWS[this.size].name} beschlossen: Der alte Hafen bringt ${eur(sale)}. Baue jetzt auf ${GRID_W} × ${GRID_H} Feldern neu.`, 'good', { tag: 'level' });
+    return n;
   }
 
   /** Wartung für heute Abend planen oder absagen */
@@ -3444,7 +3563,7 @@ export class Sim {
   potential(): { crane: number; out: number; trucks: number; best: number; limit: string; fee: number } {
     const crane = Math.round(this.cranes.filter((c) => !c.build).reduce((n, c) => n + (60 / this.moveTime({ ...c, wear: Math.min(c.wear, 1 - c.cap) })) * 24, 0));
     const gates = this.gates.filter((g) => !g.build).reduce((n, g) => n + (60 / (GATE_PROCESS_GM / (1 + 0.2 * this.tech.scanner) / this.hinterlandMul(g))) * 24, 0);
-    const rails = this.rails.filter((r) => !r.build && this.railLinked(r)).length * RAIL_CAP * (1440 / (RAIL_INTERVAL_GM * (this.traits.includes('railhub') ? 0.67 : 1)));
+    const rails = this.rails.filter((r) => !r.build && this.railLinked(r)).length * this.railCap * (1440 / (RAIL_INTERVAL_GM * (this.hasProject('bahnhof') ? 0.75 : 1) * (this.traits.includes('railhub') ? 0.67 : 1)));
     const out = Math.round(gates + rails);
     // Ein Truck schafft je Fahrt 2 Container, eine Fahrt dauert grob 10 Spielminuten
     const trucks = Math.round(this.trucks.filter((t) => t.staffed && t.wear < 1).length * TRUCK_CAP * (1440 / 10) / 2);
@@ -3600,6 +3719,17 @@ export class Sim {
 
   /** Stündlich: Strom abrechnen, Messwerte sammeln, Regeln ausführen */
   private hourTick() {
+    // Großprojekt im Bau
+    if (this.projBuild) {
+      this.projBuild.left -= 60;
+      if (this.projBuild.left <= 0) {
+        const id = this.projBuild.id;
+        this.projects.push(id);
+        this.projBuild = null;
+        this.version++;
+        this.emit(`Großprojekt fertig: ${PROJECTS[id].name}. ${PROJECTS[id].text}`, 'good', { tag: 'project' });
+      }
+    }
     // Sturmschäden: Ab und zu trifft es einen Kran. Die Versicherung zahlt einen Teil.
     if (this.weather === 'storm' && this.level >= 2) {
       for (const c of this.cranes) {
@@ -4229,7 +4359,7 @@ export class Sim {
             this.exportsLoaded++;
             this.orderProgress('export', 1);
             this.handled++, this.today.handled++;
-            const ef = Math.round(EXPORT_FEE * (1 + 0.05 * this.tech.sales));
+            const ef = Math.round(EXPORT_FEE * (1 + 0.05 * this.tech.sales) * (this.hasProject('logistics') ? 1.25 : 1));
             this.money += ef;
             this.today.exportFees += ef;
             this.emit(undefined, 'good', { tag: 'export', x: c.x, y: c.y - 1, amount: ef });
@@ -4299,7 +4429,7 @@ export class Sim {
         t.idleFor = 0;
         // Die Leitstelle braucht Funkzeit. Trucks mit fester Aufgabe fahren sofort los.
         if (t.role === 'auto') {
-          t.wait = DISPATCH_GM * (1 - 0.3 * this.tech.radio);
+          t.wait = this.hasProject('control') ? 0 : DISPATCH_GM * (1 - 0.3 * this.tech.radio);
           continue;
         }
       }
@@ -4483,7 +4613,7 @@ export class Sim {
         }
         case 'leaving':
           r.state = 'away';
-          r.timer = RAIL_INTERVAL_GM * (this.traits.includes('railhub') ? 0.67 : 1) - 2 * RAIL_TRAVEL_GM - RAIL_STAY_GM;
+          r.timer = RAIL_INTERVAL_GM * (this.traits.includes('railhub') ? 0.67 : 1) * (this.hasProject('bahnhof') ? 0.75 : 1) - 2 * RAIL_TRAVEL_GM - RAIL_STAY_GM;
           break;
       }
     }
@@ -4960,6 +5090,12 @@ export class Sim {
     const interest = this.interestPerDay;
     this.money -= interest;
     this.today.interest += interest;
+    if (this.hasProject('cruise')) {
+      const c = Math.round(40_000 * this.inflation);
+      this.money += c;
+      this.today.bonus += c;
+    }
+    if (this.hasProject('cruise') || this.hasProject('tower')) this.rep = Math.min(REP_MAX, this.rep + (this.hasProject('tower') ? 1 : 0.5));
     const prem = this.insurancePremium();
     this.money -= prem;
     this.today.insurance = (this.today.insurance ?? 0) + prem;
@@ -5076,6 +5212,9 @@ export class Sim {
   serialize(): SaveData {
     return {
       v: 3,
+      size: this.size,
+      projects: this.projects,
+      projBuild: this.projBuild,
       completedDay: this.completedDay,
       kind: Array.from(this.kind),
       stock: Array.from(this.stock),
@@ -5200,7 +5339,11 @@ export class Sim {
   }
 
   static deserialize(d: SaveData): Sim {
+    // Erst die Kartengröße setzen: Die Felder-Arrays bekommen beim Anlegen ihre Länge
+    setGridSize(d.size ?? 0);
     const s = new Sim(d.seed, d.diff ?? 'normal', d.map ?? 'coast');
+    s.projects = d.projects ?? [];
+    s.projBuild = d.projBuild ?? null;
     s.kind.set(d.kind);
     if (d.oneway) s.oneway.set(d.oneway);
     if (d.overpass) s.overpass.set(d.overpass);

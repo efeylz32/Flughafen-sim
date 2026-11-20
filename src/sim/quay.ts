@@ -22,7 +22,8 @@ export const OUT: [number, number][] = [
   [1, 0],
 ];
 
-const LINE = [COAST_ROW, GRID_H - 4, 2, GRID_W - 3];
+/** Küstenlinien je Seite. Als Funktion, weil die Kartengröße wechseln kann. */
+const line = (side: number) => [COAST_ROW, GRID_H - 4, 2, GRID_W - 3][side];
 
 /** Gültiger Bereich der Position je Seite (Ecken gehören zur Nord- bzw. keiner Seite) */
 function range(side: number): [number, number] {
@@ -42,7 +43,7 @@ export function qTile(q: number): [number, number] | null {
   const p = posOf(q);
   const [a, b] = range(side);
   if (p < a || p > b) return null;
-  return isVertical(side) ? [LINE[side], p] : [p, LINE[side]];
+  return isVertical(side) ? [line(side), p] : [p, line(side)];
 }
 
 /** Kaiposition eines Feldes (unabhängig davon, ob dort Wasser liegt) oder -1 */
@@ -50,7 +51,7 @@ export function qOf(x: number, y: number): number {
   for (const side of SIDES) {
     const p = isVertical(side) ? y : x;
     const l = isVertical(side) ? x : y;
-    if (l !== LINE[side]) continue;
+    if (l !== line(side)) continue;
     const [a, b] = range(side);
     if (p >= a && p <= b) return side * QS + p;
   }

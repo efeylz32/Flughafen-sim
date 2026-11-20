@@ -2,8 +2,22 @@
 // 1x Geschwindigkeit: 1 Spieltag = 6 Minuten Echtzeit = 4 gm pro Sekunde.
 
 export const TILE = 32;
-export const GRID_W = 36;
-export const GRID_H = 28;
+/** Kartengröße in Feldern. Sie wächst mit den Hafenerweiterungsgesetzen (siehe MAP_SIZES, setGridSize). */
+export let GRID_W = 36;
+export let GRID_H = 28;
+/** Die drei Kartengrößen. Mehr als 64 Felder je Küste lässt die Kai-Nummerierung nicht zu. */
+export const MAP_SIZES: [number, number][] = [
+  [36, 28],
+  [48, 36],
+  [60, 44],
+];
+/** Aktuelle Größenstufe 0..2 */
+export let GRID_SIZE = 0;
+/** Kartengröße umschalten. Muss vor `new Sim` passieren, weil die Felder-Arrays beim Anlegen ihre Größe bekommen. */
+export function setGridSize(size: number) {
+  GRID_SIZE = Math.max(0, Math.min(MAP_SIZES.length - 1, size));
+  [GRID_W, GRID_H] = MAP_SIZES[GRID_SIZE];
+}
 /** Erste Landreihe. Kaimauern dürfen nur hier stehen (Wasser liegt darüber). */
 export const COAST_ROW = 8;
 
@@ -622,3 +636,24 @@ export const RAIL_EMPTIES = 10;
 
 /** Stellplätze pro Parkplatz-Feld */
 export const PARK_SLOTS = 4;
+
+/** Hafenerweiterungsgesetze: neue, größere Karte vom selben Typ. Index = Zielgröße − 1. */
+export const LAWS = [
+  { name: 'Hafenerweiterungsgesetz I', level: 7, cost: 5_000_000 },
+  { name: 'Hafenerweiterungsgesetz II', level: 10, cost: 20_000_000 },
+];
+/** Land wird auf größeren Karten teurer (Faktor je Größenstufe) */
+export const PLOT_MUL = [1, 4, 12];
+
+/** Großprojekte: einmalig, sehr teuer, dauerhafte Vorteile. Bauzeit in Spieltagen. */
+export type ProjectId = 'bahnhof' | 'cruise' | 'control' | 'canal' | 'logistics' | 'tower' | 'freezone';
+export const PROJECTS: Record<ProjectId, { name: string; text: string; cost: number; level: number; days: number }> = {
+  bahnhof: { name: 'Hafenbahnhof', text: 'Züge nehmen 50 % mehr Container mit und kommen öfter.', cost: 3_000_000, level: 5, days: 3 },
+  cruise: { name: 'Kreuzfahrt-Terminal', text: 'Touristen bringen jeden Tag 40.000 € und etwas Ruf.', cost: 5_000_000, level: 6, days: 4 },
+  control: { name: 'Automatische Leitzentrale', text: 'Trucks bekommen ihren nächsten Auftrag sofort und fahren 10 % schneller.', cost: 8_000_000, level: 7, days: 5 },
+  canal: { name: 'Tiefwasserkanal', text: 'Alle Liegeplätze gelten als ausgebaggert. Große Schiffe brauchen nur noch genug Kai.', cost: 12_000_000, level: 8, days: 6 },
+  logistics: { name: 'Logistikpark', text: 'Export bringt 25 % mehr, Lieferaufträge zahlen 30 % mehr.', cost: 15_000_000, level: 9, days: 6 },
+  tower: { name: 'Hafen-Wahrzeichen', text: 'Ein Turm, den jeder kennt: Ruf steigt täglich, Gebühren +5 %.', cost: 25_000_000, level: 10, days: 8 },
+  freezone: { name: 'Freihandelszone', text: 'Containergebühren +10 %.', cost: 40_000_000, level: 11, days: 10 },
+};
+export const PROJECT_IDS = Object.keys(PROJECTS) as ProjectId[];

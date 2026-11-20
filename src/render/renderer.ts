@@ -32,8 +32,9 @@ export interface View {
   rect: { x0: number; y0: number; x1: number; y1: number } | null;
 }
 
-const W = GRID_W * TILE;
-const H = GRID_H * TILE;
+/** Kartengröße in Pixeln. Ändert sich, wenn ein Gesetz die Karte vergrößert (siehe syncSize). */
+let W = GRID_W * TILE;
+let H = GRID_H * TILE;
 const COAST = COAST_ROW * TILE;
 /** Einfarbige Fläche weit außerhalb der Karte. */
 const FAR = 120 * TILE;
@@ -527,6 +528,9 @@ export class Renderer {
     g.clear();
     for (const c of this.decor.removeChildren()) c.destroy();
     this.baseMap = map;
+    // Wasserflächen an die Kartenbreite anpassen (größere Karte nach einem Gesetz)
+    this.waves.width = this.swell.width = W + 2 * WATER_EXT;
+    this.waves.height = this.swell.height = WATER_EXT + COAST - 4;
     if (map === 'island') {
       // Ringsum Meer, zur Insel hin heller
       g.rect(-FAR, -FAR, W + 2 * FAR, H + 2 * FAR).fill(C.deep);
@@ -584,6 +588,7 @@ export class Renderer {
 
   private drawGrid() {
     const g = this.grid;
+    g.clear();
     for (let x = 0; x <= GRID_W; x++) g.rect(x * TILE - 0.5, COAST, 1, H - COAST).fill({ color: 0xffffff, alpha: 0.16 });
     for (let y = COAST_ROW; y <= GRID_H; y++) g.rect(0, y * TILE - 0.5, W, 1).fill({ color: 0xffffff, alpha: 0.16 });
     g.visible = false;
@@ -1755,6 +1760,16 @@ export class Renderer {
     if (this.simRef !== sim) {
       this.resetViews();
       this.simRef = sim;
+      this.version = -1;
+    }
+    // Andere Kartengröße (Gesetz oder Spielstand): Hintergrund, Raster und Nachtfläche neu
+    if (W !== GRID_W * TILE || H !== GRID_H * TILE) {
+      W = GRID_W * TILE;
+      H = GRID_H * TILE;
+      this.drawBase(sim.map);
+      this.drawGrid();
+      this.night.clear();
+      this.night.rect(-FAR, -FAR, W + 2 * FAR, H + 2 * FAR).fill(0xffffff);
       this.version = -1;
     }
     if (this.baseMap !== sim.map) this.drawBase(sim.map);

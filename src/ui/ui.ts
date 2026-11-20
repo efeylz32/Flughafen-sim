@@ -29,6 +29,10 @@ import { INSURANCE, OVERPASS_LEVEL, PLANT_LEVELS, MAX_ORDERS, ORDER_KINDS,
   SHIP_PATIENCE_GM,
   MAX_LEVEL,
   LV,
+  MAP_SIZES,
+  PROJECTS,
+  PROJECT_IDS,
+  type ProjectId,
   GRID_W,
   YARD_USES,
   TRAITS,
@@ -311,6 +315,7 @@ export class UI {
   private ghostKey = '';
   private usedPick!: HTMLElement;
   private techModal!: HTMLElement;
+  private lawConfirm = false;
   private techBody!: HTMLElement;
   private techBadge!: HTMLElement;
   private lastTech = '';
@@ -492,7 +497,7 @@ export class UI {
       this.game.toggleOverlay();
       click();
     });
-    const techBtn = mk(ICONS.tech, 'Verbesserungen', () => {
+    const techBtn = mk(ICONS.tech, 'Ausbau: Verbesserungen, Großprojekte, Hafenerweiterung', () => {
       this.techModal.classList.remove('hidden');
       this.renderTech(true);
       click();
@@ -757,7 +762,7 @@ export class UI {
 
     // Verbesserungen
     this.techModal = el('div', 'modal hidden');
-    this.techModal.innerHTML = `<div class="dialog deals"><div class="dhead"><h2>Verbesserungen</h2><button class="x" aria-label="Schließen">${ICONS.close}</button></div><div class="body"></div></div>`;
+    this.techModal.innerHTML = `<div class="dialog deals"><div class="dhead"><h2>Ausbau</h2><button class="x" aria-label="Schließen">${ICONS.close}</button></div><div class="body"></div></div>`;
     this.techBody = this.techModal.querySelector('.body')!;
     this.techModal.querySelector('.x')!.addEventListener('click', () => this.techModal.classList.add('hidden'));
     this.techModal.addEventListener('click', (e) => {
@@ -766,6 +771,26 @@ export class UI {
       const b = t.closest<HTMLElement>('[data-tech]');
       if (b) {
         this.game.buyTech(b.dataset.tech as TechId);
+        this.renderTech(true);
+      }
+      const pj = t.closest<HTMLElement>('[data-proj]');
+      if (pj) {
+        const r = this.game.sim.startProject(pj.dataset.proj as ProjectId);
+        if (!r.ok) this.game.fail(r.reason ?? 'Nicht möglich');
+        else {
+          this.game.sound.play('buildBig');
+          this.toast(`Großprojekt begonnen: ${PROJECTS[pj.dataset.proj as ProjectId].name}`, 'good');
+        }
+        this.renderTech(true);
+      }
+      if (t.closest('[data-law]')) {
+        if (!this.lawConfirm) this.lawConfirm = true;
+        else {
+          this.lawConfirm = false;
+          const r = this.game.enactLaw();
+          if (r) this.game.fail(r);
+          else this.techModal.classList.add('hidden');
+        }
         this.renderTech(true);
       }
     });
@@ -1931,11 +1956,40 @@ export class UI {
 
   private renderTech(force: boolean) {
     const sim = this.game.sim;
-    const key = `${sim.level}|${Math.floor(sim.money / 5000)}|${TECH_IDS.map((id) => sim.tech[id]).join(',')}`;
+    const key = `${sim.level}|${Math.floor(sim.money / 5000)}|${TECH_IDS.map((id) => sim.tech[id]).join(',')}|${sim.projects.join()}|${sim.projBuild ? Math.ceil(sim.projBuild.left / 60) : ''}|${sim.size}|${this.lawConfirm}`;
     if (!force && key === this.lastTech) return;
     this.lastTech = key;
+    // Großprojekte: einmalig, teuer, mit Bauzeit
+    const pb = sim.projBuild;
+    const projects = PROJECT_IDS.map((id) => {
+      const p = PROJECTS[id];
+      const done = sim.hasProject(id);
+      const building = pb?.id === id;
+      const chk = sim.canStartProject(id);
+      const btn = done
+        ? '<span class="tag good">gebaut</span>'
+        : building
+          ? `<div class="progress"><span style="width:${Math.round((1 - pb!.left / (p.days * 1440)) * 100)}%"></span></div><div class="sub">Im Bau, noch ${Math.ceil(pb!.left / 1440 * 10) / 10} Tage</div>`
+          : sim.level < p.level
+            ? `<div class="locknote">${ICONS.lock}<span>Ab Hafenstufe ${p.level} (${LEVELS[p.level - 1].name})</span></div>`
+            : `<button class="primary" data-proj="${id}" ${chk.ok ? '' : 'disabled'}>Bauen · ${eur(sim.projectCost(id))} · ${p.days} Tage</button>${chk.ok ? '' : `<div class="sub">${chk.reason}</div>`}`;
+      return `<div class="deal tech ${done ? 'done' : ''}"><div class="dl"><b>${p.name}</b></div><div class="sub">${p.text}</div>${btn}</div>`;
+    }).join('');
+    // Hafenerweiterungsgesetz: größere Karte, der alte Hafen wird verkauft
+    const law = sim.nextLaw;
+    const lawChk = sim.canExpand();
+    const sale = Math.round(sim.portValue() * 0.5);
+    const lawHtml = law
+      ? `<div class="deal tech law"><div class="dl"><b>${law.name}</b><span class="tag">Karte ${sim.size + 1} → ${sim.size + 2} von ${MAP_SIZES.length}</span></div>
+        <div class="sub">Neue, größere Karte vom selben Typ: ${MAP_SIZES[sim.size + 1].join(' × ')} statt ${MAP_SIZES[sim.size].join(' × ')} Felder, Hügel und Küste neu gewürfelt. Dein jetziger Hafen wird für etwa ${eur(sale)} verkauft. Stufe, Geld, Verbesserungen, Großprojekte, Ruf und alle Zähler bleiben. Verträge enden ohne Strafe, Personal stellst du beim Bauen neu ein.</div>
+        ${
+          sim.level < law.level
+            ? `<div class="locknote">${ICONS.lock}<span>Ab Hafenstufe ${law.level} (${LEVELS[law.level - 1].name})</span></div>`
+            : `<button class="${this.lawConfirm ? 'danger' : 'primary'}" data-law="1" ${lawChk.ok ? '' : 'disabled'}>${this.lawConfirm ? `Wirklich beschließen? Der Hafen wird verkauft` : `Beschließen · ${eur(law.cost)}`}</button>${lawChk.ok ? '' : `<div class="sub">${lawChk.reason}</div>`}`
+        }</div>`
+      : `<p class="sub">Du baust schon auf der größten Karte (${MAP_SIZES[sim.size].join(' × ')} Felder).</p>`;
     this.techBody.innerHTML =
-      `<p class="sub">Kleine Verbesserungen für den ganzen Hafen. Jede Stufe kostet mehr und wird mit der Hafenstufe freigeschaltet.</p>` +
+      `<h3>Hafenerweiterung</h3>${lawHtml}<h3>Großprojekte</h3><p class="sub">Einmalig und teuer, dafür dauerhaft. Es wird immer nur ein Projekt gleichzeitig gebaut.</p>${projects}<h3>Verbesserungen</h3><p class="sub">Kleine Verbesserungen für den ganzen Hafen. Jede Stufe kostet mehr und wird mit der Hafenstufe freigeschaltet.</p>` +
       TECH_IDS.map((id) => {
         const t = TECH[id];
         const n = sim.tech[id];

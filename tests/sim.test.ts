@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { COAST_ROW, GRID_H, GRID_W, MAX_LEVEL, T, TECH, TECH_IDS, TICKS_PER_SEC } from '../src/sim/data';
+import { COAST_ROW, GRID_H, GRID_W, MAX_LEVEL, setGridSize, T, TECH, TECH_IDS, TICKS_PER_SEC } from '../src/sim/data';
 import { completion } from '../src/sim/progression';
 import { buildDemo } from '../src/sim/demo';
 import { Sim } from '../src/sim/sim';
@@ -567,7 +567,8 @@ describe('Ziel, Pleite, Kredit', () => {
     run(s, 25);
     for (const e of s.drainEvents()) if (e.tag) tags.push(e.tag);
     expect(s.completedDay).toBe(0);
-    expect(completion(s).items.filter((i) => i.value < i.goal).length).toBe(2);
+    // Es fehlen noch: größte Karte, Großprojekte, Land der größten Karte, Super-Brücken, Hallen
+    expect(completion(s).items.filter((i) => i.value < i.goal).length).toBe(5);
   });
 
   it('Alte Spielstände mit 7 Stufen werden auf die neue Reihe abgebildet, Sieg wird zu weiterspielen', () => {
@@ -1808,5 +1809,64 @@ describe('Tagesaufgabe und neue Szenarien', () => {
     expect(z.level).toBe(5);
     run(z, 6);
     expect(z.status).toBe('play');
+  });
+});
+
+describe('Hafenerweiterung und Großprojekte', () => {
+  it('Gesetz: neue, größere Karte vom selben Typ, Fortschritt bleibt, alter Hafen wird verkauft', () => {
+    const s = bigPort(7, 6);
+    s.money = 10_000_000;
+    s.tech.spreader = 3;
+    s.handled = 200_000;
+    const before = { level: s.level, money: s.money, value: s.portValue() };
+    expect(s.canExpand().ok).toBe(true);
+    const n = s.expand();
+    try {
+      expect(n.size).toBe(1);
+      expect(n.kind.length).toBe(48 * 36);
+      expect(GRID_W).toBe(48);
+      expect(n.level).toBe(before.level);
+      expect(n.tech.spreader).toBe(3);
+      expect(n.handled).toBe(200_000);
+      expect(n.cranes.length).toBe(0);
+      expect(n.money).toBe(before.money - 5_000_000 + Math.round(before.value * 0.5));
+      expect(n.map).toBe(s.map);
+      // Auf der neuen Karte lässt sich bauen und spielen
+      expect(n.build('kai', 10, k).ok).toBe(true);
+      run(n, 2);
+      // Speichern und Laden mit Größe
+      const c = Sim.deserialize(JSON.parse(JSON.stringify(n.serialize())));
+      expect(c.size).toBe(1);
+      expect(c.kind.length).toBe(48 * 36);
+      // Inseln werden größer, aber nicht gleich: andere Hügel als beim Seed davor
+      setGridSize(1);
+      const i1 = new Sim(5, 'normal', 'island');
+      const i2 = new Sim(6, 'normal', 'island');
+      expect(Array.from(i1.kind).join('')).not.toBe(Array.from(i2.kind).join(''));
+    } finally {
+      setGridSize(0);
+    }
+  });
+
+  it('Gesetz erst ab Stufe 7 und nicht dreimal', () => {
+    const s = bigPort(6, 2);
+    s.money = 1e9;
+    expect(s.canExpand().ok).toBe(false);
+  });
+
+  it('Großprojekte: Bauzeit, nur eines gleichzeitig, Wirkung', () => {
+    const s = bigPort(8, 6);
+    s.money = 100_000_000;
+    expect(s.startProject('cruise').ok).toBe(true);
+    expect(s.canStartProject('bahnhof').ok).toBe(false);
+    expect(s.hasProject('cruise')).toBe(false);
+    run(s, 4 * 24 + 2);
+    expect(s.hasProject('cruise')).toBe(true);
+    expect(s.startProject('canal').ok).toBe(true);
+    run(s, 6 * 24 + 2);
+    // Tiefwasserkanal: ohne Baggern gilt der Liegeplatz als tief
+    expect(s.hasDeepBerth(6)).toBe(true);
+    const c = Sim.deserialize(JSON.parse(JSON.stringify(s.serialize())));
+    expect(c.projects).toEqual(['cruise', 'canal']);
   });
 });

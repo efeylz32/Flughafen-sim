@@ -1,4 +1,4 @@
-import { LEVELS, MAX_LEVEL, TECH, TECH_IDS } from './data';
+import { LAWS, LEVELS, MAP_SIZES, MAX_LEVEL, PROJECT_IDS, TECH, TECH_IDS } from './data';
 import type { Sim } from './sim';
 
 /**
@@ -57,7 +57,9 @@ export function completion(s: Sim): { items: CompletionItem[]; share: number; do
   const items: CompletionItem[] = [
     { label: `Hafenstufe ${MAX_LEVEL}: ${LEVELS[MAX_LEVEL - 1].name}`, value: s.level, goal: MAX_LEVEL },
     { label: 'Alle Verbesserungen auf der höchsten Stufe (ohne Akkord und Billigdiesel)', value: techNow, goal: techMax },
-    { label: 'Das ganze Land gekauft', value: owned, goal: plots },
+    { label: `Größte Karte (${MAP_SIZES[LAWS.length].join(' × ')} Felder, beide Gesetze)`, value: s.size, goal: LAWS.length },
+    { label: 'Alle Großprojekte gebaut', value: s.projects.length, goal: PROJECT_IDS.length },
+    { label: 'Das ganze Land der größten Karte gekauft', value: s.size === LAWS.length ? owned : 0, goal: s.size === LAWS.length ? plots : MAP_SIZES[LAWS.length][0] },
     { label: `${COMPLETE_SUPER} Super-Brücken`, value: s.cranes.filter((c) => c.model === 'super').length, goal: COMPLETE_SUPER },
     { label: 'Mindestens 4 Hallen, alle auf Stufe 3', value: s.plants.filter((p) => (p.lvl ?? 1) >= 3).length, goal: Math.max(4, s.plants.length) },
     { label: '100 Mega-Frachter abgefertigt', value: s.megaDone, goal: 100 },

@@ -641,3 +641,10 @@ html, body { touch-action: none; overscroll-behavior: none; }
 #hud .decision .opts button { background: linear-gradient(180deg, #2f5f95, #234b78); color: #fff; box-shadow: 0 4px 0 #0f2845; font-family: var(--display); font-size: 16px; }
 #hud .dialog.menu.mainmenu .daily { background: linear-gradient(180deg, #33ad73, #208455); box-shadow: 0 4px 0 #0f4d30, 0 8px 16px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.18); font-size: 16px; padding: 11px 14px; }
 #hud .dialog.menu.mainmenu .daily .mi { color: #fff3c2; }
+
+.deal.tech.done { opacity: .75; }
+.deal.tech.law { background: linear-gradient(180deg, #fff7e0, #ffefc7); border-color: #f2c76a; }
+.deal .tag.good { background: #e3f4ea; color: var(--good); }
+.deal .progress { height: 10px; border-radius: 5px; background: #e6ebf2; overflow: hidden; }
+.deal .progress span { display: block; height: 100%; background: linear-gradient(90deg, #f6b42c, #ffd25a); }
+#hud .dialog:not(.menu) .danger { background: linear-gradient(180deg, #e65a52, #c43c35); color: #fff; box-shadow: 0 4px 0 #7c1e1a; border: 0; border-radius: 12px; padding: 12px; font-family: var(--display); font-weight: 800; }
