@@ -12,6 +12,8 @@
     "playtest": "PLAYTEST=1 vitest run tests/playtest.test.ts --disableConsoleIntercept"
   },
   "dependencies": {
+    "@fontsource/baloo-2": "^5.3.0",
+    "@fontsource/nunito": "^5.3.0",
     "pixi.js": "^8.23.0"
   },
   "devDependencies": {

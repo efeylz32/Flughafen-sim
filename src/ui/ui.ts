@@ -1010,20 +1010,21 @@ export class UI {
         const mi = (icon: string, label: string, attrs: string, cls = 'mbtn') => `<button class="${cls}" ${attrs}><span class="mi">${icon}</span><span class="ml">${label}</span></button>`;
         body = `
           <div class="brand">
-            <div class="anchor">${ANCHOR}</div>
+            <div class="crest"><span class="ring"></span><span class="anchor">${ANCHOR}</span></div>
             <h1 class="title"><span class="t1">PORT</span><span class="t2">EMPIRE</span></h1>
-            <p class="tagline">Vom Anleger zum Weltklasse-Hafen</p>
+            <div class="ribbon"><span>Containerhafen-Tycoon</span></div>
           </div>
           ${note}
           ${m ? `<button class="hero" data-act="resume"><span class="ml">Weiterspielen</span><small>Tag ${m.day} · ${m.levelName} · ${eur(m.money)}</small></button>` : ''}
-          ${m ? mi(ICONS.crane, 'Neues Spiel', 'data-act="view" data-arg="new"') : `<button class="hero" data-act="view" data-arg="new"><span class="ml">Neues Spiel</span><small>Baue deinen ersten Hafen</small></button>`}
+          ${m ? mi(ICONS.crane, 'Neues Spiel', 'data-act="view" data-arg="new"', 'mbtn wide') : `<button class="hero" data-act="view" data-arg="new"><span class="ml">Neues Spiel</span><small>Vom Anleger zum Weltklasse-Hafen</small></button>`}
           <div class="mgrid">
             ${mi(ICONS.paste, 'Laden', 'data-act="view" data-arg="saves"')}
             ${mi(ICONS.trophy, 'Erfolge', 'data-act="achv"')}
-            ${mi(ICONS.tech, 'Einstellungen', 'data-act="view" data-arg="settings"')}
+            ${mi(ICONS.tech, 'Optionen', 'data-act="view" data-arg="settings"')}
             ${mi(ICONS.eye, 'Hilfe', 'data-act="view" data-arg="help"')}
           </div>
-          ${this.standalone ? '' : mi(ICONS.star, 'Als App installieren', 'data-act="install"', 'mbtn install')}`;
+          ${this.standalone ? '' : `<button class="linkbtn" data-act="install">${ICONS.star}<span>Als App installieren</span></button>`}
+          <div class="mfoot">Version 1.0 · auch offline spielbar</div>`;
         break;
       }
       case 'install': {
@@ -1318,7 +1319,7 @@ export class UI {
     const t = el('div', `toast ${kind}`);
     t.textContent = text;
     this.toasts.appendChild(t);
-    while (this.toasts.children.length > 4) this.toasts.firstElementChild?.remove();
+    while (this.toasts.children.length > 3) this.toasts.firstElementChild?.remove();
     setTimeout(() => t.classList.add('out'), 3600);
     setTimeout(() => t.remove(), 4000);
   }

@@ -378,7 +378,7 @@ export class Renderer {
       t = new Text({
         text,
         style: {
-          fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+          fontFamily: '"Baloo 2", "Nunito", system-ui, -apple-system, sans-serif',
           fontSize: 13,
           fontWeight: '800',
           fill: 0xffffff,
@@ -1320,7 +1320,7 @@ export class Renderer {
     const label = new Text({
       text: s.name,
       style: {
-        fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+        fontFamily: '"Baloo 2", "Nunito", system-ui, -apple-system, sans-serif',
         fontSize: 11,
         fontWeight: '800',
         fill: 0xffffff,

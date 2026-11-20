@@ -6,6 +6,11 @@ import { setupInput } from './ui/input';
 import { UI } from './ui/ui';
 
 async function boot() {
+  // Spielschrift laden, bevor die Karte Texte (Schiffsnamen, Beträge) zeichnet; höchstens kurz warten
+  await Promise.race([
+    Promise.all(['800 16px "Baloo 2"', '700 16px "Baloo 2"', '700 16px Nunito', '800 16px Nunito'].map((f) => document.fonts.load(f))).catch(() => undefined),
+    new Promise((r) => setTimeout(r, 1200)),
+  ]);
   const game = new Game();
   const host = document.getElementById('game')!;
   const hud = document.getElementById('hud')!;
