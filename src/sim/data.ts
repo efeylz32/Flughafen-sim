@@ -75,24 +75,39 @@ export const UNLOCK: Record<BuildTool, number> = {
   yard: 1,
   gate: 1,
   truck: 1,
-  reefer: 3,
-  rail: 3,
-  dredge: 3,
+  parking: 1,
   unpack: 2,
   pack: 2,
-  cold: 3,
   workshop: 2,
-  rtg: 3,
   road2: 2,
-  solar: 2,
-  track: 3,
-  parking: 1,
-  battery: 3,
-  customs: 2,
-  hwy: 3,
-  hazard: 3,
   emptyyard: 2,
-  fill: 3,
+  solar: 3,
+  rail: 3,
+  track: 3,
+  dredge: 3,
+  reefer: 4,
+  cold: 4,
+  hazard: 4,
+  fill: 4,
+  rtg: 4,
+  battery: 4,
+  hwy: 4,
+  customs: 5,
+};
+/** Ab welcher Hafenstufe Systeme und Inhalte dazukommen (damit sich das Spiel über viele Stufen entfaltet) */
+export const LV = {
+  /** Gefahrgut und Kühlfracht an Bord, große Schiffe im Vertrag, Richtung wählen */
+  cargo: 4,
+  big: 4,
+  spec: 4,
+  /** Mega-Frachter */
+  mega: 6,
+  /** Zoll, Versicherung */
+  customs: 5,
+  insurance: 5,
+  /** Wartungsfenster, Lieferaufträge */
+  maint: 3,
+  orders: 3,
 };
 /** Kranmodelle. Aufrüsten führt jeweils zum nächsten Modell. */
 export type CraneModel = 'light' | 'mobile' | 'bridge' | 'super';
@@ -102,7 +117,7 @@ export const CRANE_MODELS: Record<
 > = {
   light: { name: 'Leichtkran', move: 4.5, run: 600, buffer: 3, big: false, next: 'mobile', upCost: 50_000, upLevel: 1, color: 0xe0a526, text: 'Billig und genügsam, aber langsam' },
   mobile: { name: 'Mobilkran', move: 3, run: 1_200, buffer: 4, big: false, next: 'bridge', upCost: 120_000, upLevel: 2, color: 0xe2582c, text: 'Der Standard für kleine Liegeplätze' },
-  bridge: { name: 'Containerbrücke', move: 1.5, run: 2_500, buffer: 8, big: true, next: 'super', upCost: 200_000, upLevel: 4, color: 0x2f6db0, text: 'Steht auf zwei Kai-Feldern, doppelt so schnell' },
+  bridge: { name: 'Containerbrücke', move: 1.5, run: 2_500, buffer: 8, big: true, next: 'super', upCost: 200_000, upLevel: 6, color: 0x2f6db0, text: 'Steht auf zwei Kai-Feldern, doppelt so schnell' },
   super: { name: 'Super-Brücke', move: 1, run: 3_800, buffer: 10, big: true, next: null, upCost: 0, upLevel: 0, color: 0x1f7a6d, text: 'Für Mega-Frachter: 60 Moves pro Stunde' },
 };
 /** Moves pro Stunde eines Modells (ohne Verschleiß und Verbesserungen) */
@@ -111,16 +126,16 @@ export const movesPerHour = (m: CraneModel) => Math.round(60 / CRANE_MODELS[m].m
 /** Kleine Verbesserungen in Stufen. Jede Stufe kostet mehr und braucht eine Mindest-Hafenstufe. */
 export type TechId = 'spreader' | 'scanner' | 'stack' | 'sales' | 'radio' | 'engine' | 'cool' | 'maint' | 'akkord' | 'diesel';
 export const TECH: Record<TechId, { name: string; text: string; per: string; cost: number[]; level: number[] }> = {
-  spreader: { name: 'Twin-Spreader', text: 'Kräne laden und löschen schneller.', per: '+10 % Kranmoves', cost: [30_000, 60_000, 120_000], level: [1, 2, 3] },
-  scanner: { name: 'Gate-Scanner', text: 'Gates fertigen Container schneller ab.', per: '+20 % Gate-Tempo', cost: [25_000, 50_000, 100_000], level: [1, 2, 3] },
-  stack: { name: 'Stapeltechnik', text: 'Höher stapeln: mehr Container pro Lagerfeld.', per: '+1 Container pro Feld', cost: [40_000, 90_000], level: [2, 3] },
-  sales: { name: 'Vertrieb', text: 'Bessere Konditionen bei Spediteuren.', per: '+5 % auf Containergebühren', cost: [50_000, 100_000, 200_000], level: [2, 3, 4] },
-  radio: { name: 'Leitstelle', text: 'Digitaler Funk: Automatik-Trucks bekommen schneller ihren nächsten Auftrag.', per: '−30 % Funkzeit', cost: [20_000, 50_000], level: [1, 2] },
-  engine: { name: 'Motoren', text: 'Stärkere Zugmaschinen.', per: '+8 % Truck-Tempo', cost: [30_000, 70_000, 140_000], level: [1, 2, 3] },
-  cool: { name: 'Kühltechnik', text: 'Bessere Aggregate an den Kühlplätzen.', per: '+30 % Haltbarkeit', cost: [30_000, 60_000], level: [3, 3] },
-  akkord: { name: 'Akkord-Schichten', text: 'Kräne arbeiten schneller, aber die Belegschaft wird öfter krank, die Stimmung sinkt und überlastete Kräne haben eher Unfälle.', per: '+20 % Kranmoves, doppelter Krankenstand', cost: [60_000], level: [2] },
+  spreader: { name: 'Twin-Spreader', text: 'Kräne laden und löschen schneller.', per: '+10 % Kranmoves', cost: [30_000, 60_000, 120_000, 240_000, 420_000], level: [1, 2, 4, 6, 9] },
+  scanner: { name: 'Gate-Scanner', text: 'Gates fertigen Container schneller ab.', per: '+20 % Gate-Tempo', cost: [25_000, 50_000, 100_000, 200_000, 360_000], level: [1, 2, 4, 7, 10] },
+  stack: { name: 'Stapeltechnik', text: 'Höher stapeln: mehr Container pro Lagerfeld.', per: '+1 Container pro Feld', cost: [40_000, 90_000, 180_000, 340_000], level: [2, 4, 7, 10] },
+  sales: { name: 'Vertrieb', text: 'Bessere Konditionen bei Spediteuren.', per: '+5 % auf Containergebühren', cost: [50_000, 100_000, 200_000, 350_000, 550_000], level: [2, 3, 5, 8, 11] },
+  radio: { name: 'Leitstelle', text: 'Digitaler Funk: Automatik-Trucks bekommen schneller ihren nächsten Auftrag.', per: '−30 % Funkzeit', cost: [20_000, 50_000, 120_000], level: [1, 3, 6] },
+  engine: { name: 'Motoren', text: 'Stärkere Zugmaschinen.', per: '+8 % Truck-Tempo', cost: [30_000, 70_000, 140_000, 260_000, 420_000], level: [1, 2, 4, 7, 10] },
+  cool: { name: 'Kühltechnik', text: 'Bessere Aggregate an den Kühlplätzen.', per: '+30 % Haltbarkeit', cost: [30_000, 60_000, 120_000], level: [4, 5, 8] },
+  akkord: { name: 'Akkord-Schichten', text: 'Kräne arbeiten schneller, aber die Belegschaft wird öfter krank, die Stimmung sinkt und überlastete Kräne haben eher Unfälle.', per: '+20 % Kranmoves, doppelter Krankenstand', cost: [60_000], level: [3] },
   diesel: { name: 'Billigdiesel', text: 'Trucks sind günstiger im Betrieb, verschleißen aber schneller.', per: '−40 % Truck-Betriebskosten, +30 % Verschleiß', cost: [40_000], level: [2] },
-  maint: { name: 'Wartungsplan', text: 'Vorbeugende Wartung.', per: '−20 % Verschleiß', cost: [30_000, 60_000, 120_000], level: [2, 3, 4] },
+  maint: { name: 'Wartungsplan', text: 'Vorbeugende Wartung.', per: '−20 % Verschleiß', cost: [30_000, 60_000, 120_000, 240_000], level: [2, 4, 6, 9] },
 };
 export const TECH_IDS = Object.keys(TECH) as TechId[];
 
@@ -128,7 +143,7 @@ export const UPGRADE = {
   /** Kran zum nächsten Modell (Kosten und Stufe stehen in CRANE_MODELS) */
   crane: { cost: 120_000, level: 2 },
   /** Truck zum fahrerlosen Fahrzeug: schneller und billiger im Betrieb */
-  truck: { cost: 30_000, level: 4 },
+  truck: { cost: 30_000, level: 6 },
 };
 export const REFUND = 0.5;
 
@@ -277,7 +292,7 @@ export const TRUCK_CAP = 2; // Container pro Fahrt
 export const TRUCK_PATIENCE_GM = 10;
 /** Überführung an einer Kreuzung: Preis und ab welcher Stufe */
 export const OVERPASS_COST = 20_000;
-/** Zoll: Anteil der Import-Container, die ab Stufe 2 kontrolliert werden müssen */
+/** Zoll: Anteil der Import-Container, die ab Stufe LV.customs kontrolliert werden müssen */
 export const CUSTOMS_SHARE = 0.12;
 /** Ohne Zollhof prüft das Gate selbst und braucht so viel länger */
 export const CUSTOMS_GATE_SLOW = 3;
@@ -290,18 +305,18 @@ export const MAINT_COST = 2_500;
 /** Lieferaufträge von Firmen im Hinterland */
 export type OrderKind = 'road' | 'rail' | 'export' | 'goods';
 export const ORDER_KINDS: Record<OrderKind, { text: string; level: number; share: number; per: number }> = {
-  road: { text: 'Container per Lkw abholen', level: 2, share: 0.75, per: 11 },
-  rail: { text: 'Container per Bahn abholen', level: 2, share: 0.75, per: 12 },
-  export: { text: 'Export-Container aufs Schiff bringen', level: 2, share: 0.65, per: 14 },
-  goods: { text: 'Ladungen Ware aus den Hallen', level: 3, share: 0.8, per: 70 },
+  road: { text: 'Container per Lkw abholen', level: 3, share: 0.75, per: 11 },
+  rail: { text: 'Container per Bahn abholen', level: 3, share: 0.75, per: 12 },
+  export: { text: 'Export-Container aufs Schiff bringen', level: 3, share: 0.65, per: 14 },
+  goods: { text: 'Ladungen Ware aus den Hallen', level: 4, share: 0.8, per: 70 },
 };
 export const ORDER_FIRMS = ['Elektro Weser', 'Modehaus Lindgren', 'Frischkontor Nord', 'Möbel Hansen', 'Autoteile Brandt', 'Kaffeerösterei Albers', 'Spielwaren Kühn', 'Baustoff Petersen'];
 export const MAX_ORDERS = 2;
 /** Hallen-Stufen: Preis als Anteil des Neupreises, Tempo, Puffer, Bauzeit (Spielminuten), ab Hafenstufe */
 export const PLANT_LEVELS = [
   { cost: 0, speed: 1, buf: 0, time: 0, level: 0 },
-  { cost: 0.6, speed: 1.4, buf: 2, time: 240, level: 3 },
-  { cost: 1, speed: 1.8, buf: 4, time: 360, level: 4 },
+  { cost: 0.6, speed: 1.4, buf: 2, time: 240, level: 5 },
+  { cost: 1, speed: 1.8, buf: 4, time: 360, level: 7 },
 ] as const;
 /** Versicherung: Stufen mit Tagesprämie und Erstattungsanteil bei Unfall, Verderb und Sturmschäden */
 export const INSURANCE = [
@@ -313,7 +328,7 @@ export const MAINT_GM = 120;
 export const MAINT_HOUR = 22;
 export const MAINT_WEAR = 0.3;
 export const MAINT_CARE_GM = 3 * 24 * 60;
-export const OVERPASS_LEVEL = 2;
+export const OVERPASS_LEVEL = 3;
 /** So lange wartet ein Truck höchstens auf Querverkehr an einer Kreuzung (Spielminuten) */
 export const CROSS_WAIT_GM = 3;
 
@@ -413,53 +428,64 @@ export const ROUTINE_HANDLE = 0.5;
 export const REEFER_FEE = 400;
 export const EXPORT_FEE = 250;
 
-// Hafenstufen: `need` ist die Zahl der insgesamt umgeschlagenen Container
+// Hafenstufen: `need` ist die Zahl der insgesamt umgeschlagenen Container. Dazu kommt ab Stufe 3 je ein
+// Meilenstein (siehe progression.ts). Es gibt keinen Sieg: Am Ende steht die Vollendung, wenn alles ausgebaut ist.
 export const LEVELS = [
   { name: 'Anleger', need: 0, bonus: 0, contracts: 0 },
-  { name: 'Regionalhafen', need: 1_000, bonus: 40_000, contracts: 2 },
-  { name: 'Handelshafen', need: 7_000, bonus: 100_000, contracts: 3 },
-  { name: 'Seehafen', need: 17_000, bonus: 180_000, contracts: 4 },
-  { name: 'Weltklasse-Hafen', need: 36_000, bonus: 300_000, contracts: 5 },
-  // Nach dem Ziel geht es weiter
-  { name: 'Mega-Hub', need: 70_000, bonus: 400_000, contracts: 6 },
-  { name: 'Welthafen', need: 120_000, bonus: 600_000, contracts: 7 },
+  { name: 'Regionalhafen', need: 1_500, bonus: 30_000, contracts: 2 },
+  { name: 'Küstenhafen', need: 7_000, bonus: 50_000, contracts: 2 },
+  { name: 'Handelshafen', need: 20_000, bonus: 80_000, contracts: 3 },
+  { name: 'Seehafen', need: 45_000, bonus: 110_000, contracts: 3 },
+  { name: 'Großhafen', need: 90_000, bonus: 150_000, contracts: 4 },
+  { name: 'Containerdrehkreuz', need: 160_000, bonus: 200_000, contracts: 4 },
+  { name: 'Mega-Hub', need: 260_000, bonus: 250_000, contracts: 5 },
+  { name: 'Kontinentalhafen', need: 400_000, bonus: 300_000, contracts: 5 },
+  { name: 'Welthafen', need: 580_000, bonus: 350_000, contracts: 6 },
+  { name: 'Weltmarktführer', need: 800_000, bonus: 400_000, contracts: 6 },
+  { name: 'Port Empire', need: 1_100_000, bonus: 500_000, contracts: 7 },
 ];
-/** Mit dieser Stufe ist das Spiel gewonnen. Danach geht es ohne Frist weiter. */
-export const GOAL_LEVEL = 5;
-/** Was jede Stufe neu bringt (für die Anzeige beim Aufstieg). */
+export const MAX_LEVEL = LEVELS.length;
+/** Was jede Stufe neu bringt (für die Anzeige beim Aufstieg). Index = Stufe − 1. */
 export const LEVEL_NEWS: { title: string; text: string }[][] = [
   [],
   [
     { title: 'Export', text: 'Schiffe wollen jetzt auch beladen werden. Export-Container kommen über das Gate und bringen 250 € pro Stück.' },
-    { title: 'Mehr Verträge', text: 'Bis zu 2 Daueraufträge gleichzeitig. Nur über Verträge kommen größere Schiffe.' },
+    { title: 'Verträge', text: 'Bis zu 2 Daueraufträge gleichzeitig. Nur über Verträge kommen größere Schiffe.' },
     { title: 'Containerbrücke', text: 'Tippe einen Kran an und rüste ihn auf. Er arbeitet dann doppelt so schnell.' },
-    { title: 'Leerlager', text: 'Beim Auspacken in der Packhalle bleiben leere Container übrig. Das Leerlager nimmt sie auf (ab Stufe 2).' },
-    { title: 'Verarbeitung', text: 'Die Packhalle packt Container aus, die Veredelung macht aus zwei davon Fertigware für 900 €. Trucks fahren die Ware dazwischen.' },
-    { title: 'Verschleiß und Werkstatt', text: 'Kräne und Trucks nutzen sich ab, werden langsamer und fallen bei 100 % aus. Eine Werkstatt mit Mechaniker repariert sie.' },
-    { title: 'Konkurrenz und Ereignisse', text: 'Hafen Nordstadt wirbt Reedereien ab, wenn du unpünktlich bist. Ab und zu musst du Entscheidungen treffen.' },
-    { title: 'Wetter', text: 'Bei Sturm stehen die Kräne still, bei Nebel ist die Einfahrt gesperrt. Es gibt eine Vorwarnung.' },
+    { title: 'Verarbeitung', text: 'Die Packhalle packt Container aus, die Veredelung macht aus zwei davon Fertigware. Leere Container kommen ins Leerlager.' },
+    { title: 'Verschleiß und Werkstatt', text: 'Kräne und Trucks nutzen sich ab und fallen irgendwann aus. Eine Werkstatt mit Mechaniker repariert sie.' },
+    { title: 'Konkurrenz, Wetter, Ereignisse', text: 'Hafen Nordstadt wirbt Reedereien ab, wenn du unpünktlich bist. Stürme legen Kräne lahm, ab und zu musst du entscheiden.' },
   ],
   [
-    { title: 'Kühlfracht', text: 'Kühlcontainer brauchen Kühlplätze mit Strom und verderben nach 10 Stunden. Sie bringen 400 € pro Stück.' },
-    { title: 'Gefahrgut', text: 'Schiffe bringen Gefahrgut (700 € pro Container). Es braucht eine eigene Gefahrgutfläche mit 2 Feldern Abstand zu Gates, Hallen und Werkstatt.' },
-    { title: 'Befüllhalle', text: 'Macht aus einem leeren Container und Ware einen Export-Container. Das Leergut kommt aus der Packhalle (Leerlager bauen), die Ware aus der Packhalle oder von einem Zug am Gleisanschluss.' },
-    { title: 'Kühlhalle', text: 'Verarbeitet Kühlcontainer vom Kühlplatz zu Lebensmitteln für 750 € statt 400 €.' },
-    { title: 'Gleisanschluss', text: 'Am rechten Kartenrand: Alle 6 Stunden holt ein Zug bis zu 40 Container auf einmal ab.' },
-    { title: 'Baggern', text: 'Vertiefe das Wasser vor dem Kai. Ein tiefer Liegeplatz mit 6 Feldern nimmt große Schiffe mit 300 Containern auf.' },
-    { title: 'Bis zu 3 Verträge', text: 'Auch für Kühlfracht und große Schiffe.' },
+    { title: 'Strom', text: 'Solarfelder liefern Strom für Kräne und Hallen. Bei Stromausfall hilft später eine Batterie.' },
+    { title: 'Bahn', text: 'Gleisanschluss am Kartenrand und Gleise: Ein Zug holt viele Container auf einmal ab.' },
+    { title: 'Baggern', text: 'Vertiefe das Wasser vor dem Kai. So passen später große Schiffe an den Liegeplatz.' },
+    { title: 'Lieferaufträge und Wartung', text: 'Firmen bestellen feste Mengen. Kräne lassen sich nachts warten, dann fallen sie seltener aus.' },
+    { title: 'Überführungen', text: 'An Kreuzungen warten Trucks auf Querverkehr. Eine Überführung hebt das auf.' },
   ],
   [
-    { title: 'Fahrerlose Fahrzeuge', text: 'Tippe einen Truck an und rüste ihn auf. Er fährt dann schneller und kostet weniger im Betrieb.' },
+    { title: 'Kühlfracht und Gefahrgut', text: 'Kühlcontainer brauchen Kühlplätze und verderben nach 10 Stunden. Gefahrgut braucht eigene Flächen mit Abstand.' },
+    { title: 'Große Schiffe', text: 'Verträge mit großen Schiffen (300 Container). Sie brauchen 6 Kai-Felder, davor ausgebaggert.' },
+    { title: 'Portalkran, Befüllhalle, Kühlhalle', text: 'Portalkräne stapeln höher. Die Befüllhalle macht aus Leergut Export, die Kühlhalle Lebensmittel.' },
+    { title: 'Autobahn und Batterie', text: 'Breite Hauptachsen und Strom-Speicher für Ausfälle.' },
+    { title: 'Richtung wählen', text: 'Umschlag-Hub, Logistik-Hafen oder Kühlhafen: Jede Richtung hat Stärken und Schwächen.' },
+  ],
+  [
+    { title: 'Zoll', text: 'Ein Teil der Import-Container muss durch den Zoll. Ohne Zollhof prüft das Gate selbst und braucht dreimal so lange.' },
+    { title: 'Versicherung', text: 'In der Bilanz: deckt Unfälle, Sturmschäden und verdorbene Ware zum Teil ab.' },
+    { title: 'Hallen ausbauen', text: 'Hallen lassen sich auf Stufe 2 ausbauen: schneller, mehr Puffer.' },
+  ],
+  [
+    { title: 'Mega-Frachter', text: '500 Container auf einmal. Sie brauchen 8 Kai-Felder in einer Reihe, davor ausgebaggert.' },
     { title: 'Super-Brücke', text: 'Containerbrücken lassen sich ein letztes Mal aufrüsten: 60 Moves pro Stunde.' },
-    { title: 'Mega-Frachter', text: 'Bringen 500 Container und 16.000 € Liegegebühr. Sie brauchen 8 Kai-Felder in einer Reihe, davor ausgebaggert.' },
-    { title: 'Bis zu 4 Verträge', text: 'Mehr Reedereien können gleichzeitig zu dir fahren.' },
+    { title: 'Fahrerlose Fahrzeuge', text: 'Trucks lassen sich aufrüsten: schneller, billiger im Betrieb, ohne Fahrer.' },
   ],
-  [
-    { title: 'Ziel erreicht', text: 'Du hast gewonnen. Das Spiel geht ohne Frist weiter: Mega-Hub und Welthafen warten.' },
-    { title: 'Bis zu 5 Verträge', text: 'Dein Hafen spielt in der obersten Liga.' },
-  ],
-  [{ title: 'Bis zu 6 Verträge', text: 'Mehr Mega-Frachter, mehr Verträge. Jetzt zählt der Durchsatz.' }],
-  [{ title: 'Bis zu 7 Verträge', text: 'Der größte Hafen der Welt. Alles Weitere ist Rekordjagd.' }],
+  [{ title: 'Hallen Stufe 3', text: 'Die letzte Ausbaustufe für Hallen.' }, { title: 'Mehr Verbesserungen', text: 'Neue Stufen für Stapeltechnik und Leitstelle.' }],
+  [{ title: 'Bis zu 5 Verträge', text: 'Mehr Reedereien gleichzeitig.' }],
+  [{ title: 'Neue Verbesserungsstufen', text: 'Spreader, Wartung und Kühltechnik lassen sich weiter ausbauen.' }],
+  [{ title: 'Bis zu 6 Verträge', text: 'Dein Hafen spielt weltweit ganz oben mit.' }],
+  [{ title: 'Letzte Verbesserungen', text: 'Vertrieb, Stapeltechnik und Gate-Scanner auf die höchste Stufe.' }],
+  [{ title: 'Port Empire', text: 'Die höchste Stufe. Jetzt fehlt nur noch die Vollendung: alles ausbauen.' }],
 ];
 
 /** Spezialisierung ab Stufe 3: Eine Richtung wählen, die anderen sind damit zu. */

@@ -1,4 +1,4 @@
-import { LEVELS } from './sim/data';
+import { LEVELS, MAX_LEVEL } from './sim/data';
 import type { Sim } from './sim/sim';
 
 /** Erfolge gelten pro Browser über alle Spiele hinweg. */
@@ -14,8 +14,9 @@ export const ACHIEVEMENTS: Achievement[] = [
   { id: 'ship100', name: 'Hochbetrieb', text: '100 Schiffe in einem Spiel abgefertigt', done: (s) => s.shipsDone >= 100 },
   { id: 'lvl3', name: LEVELS[2].name, text: 'Stufe 3 erreicht', done: (s) => s.level >= 3 },
   { id: 'fill', name: 'Kreislaufwirtschaft', text: '30 Container in der Befüllhalle befüllt', done: (s) => s.plants.filter((p) => p.kind === 'fill').reduce((n, p) => n + p.made, 0) >= 30 },
-  { id: 'lvl5', name: LEVELS[4].name, text: 'Stufe 5 erreicht', done: (s) => s.level >= 5 },
-  { id: 'lvl7', name: LEVELS[6].name, text: 'Die höchste Stufe erreicht', done: (s) => s.level >= 7 },
+  { id: 'lvl6', name: LEVELS[5].name, text: 'Stufe 6 erreicht', done: (s) => s.level >= 6 },
+  { id: 'lvl9', name: LEVELS[8].name, text: 'Stufe 9 erreicht', done: (s) => s.level >= 9 },
+  { id: 'lvlmax', name: LEVELS[MAX_LEVEL - 1].name, text: 'Die höchste Stufe erreicht', done: (s) => s.level >= MAX_LEVEL },
   { id: 'mega', name: 'Riesenpott', text: '5 Mega-Frachter abgefertigt', done: (s) => s.megaDone >= 5 },
   { id: 'day1000', name: 'Tausender', text: '1.000 Container an einem Tag umgeschlagen', done: (s) => s.today.handled >= 1000 },
   { id: 'prem100', name: 'Veredler', text: '100 Container Fertigware verkauft', done: (s) => s.premiumDone >= 100 },
@@ -28,9 +29,12 @@ export const ACHIEVEMENTS: Achievement[] = [
   { id: 'contract10', name: 'Verlässlicher Partner', text: '10 Verträge vollständig erfüllt', done: (s) => s.contractsDone >= 10 },
   { id: 'million', name: 'Millionär', text: 'Eine Million Euro auf dem Konto', done: (s) => s.money >= 1_000_000 },
   { id: 'rep90', name: 'Bester Ruf', text: 'Ruf von 90 erreicht', done: (s) => s.rep >= 90 },
-  { id: 'win_easy', name: 'Sieg: Leicht', text: 'Auf Leicht gewonnen', done: (s) => s.status === 'won' && !s.scenario && s.diff === 'easy' },
-  { id: 'win_normal', name: 'Sieg: Normal', text: 'Auf Normal gewonnen', done: (s) => s.status === 'won' && !s.scenario && s.diff === 'normal' },
-  { id: 'win_hard', name: 'Sieg: Schwer', text: 'Auf Schwer gewonnen', done: (s) => s.status === 'won' && !s.scenario && s.diff === 'hard' },
+  { id: 'done_easy', name: 'Vollendet: Leicht', text: 'Einen Hafen auf Leicht vollendet', done: (s) => s.completedDay > 0 && s.diff === 'easy' },
+  { id: 'done_normal', name: 'Vollendet: Normal', text: 'Einen Hafen auf Normal vollendet', done: (s) => s.completedDay > 0 && s.diff === 'normal' },
+  { id: 'done_hard', name: 'Vollendet: Schwer', text: 'Einen Hafen auf Schwer vollendet', done: (s) => s.completedDay > 0 && s.diff === 'hard' },
+  { id: 'orders50', name: 'Lieferant', text: '50 Lieferaufträge erfüllt', done: (s) => s.ordersDone >= 50 },
+  { id: 'day5000', name: 'Fünftausender', text: '5.000 Container an einem Tag umgeschlagen', done: (s) => s.today.handled >= 5000 },
+  { id: 'super8', name: 'Brückenbauer', text: '8 Super-Brücken gleichzeitig', done: (s) => s.cranes.filter((c) => c.model === 'super').length >= 8 },
   { id: 'scen_all', name: 'Krisenmanager', text: 'Ein Szenario geschafft', done: (s) => s.status === 'won' && !!s.scenario },
 ];
 
@@ -75,7 +79,7 @@ export class Progress {
     return fresh;
   }
 
-  /** Trägt einen Sieg in die Bestenliste ein (nach Tagen, dann Containern). */
+  /** Trägt eine Vollendung oder ein geschafftes Szenario in die Bestenliste ein (nach Tagen, dann Containern). */
   addRecord(r: Record) {
     this.records.push(r);
     this.records.sort((a, b) => a.day - b.day || b.handled - a.handled);

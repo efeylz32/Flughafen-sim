@@ -1,7 +1,14 @@
-import { LEVELS } from './data';
+import { GRID_W, LEVELS, T } from './data';
+import { OUT, Q_MAX, qOf, qTile, sideOf } from './quay';
+import { MILESTONES } from './progression';
 import type { Sim } from './sim';
 
 const need = (level: number) => LEVELS[level - 1].need.toLocaleString('de-DE');
+const reach = (level: number): Mission => ({
+  title: `Werde ${LEVELS[level - 1].name}`,
+  text: `Schlage insgesamt ${need(level)} Container um${MILESTONES[level] ? ` und schaffe den Meilenstein: ${MILESTONES[level]!.text}` : ''}. Tippe auf die Stufe oben, um den Fortschritt zu sehen.`,
+  done: (s) => s.level >= level,
+});
 
 export interface Mission {
   title: string;
@@ -67,11 +74,7 @@ export const MISSIONS: Mission[] = [
     text: 'Unter 8 Stunden am Kai. Staut es, schau in den Engpass-Überblick.',
     done: (s) => s.shipsOnTime >= 5,
   },
-  {
-    title: 'Werde Regionalhafen',
-    text: `Schlage insgesamt ${need(2)} Container um. Der Balken neben der Uhr zeigt den Fortschritt.`,
-    done: (s) => s.level >= 2,
-  },
+  reach(2),
   {
     title: 'Baue eine Werkstatt',
     text: 'Ab jetzt nutzen sich Kräne und Trucks ab und fallen irgendwann aus. Eine Werkstatt (2 × 2, Gebäude) mit Mechaniker repariert sie.',
@@ -107,44 +110,111 @@ export const MISSIONS: Mission[] = [
     text: 'Unter Gelände: „Land kaufen“ und auf einen dunklen Streifen tippen. Jeder weitere Streifen wird teurer.',
     done: (s) => s.plotsBought >= 1,
   },
+  reach(3),
   {
-    title: 'Werde Handelshafen',
-    text: `Schlage insgesamt ${need(3)} Container um.`,
-    done: (s) => s.level >= 3,
+    title: 'Schicke einen Zug mit Containern los',
+    text: 'Baue einen Gleisanschluss am Kartenrand und verbinde ihn mit einer Straße.',
+    done: (s) => s.trainsDone >= 1,
   },
+  reach(4),
   {
     title: 'Schlage 20 Kühlcontainer um',
     text: 'Baue mindestens 2 Kühlplätze an die Straße. Dann bringen Schiffe Kühlfracht, die in 10 Stunden raus muss.',
     done: (s) => s.reefersHandled >= 20,
   },
   {
-    title: 'Schicke einen Zug mit Containern los',
-    text: 'Baue einen Gleisanschluss am rechten Kartenrand und verbinde ihn mit einer Straße.',
-    done: (s) => s.trainsDone >= 1,
-  },
-  {
     title: 'Fertige ein großes Schiff ab',
-    text: 'Baue 6 Kai-Felder in einer Reihe und baggere das Wasser davor aus. Große Schiffe bringen 300 Container.',
+    text: 'Baue 6 Kai-Felder in einer Reihe und baggere das Wasser davor aus. Nimm dann einen Vertrag mit großem Schiff an.',
     done: (s) => s.bigShipsDone >= 1,
   },
+  reach(5),
   {
-    title: 'Werde Seehafen',
-    text: `Schlage insgesamt ${need(4)} Container um.`,
-    done: (s) => s.level >= 4,
+    title: 'Baue einen Zollhof',
+    text: 'Ohne Zollhof prüft das Gate jeden achten Import-Container selbst und wird langsam.',
+    done: (s) => s.customsTiles > 0,
   },
+  reach(6),
   {
     title: 'Rüste einen Truck zum fahrerlosen Fahrzeug auf',
     text: 'Tippe einen Truck an und rüste ihn auf. Er fährt schneller und kostet weniger im Betrieb.',
     done: (s) => s.trucks.some((t) => t.agv),
   },
   {
-    title: 'Werde Weltklasse-Hafen',
-    text: `Schlage insgesamt ${need(5)} Container um.`,
-    done: (s) => s.level >= 5,
+    title: 'Fertige einen Mega-Frachter ab',
+    text: '8 Kai-Felder in einer Reihe, davor ausgebaggert, und ein Vertrag mit Mega-Frachter.',
+    done: (s) => s.megaDone >= 1,
   },
+  reach(7),
 ];
 
 /** Was der „Los“-Knopf der Mission öffnet: ein Werkzeug oder ein Fenster */
 export const MISSION_GO: (string | null)[] = [
-  'berth', 'crane', 'road', 'yard', 'gate', 'truck', 'view', 'view', null, 'workshop', 'assign', null, 'deals', 'view', 'unpack', 'buyland', null, 'reefer', 'rail', 'berth', null, 'view', null,
+  'berth', 'crane', 'road', 'yard', 'gate', 'truck', 'view', 'view', null, 'workshop', 'assign', null, 'deals', 'view', 'unpack', 'buyland',
+  null, 'rail', null, 'reefer', 'dredge', null, 'customs', null, 'view', 'deals', null,
 ];
+
+/**
+ * Wo die ersten Missionen gebaut werden sollen: Felder, die auf der Karte leuchten.
+ * Nur für den Einstieg (Liegeplatz bis erster Truck), danach leer.
+ */
+export function missionHint(s: Sim): number[] {
+  const out: number[] = [];
+  const free = (i: number) => s.kind[i] === T.Land && s.owned[i % GRID_W] === 1;
+  switch (s.mission) {
+    case 0: {
+      // Vier freie Küstenfelder nebeneinander, möglichst mitten im eigenen Land
+      const owned = s.owned.reduce((a, v, x) => (v ? [...a, x] : a), [] as number[]);
+      const mid = owned.length ? (owned[0] + owned[owned.length - 1]) / 2 - 1.5 : GRID_W / 2;
+      let best: number[] = [];
+      let bestD = Infinity;
+      for (let q = 0; q < Q_MAX - 3; q++) {
+        const ts = [0, 1, 2, 3].map((d) => qTile(q + d));
+        if (ts.some((t) => !t)) continue;
+        if (!ts.every((t) => free(s.idx(t![0], t![1])) && s.kaiSpot(t![0], t![1]))) continue;
+        const d = Math.abs(ts[0]![0] - mid) + Math.abs(ts[0]![1] - ts[3]![1]) * 0;
+        if (d < bestD) {
+          bestD = d;
+          best = ts.map((t) => s.idx(t![0], t![1]));
+        }
+      }
+      out.push(...best);
+      break;
+    }
+    case 1: {
+      // Kai-Felder an einem Liegeplatz
+      for (let i = 0; i < s.kind.length && out.length < 4; i++) {
+        if (s.kind[i] !== T.Kai) continue;
+        const x = i % GRID_W;
+        const y = (i / GRID_W) | 0;
+        if (!s.craneAt(x, y) && s.berthContaining(qOf(x, y)) >= 0) out.push(i);
+      }
+      break;
+    }
+    case 2: {
+      // Das Feld direkt landeinwärts hinter dem Kran
+      for (const c of s.cranes) {
+        const q = s.cq(c);
+        if (q < 0) continue;
+        const [dx, dy] = OUT[sideOf(q)];
+        const x = c.x - dx;
+        const y = c.y - dy;
+        if (s.inBounds(x, y) && free(s.idx(x, y))) out.push(s.idx(x, y));
+      }
+      break;
+    }
+    case 3:
+    case 4: {
+      // Freie Felder direkt an einer Straße, die mit einem Kran verbunden ist
+      for (let i = 0; i < s.kind.length && out.length < (s.mission === 3 ? 6 : 2); i++) {
+        if (!free(i)) continue;
+        if (s.adjRoad(i).length) out.push(i);
+      }
+      break;
+    }
+    case 5: {
+      for (let i = 0; i < s.kind.length && out.length < 3; i++) if (s.kind[i] === T.Road && s.roadTier[i] !== 2) out.push(i);
+      break;
+    }
+  }
+  return out;
+}

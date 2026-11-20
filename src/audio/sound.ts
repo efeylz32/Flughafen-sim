@@ -97,6 +97,14 @@ export class Sound {
     else if (this.ctx && this.ctx.state === 'running') void this.ctx.suspend();
   }
 
+  /** Für die Musik: Audio-Kontext und Ausgang, sobald der Ton freigegeben ist */
+  get context(): AudioContext | null {
+    return this.ctx;
+  }
+  get output(): AudioNode | null {
+    return this.master;
+  }
+
   toggle(): boolean {
     this.setEnabled(!this.enabled);
     return this.enabled;

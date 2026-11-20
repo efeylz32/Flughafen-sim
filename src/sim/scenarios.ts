@@ -37,4 +37,20 @@ export const SCENARIOS: Scenario[] = [
     days: 20,
     done: (s) => s.foodDone >= 150,
   },
+  {
+    id: 'sturm',
+    name: 'Sturmsaison',
+    text: 'Ein Regionalhafen an einer Sturmküste: Ständig stehen die Kräne still, die Reedereien wollen trotzdem pünktlich sein.',
+    goal: '25 Schiffe pünktlich abfertigen',
+    days: 12,
+    done: (s) => s.shipsOnTime >= 25,
+  },
+  {
+    id: 'zoll',
+    name: 'Zollrazzia',
+    text: 'Ein Seehafen ohne Zollhof. Jeder achte Import muss geprüft werden, die Gates stauen sich schon.',
+    goal: '400 Container durch den Zollhof prüfen',
+    days: 12,
+    done: (s) => s.customsDone >= 400,
+  },
 ];

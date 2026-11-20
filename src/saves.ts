@@ -61,7 +61,7 @@ export function writeSlot(slot: Slot, sim: Sim): boolean {
 
 export function readSlot(slot: Slot): SaveData | null {
   const s = read(slot);
-  return s && (s.data.v === 1 || s.data.v === 2) ? s.data : null;
+  return s && (s.data.v === 1 || s.data.v === 2 || s.data.v === 3) ? s.data : null;
 }
 
 export function metaOfSlot(slot: Slot): Meta | null {

@@ -6,6 +6,8 @@ import { N as QN, S as QS_, W as QW, qOf, qOfWater, qTile, sideOf, OUT, Q_MAX } 
 const SIDE_ANGLE = [0, Math.PI, -Math.PI / 2, Math.PI / 2];
 
 export interface View {
+  /** Einstieg: Felder, auf die die aktuelle Mission zeigt */
+  hint?: number[];
   /** Gerade wird gemalt (Straße ziehen usw.) */
   painting?: boolean;
   overlay: boolean;
@@ -2052,6 +2054,23 @@ export class Renderer {
       const grow = u * 5;
       g.roundRect(p.x - grow, p.y - grow, TILE + grow * 2, TILE + grow * 2, 3 + grow).stroke({ width: 2.5, color: p.color, alpha: (1 - u) * 0.95 });
       g.rect(p.x, p.y, TILE, TILE).fill({ color: p.color, alpha: (1 - u) * 0.35 });
+    }
+
+    // Einstieg: Hier bauen! Goldene, pulsierende Felder und ein hüpfender Pfeil
+    if (view.hint && view.hint.length && !view.calm) {
+      const pulse = 0.55 + 0.35 * Math.sin(view.time * 5);
+      for (const i of view.hint) {
+        const hx = (i % GRID_W) * TILE;
+        const hy = ((i / GRID_W) | 0) * TILE;
+        g.roundRect(hx + 1, hy + 1, TILE - 2, TILE - 2, 5).fill({ color: 0xffd24a, alpha: 0.32 * pulse }).stroke({ width: 4, color: 0xffc21a, alpha: pulse });
+      }
+      // Pfeil über der Mitte der Markierung, groß genug für das Handy
+      const mid = view.hint[Math.floor((view.hint.length - 1) / 2)];
+      const ax = (mid % GRID_W) * TILE + (view.hint.length > 1 && view.hint[1] === view.hint[0] + 1 ? TILE : TILE / 2);
+      const ay = ((view.hint[0] / GRID_W) | 0) * TILE - 4 - Math.abs(Math.sin(view.time * 4)) * 14;
+      const S = 1.8;
+      g.poly([ax - 13 * S, ay - 16 * S, ax + 13 * S, ay - 16 * S, ax, ay]).fill(0xffc21a).stroke({ width: 3, color: 0x6b3f00 });
+      g.roundRect(ax - 6 * S, ay - 34 * S, 12 * S, 19 * S, 3).fill(0xffc21a).stroke({ width: 3, color: 0x6b3f00 });
     }
 
     if (view.rect) {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { COAST_ROW, GRID_H, GRID_W, T, TICKS_PER_SEC } from '../src/sim/data';
+import { COAST_ROW, GRID_H, GRID_W, MAX_LEVEL, T, TECH, TECH_IDS, TICKS_PER_SEC } from '../src/sim/data';
+import { completion } from '../src/sim/progression';
 import { buildDemo } from '../src/sim/demo';
 import { Sim } from '../src/sim/sim';
 
@@ -218,8 +219,8 @@ describe('Hafenstufen', () => {
   it('Werkzeuge sind bis zur passenden Stufe gesperrt', () => {
     const sim = new Sim();
     expect(sim.canBuild('reefer', 5, k + 2)).toMatchObject({ ok: false });
-    expect(sim.canBuild('reefer', 5, k + 2).reason).toMatch(/Stufe 3/);
-    sim.level = 3;
+    expect(sim.canBuild('reefer', 5, k + 2).reason).toMatch(/Stufe 4/);
+    sim.level = 4;
     expect(sim.canBuild('reefer', 5, k + 2).ok).toBe(true);
   });
 
@@ -321,7 +322,7 @@ describe('Wetter', () => {
 
 describe('Kühlfracht', () => {
   it('Kühlcontainer gehen nur auf Kühlplätze und bringen 400 €', () => {
-    const sim = bigPort(3);
+    const sim = bigPort(4);
     for (let x = 10; x <= 15; x++) sim.build('reefer', x, k + 5);
     for (let x = 10; x <= 15; x++) sim.build('road', x, k + 6);
     for (let y = k + 2; y <= k + 6; y++) sim.build('road', 9, y);
@@ -332,7 +333,7 @@ describe('Kühlfracht', () => {
 
   it('Kühlcontainer verderben nach 10 Stunden und kosten Strafe', () => {
     const sim = new Sim();
-    sim.level = 3;
+    sim.level = 4;
     sim.build('reefer', 5, k + 2);
     const i = sim.idx(5, k + 2);
     sim.stock[i] = 3;
@@ -348,7 +349,7 @@ describe('Kühlfracht', () => {
 
 describe('Bahn', () => {
   it('Gleisanschluss nur am rechten Rand, der Zug holt Container ab', () => {
-    const sim = bigPort(3);
+    const sim = bigPort(4);
     expect(sim.canBuild('rail', 20, k + 2)).toMatchObject({ ok: false });
     expect(sim.build('rail', GRID_W - 1, k + 2).ok).toBe(true);
     run(sim, 24);
@@ -360,7 +361,7 @@ describe('Bahn', () => {
 
 describe('Große Schiffe', () => {
   it('kommen erst mit tiefem Liegeplatz und laden 300 Container ab', () => {
-    const sim = bigPort(3, 12);
+    const sim = bigPort(4, 12);
     expect(sim.hasDeepBerth()).toBe(false);
     for (let x = 6; x < 12; x++) expect(sim.build('dredge', x, k - 1).ok).toBe(true);
     expect(sim.hasDeepBerth()).toBe(true);
@@ -372,7 +373,7 @@ describe('Große Schiffe', () => {
 
   it('Baggern lässt sich zurücknehmen', () => {
     const sim = new Sim();
-    sim.level = 3;
+    sim.level = 4;
     const before = sim.money;
     sim.build('dredge', 6, k - 1);
     expect(sim.depth[6]).toBe(1);
@@ -407,7 +408,7 @@ describe('Aufrüsten', () => {
     sim.build('road', 5, k + 1);
     const id = sim.build('truck', 5, k + 1).truckId!;
     expect(sim.upgrade('truck', id)).toMatchObject({ ok: false });
-    sim.level = 4;
+    sim.level = 6;
     expect(sim.upgrade('truck', id).ok).toBe(true);
     expect(sim.trucks[0].agv).toBe(true);
   });
@@ -536,25 +537,55 @@ describe('Ziel, Pleite, Kredit', () => {
     expect(sim.debtDays).toBe(0);
   });
 
-  it('Weltklasse-Hafen ist der Sieg, Tag nach dem Ziel ist verloren', () => {
-    const win = new Sim(1);
-    win.level = 4;
-    win.handled = 1e6;
-    run(win, 0.1);
-    expect(win.status).toBe('won');
-    expect(win.level).toBe(7);
+  it('Es gibt keinen Sieg und keine Frist: Aufstieg braucht Container und Meilenstein', () => {
+    const s = new Sim(1);
+    s.level = 6;
+    s.handled = 1e7;
+    run(s, 0.1);
+    // Ohne Meilenstein (1 Mega-Frachter) bleibt es bei Stufe 6
+    expect(s.level).toBe(6);
+    s.megaDone = 1;
+    run(s, 0.1);
+    expect(s.level).toBe(7);
+    expect(s.status).toBe('play');
     const late = new Sim(1, 'hard');
-    late.gm += 50 * 1440;
+    late.gm += 300 * 1440;
+    late.money = 1e6;
     run(late, 24);
-    expect(late.status).toBe('lost');
-    expect(late.endReason).toMatch(/Ziel verpasst/);
+    expect(late.status).toBe('play');
+  });
+
+  it('Vollendung erst, wenn alles ausgebaut ist, danach geht es weiter', () => {
+    const s = new Sim(1);
+    s.money = 1e9;
+    run(s, 0.1);
+    s.level = MAX_LEVEL;
+    for (const id of TECH_IDS) s.tech[id] = TECH[id].cost.length;
+    s.owned.fill(1);
+    s.megaDone = 100;
+    const tags: string[] = [];
+    run(s, 25);
+    for (const e of s.drainEvents()) if (e.tag) tags.push(e.tag);
+    expect(s.completedDay).toBe(0);
+    expect(completion(s).items.filter((i) => i.value < i.goal).length).toBe(2);
+  });
+
+  it('Alte Spielstände mit 7 Stufen werden auf die neue Reihe abgebildet, Sieg wird zu weiterspielen', () => {
+    const s = bigPort(2);
+    const d = JSON.parse(JSON.stringify(s.serialize()));
+    d.v = 2;
+    d.level = 4;
+    d.status = 'won';
+    const c = Sim.deserialize(d);
+    expect(c.level).toBe(6);
+    expect(c.status).toBe('play');
   });
 });
 
 describe('Gebäudegrößen', () => {
   it('Gebäude belegen mehrere Felder, Abriss und Rückgängig räumen alle', () => {
     const sim = new Sim();
-    sim.level = 3;
+    sim.level = 4;
     expect(sim.build('pack', 5, k + 3).ok).toBe(true);
     for (let y = k + 3; y < k + 6; y++) for (let x = 5; x < 8; x++) expect(sim.kind[sim.idx(x, y)]).toBe(8);
     expect(sim.canBuild('gate', 7, k + 3)).toMatchObject({ ok: false });
@@ -577,7 +608,7 @@ describe('Gebäudegrößen', () => {
 
 describe('Kühlhalle', () => {
   it('macht aus Kühlcontainern Lebensmittel für 750 €', () => {
-    const sim = bigPort(3, 12);
+    const sim = bigPort(4, 12);
     for (let x = 10; x <= 15; x++) sim.build('reefer', x, k + 5);
     for (let x = 9; x <= 22; x++) sim.build('road', x, k + 6);
     for (let y = k + 2; y <= k + 6; y++) sim.build('road', 9, y);
@@ -770,7 +801,7 @@ describe('Große Kräne und Portalkräne', () => {
 
   it('der Portalkran erhöht die Stellplätze im Umkreis und braucht einen Kranführer', () => {
     const sim = new Sim();
-    sim.level = 3;
+    sim.level = 4;
     for (let x = 5; x <= 9; x++) sim.build('yard', x, k + 3);
     // Eine Reihe reicht nicht: Der Portalkran überspannt 3 × 3 Lagerfelder
     expect(sim.canBuild('rtg', 7, k + 3).ok).toBe(false);
@@ -885,7 +916,7 @@ describe('Speichern', () => {
   });
 
   it('Roundtrip erhält Stufe, Verträge, Aufrüstungen und Baggerung', () => {
-    const sim = bigPort(3);
+    const sim = bigPort(4);
     sim.build('dredge', 6, k - 1);
     sim.build('rail', GRID_W - 1, k + 2);
     sim.upgrade('crane', sim.cranes[0].id);
@@ -893,7 +924,7 @@ describe('Speichern', () => {
     (sim as unknown as { makeOffers(): void }).makeOffers();
     sim.acceptContract(sim.offers[0].id);
     const copy = Sim.deserialize(JSON.parse(JSON.stringify(sim.serialize())));
-    expect(copy.level).toBe(3);
+    expect(copy.level).toBe(4);
     expect(copy.depth[6]).toBe(1);
     expect(copy.rails.length).toBe(1);
     expect(copy.cranes[0].big).toBe(true);
@@ -1019,7 +1050,7 @@ describe('Kranmodelle', () => {
     expect(c.model).toBe('mobile');
     expect(sim.moveTime(c)).toBeLessThan(slow);
     expect(sim.canUpgrade('crane', c.id).ok).toBe(false); // Containerbrücke erst ab Stufe 2
-    sim.level = 4;
+    sim.level = 6;
     sim.upgrade('crane', c.id);
     expect(c.model).toBe('bridge');
     expect(c.big).toBe(true);
@@ -1045,7 +1076,7 @@ describe('Verbesserungen', () => {
     expect(sim.buyTech('spreader').ok).toBe(true);
     expect(sim.moveTime(c)).toBeLessThan(mt);
     expect(sim.buyTech('stack').ok).toBe(false); // ab Stufe 2
-    sim.level = 3;
+    sim.level = 4;
     expect(sim.buyTech('stack').ok).toBe(true);
     const tile = sim.yardTileList[0];
     expect(sim.capAt(tile)).toBe(7);
@@ -1124,7 +1155,7 @@ describe('Bauzeit, Gebrauchtkauf und Höchstzustand', () => {
   it('alles wird mit der Hafenstufe teurer', () => {
     const sim = new Sim();
     const a = sim.costOf('crane');
-    sim.level = 3;
+    sim.level = 4;
     expect(sim.costOf('crane')).toBeGreaterThan(a);
   });
 });
@@ -1134,7 +1165,7 @@ describe('Vertiefung: Richtung, Personal, Konjunktur', () => {
 
   it('ab Stufe 3 muss eine Richtung gewählt werden, sie wirkt und wird gespeichert', () => {
     const sim = basicPort(2, 1);
-    sim.level = 3;
+    sim.level = 4;
     day(sim, 1);
     expect(sim.pending?.id).toBe('spec');
     const c = sim.cranes[0];
@@ -1198,7 +1229,7 @@ describe('Vertiefung: Richtung, Personal, Konjunktur', () => {
 
   it('Verträge mit Sonderbedingungen, Exklusiv sperrt freie Schiffe', () => {
     const sim = basicPort(2, 1);
-    sim.level = 4;
+    sim.level = 6;
     const conds = new Set<string | undefined>();
     for (let i = 0; i < 60; i++) {
       (sim as unknown as { makeOffers(): void }).makeOffers();
@@ -1224,7 +1255,7 @@ describe('Vertiefung: Richtung, Personal, Konjunktur', () => {
 
   it('Akkord und Billigdiesel haben einen Haken, Jahreszeiten wechseln', () => {
     const sim = basicPort(2, 1);
-    sim.level = 3;
+    sim.level = 4;
     sim.money = 1e6;
     const t = sim.moveTime(sim.cranes[0]);
     expect(sim.buyTech('akkord').ok).toBe(true);
@@ -1239,7 +1270,7 @@ describe('Gefahrgut, Leerlager und Befüllkette', () => {
   function chainPort(): Sim {
     const sim = new Sim(11);
     sim.money = 20_000_000;
-    sim.level = 3;
+    sim.level = 4;
     for (let x = 6; x < 10; x++) sim.build('kai', x, k);
     sim.build('crane', 7, k);
     sim.build('crane', 9, k);
@@ -1263,7 +1294,7 @@ describe('Gefahrgut, Leerlager und Befüllkette', () => {
 
   it('Gefahrgut braucht Abstand zu Gates, Hallen und Werkstatt', () => {
     const sim = new Sim();
-    sim.level = 3;
+    sim.level = 4;
     sim.build('road', 10, k + 1);
     sim.build('gate', 12, k + 2);
     expect(sim.canBuild('hazard', 11, k + 2).ok).toBe(false);
@@ -1315,7 +1346,7 @@ describe('Gefahrgut, Leerlager und Befüllkette', () => {
 describe('Straßenausbau: Doppelspur und Autobahn', () => {
   it('Doppelspur lässt je Richtung zwei Trucks durch, Ausbau und Rückgängig stimmen', () => {
     const sim = new Sim();
-    sim.level = 3;
+    sim.level = 4;
     sim.build('road', 8, k + 1);
     const i = sim.idx(8, k + 1);
     expect(sim.laneCap(i, 0)).toBe(1);
@@ -1344,7 +1375,7 @@ describe('Straßenausbau: Doppelspur und Autobahn', () => {
 
   it('Autobahn hat feste Richtung und keine Zufahrt zu Gebäuden', () => {
     const sim = new Sim();
-    sim.level = 3;
+    sim.level = 4;
     for (let x = 4; x <= 14; x++) sim.build('hwy', x, k + 1);
     sim.build('yard', 8, k + 2);
     expect(sim.adjRoad(sim.idx(8, k + 2))).toEqual([]);
@@ -1357,7 +1388,7 @@ describe('Straßenausbau: Doppelspur und Autobahn', () => {
   it('Betriebskosten steigen mit der Straßenart', () => {
     const a = new Sim();
     const b = new Sim();
-    a.level = b.level = 3;
+    a.level = b.level = 4;
     for (let x = 4; x < 14; x++) {
       a.build('road', x, k + 1);
       b.build('hwy', x, k + 1);
@@ -1369,7 +1400,7 @@ describe('Straßenausbau: Doppelspur und Autobahn', () => {
 describe('Zeit-Routing', () => {
   it('Trucks nehmen die schnellere Autobahn, auch wenn sie länger ist', () => {
     const sim = new Sim();
-    sim.level = 3;
+    sim.level = 4;
     sim.money = 1e7;
     // Direkter Weg: normale Straße (12 Felder). Umweg: Autobahn mit 3 Feldern mehr.
     for (let x = 4; x <= 16; x++) sim.build('road', x, k + 1);
@@ -1455,7 +1486,7 @@ describe('Eigenschaften, Weltlage, Strom, Regeln', () => {
 
   it('Strom kostet, Solar spart, Batterie überbrückt den Ausfall', () => {
     const sim = basicPort(2, 1);
-    sim.level = 3;
+    sim.level = 4;
     sim.money = 1e7;
     expect(sim.powerDemand()).toBeGreaterThan(0);
     run(sim, 6);
@@ -1488,7 +1519,7 @@ describe('Eigenschaften, Weltlage, Strom, Regeln', () => {
 describe('Container-Ziele und Umstapeln', () => {
   function railPort(): Sim {
     const sim = basicPort(6, 1);
-    sim.level = 3;
+    sim.level = 4;
     sim.money = 1e7;
     for (let x = 21; x <= GRID_W - 1; x++) sim.build('road', x, k + 1);
     sim.build('rail', GRID_W - 1, k + 2);
@@ -1523,7 +1554,7 @@ describe('Container-Ziele und Umstapeln', () => {
 describe('Gleise ins Land und Außenanbindung', () => {
   it('ein Bahnhof im Hafen braucht ein durchgehendes Gleis zum Rand, Straßen kreuzen als Bahnübergang', () => {
     const sim = new Sim();
-    sim.level = 3;
+    sim.level = 4;
     sim.money = 1e7;
     expect(sim.canBuild('rail', 25, k + 3).ok).toBe(false);
     for (let x = 26; x < GRID_W; x++) sim.build('track', x, k + 3);
@@ -1551,7 +1582,7 @@ describe('Gleise ins Land und Außenanbindung', () => {
 
   it('die Befüllhalle bekommt Leercontainer von außen über das Gate', () => {
     const sim = basicPort(4, 1);
-    sim.level = 3;
+    sim.level = 4;
     sim.money = 1e7;
     sim.build('emptyyard', 6, k + 2);
     sim.build('emptyyard', 7, k + 2);
@@ -1641,7 +1672,7 @@ describe('Gelände: Hügel, Tunnel, Brücken', () => {
 describe('Kreuzungen und Überführungen', () => {
   it('Trucks warten an Kreuzungen, die Überführung hebt das auf', () => {
     const make = () => {
-      const sim = bigPort(2, 10);
+      const sim = bigPort(3, 10);
       // Querstraße mitten durch die Hauptachse: Kreuzung bei x=21
       for (let y = k + 2; y <= k + 6; y++) sim.build('road', 21, y);
       for (let x = 20; x <= 23; x++) sim.build('road', x, k + 6);
@@ -1662,19 +1693,19 @@ describe('Kreuzungen und Überführungen', () => {
     expect(c.overpass[j]).toBe(1);
   });
 
-  it('Überführung nur auf Kreuzungen und ab Stufe 2', () => {
-    const sim = bigPort(1);
+  it('Überführung nur auf Kreuzungen und ab Stufe 3', () => {
+    const sim = bigPort(2);
     expect(sim.toggleOverpass(8, k + 1).ok).toBe(false);
-    sim.level = 2;
+    sim.level = 3;
     expect(sim.toggleOverpass(8, k + 1).reason).toMatch(/Kreuzung/);
   });
 });
 
 describe('Zoll', () => {
   it('Ohne Zollhof prüft das Gate selbst, der Zollhof übernimmt und zahlt nach der Prüfung', () => {
-    const a = bigPort(2, 10);
+    const a = bigPort(5, 10);
     run(a, 16);
-    const b = bigPort(2, 10);
+    const b = bigPort(5, 10);
     expect(b.build('customs', 26, k + 2).ok).toBe(true);
     expect(b.build('customs', 27, k + 2).ok).toBe(true);
     b.finishAll();
@@ -1689,6 +1720,9 @@ describe('Zoll', () => {
 describe('Wartung und Versicherung', () => {
   it('Wartungsfenster nimmt den Kran nachts vom Netz und senkt den Verschleiß', () => {
     const sim = bigPort(2, 6);
+    // Ohne Wetter, sonst kann ein Sturmschaden dazwischenkommen
+    (sim as unknown as { planWeather(): void }).planWeather = () => undefined;
+    sim.forecast = null;
     const c = sim.cranes[0];
     c.wear = 0.6;
     expect(sim.planMaint(c.id).ok).toBe(true);
@@ -1716,7 +1750,7 @@ describe('Wartung und Versicherung', () => {
 
 describe('Lieferaufträge', () => {
   it('Aufträge werden angeboten, gezählt, bezahlt oder bestraft', () => {
-    const sim = bigPort(2, 10);
+    const sim = bigPort(3, 10);
     run(sim, 25);
     expect(sim.orderOffers.length).toBeGreaterThan(0);
     const o = sim.orderOffers.find((o) => o.kind === 'road') ?? sim.orderOffers[0];
@@ -1734,13 +1768,13 @@ describe('Lieferaufträge', () => {
 });
 
 describe('Hallen-Stufen', () => {
-  it('Ausbau ab Stufe 3 macht die Halle schneller und den Puffer größer', () => {
-    const sim = bigPort(2, 6);
+  it('Ausbau ab Stufe 5 macht die Halle schneller und den Puffer größer', () => {
+    const sim = bigPort(4, 6);
     expect(sim.build('unpack', 12, k + 6).ok).toBe(true);
     sim.finishAll();
     const p = sim.plants[0];
     expect(sim.upgradePlant(p.id).ok).toBe(false);
-    sim.level = 3;
+    sim.level = 5;
     const before = sim.plantBuf(p);
     expect(sim.upgradePlant(p.id).ok).toBe(true);
     expect(p.lvl).toBe(2);
@@ -1748,5 +1782,31 @@ describe('Hallen-Stufen', () => {
     expect(sim.plantBuf(p)).toBeGreaterThan(before);
     const c = Sim.deserialize(JSON.parse(JSON.stringify(sim.serialize())));
     expect(c.plants[0].lvl).toBe(2);
+  });
+});
+
+describe('Tagesaufgabe und neue Szenarien', () => {
+  it('Tagesaufgabe ist für alle gleich und endet nach einem Spieltag mit Wertung', async () => {
+    const { setupDaily } = await import('../src/sim/scenario-setup');
+    const a = setupDaily('20261120');
+    const b = setupDaily('20261120');
+    expect(a.traits).toEqual(b.traits);
+    run(a, 23);
+    expect(a.status).toBe('play');
+    run(a, 1.2);
+    expect(a.status).toBe('won');
+    expect(a.dailyScore).toBeGreaterThan(0);
+    const c = Sim.deserialize(JSON.parse(JSON.stringify(a.serialize())));
+    expect(c.daily).toBe('20261120');
+  });
+
+  it('Sturmsaison und Zollrazzia lassen sich starten', async () => {
+    const { setupScenario } = await import('../src/sim/scenario-setup');
+    const s = setupScenario('sturm', 3);
+    expect(s.traits).toContain('stormy');
+    const z = setupScenario('zoll', 3);
+    expect(z.level).toBe(5);
+    run(z, 6);
+    expect(z.status).toBe('play');
   });
 });

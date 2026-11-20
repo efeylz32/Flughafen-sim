@@ -111,7 +111,8 @@ import {
   CraneModel,
   TECH,
   TechId,
-  GOAL_LEVEL,
+  LV,
+  MAX_LEVEL,
   LOAN_LIMIT_PER_LEVEL,
   LOAN_RATE,
   LOAN_STEP,
@@ -157,6 +158,7 @@ import {
 } from './data';
 import { approach, berthPose, departure, OUT, qOf, qOfWater, qTile, Q_MAX, sideOf, isVertical } from './quay';
 import { MISSIONS } from './missions';
+import { completion, milestoneDone } from './progression';
 import { SCENARIOS } from './scenarios';
 
 /** Import, Kühlfracht (Import) oder Export */
@@ -467,6 +469,7 @@ export type EventTag =
   | 'spoil'
   | 'contract'
   | 'won'
+  | 'complete'
   | 'lost'
   | 'debt'
   | 'decision'
@@ -575,7 +578,7 @@ export interface DemolishResult extends BuildCheck {
 }
 
 export interface SaveData {
-  v: 1 | 2;
+  v: 1 | 2 | 3;
   kind: number[];
   stock: number[];
   stockExp?: number[];
@@ -596,6 +599,8 @@ export interface SaveData {
   oneway?: number[];
   overpass?: number[];
   custQueue?: number[];
+  completedDay?: number;
+  daily?: { key: string; start: number; end: number };
   /** Laufender Zustand: Schiffe, Puffer, Wetter. Fehlt in alten Spielständen. */
   live?: {
     nextId: number;
@@ -741,6 +746,14 @@ export class Sim {
   foodDone = 0;
   /** Laufendes Szenario oder null für ein freies Spiel */
   scenario: string | null = null;
+  /** Tägliche Herausforderung: Datum, Startstand und Ende (Spielminute) */
+  daily = '';
+  dailyStart = 0;
+  dailyEnd = 0;
+  /** Container, die in der Tagesaufgabe geschafft wurden */
+  get dailyScore(): number {
+    return this.handled - this.dailyStart;
+  }
   /** Einbahnstraßen: erlaubte Fahrtrichtung je Feld (0 Ost, 1 Süd, 2 West, 3 Nord), -1 = beide Richtungen */
   oneway = new Int8Array(GRID_W * GRID_H).fill(-1);
   /** Überführung: Kreuzung ohne Querverkehr */
@@ -813,7 +826,7 @@ export class Sim {
   private firstOffers = false;
   /** Gekaufte Verbesserungen: Stufe je Verbesserung */
   tech: Record<TechId, number> = { spreader: 0, scanner: 0, stack: 0, sales: 0, radio: 0, engine: 0, cool: 0, maint: 0, akkord: 0, diesel: 0 };
-  /** Gewählte Spezialisierung (ab Stufe 3) */
+  /** Gewählte Spezialisierung (ab Stufe LV.spec) */
   spec: SpecId | null = null;
   /** Nachtschicht an: rund um die Uhr volle Leistung, dafür Lohnzuschlag */
   nightShift = true;
@@ -852,6 +865,8 @@ export class Sim {
   insurance = 0;
   custProg = 0;
   customsDone = 0;
+  /** Tag der Vollendung (0 = noch nicht) */
+  completedDay = 0;
   /** Summe aller Erstattungen der Versicherung */
   insuredTotal = 0;
   /** Regeln für den Leitstand */
@@ -3292,7 +3307,7 @@ export class Sim {
   }
   private makeOrderOffers() {
     this.orderOffers = [];
-    if (this.level < 2) return;
+    if (this.level < LV.orders) return;
     const kinds = (Object.keys(ORDER_KINDS) as OrderKind[]).filter((k) => this.level >= ORDER_KINDS[k].level && this.orderBase(k) > 0);
     for (let i = 0; i < 3 && kinds.length; i++) {
       const kind = this.pick(kinds);
@@ -3585,6 +3600,17 @@ export class Sim {
 
   /** Stündlich: Strom abrechnen, Messwerte sammeln, Regeln ausführen */
   private hourTick() {
+    // Sturmschäden: Ab und zu trifft es einen Kran. Die Versicherung zahlt einen Teil.
+    if (this.weather === 'storm' && this.level >= 2) {
+      for (const c of this.cranes) {
+        if (c.build || c.wear >= 1 || this.rnd() > 0.035) continue;
+        c.wear = Math.min(0.98, c.wear + 0.2);
+        const cost = Math.round((9_000 * this.inflation) / 500) * 500;
+        this.loss(cost);
+        const back = Math.round(cost * INSURANCE[this.insurance].share);
+        this.emit(`Sturmschaden an einem Kran: −${eur(cost)}${back ? `, die Versicherung zahlt ${eur(back)}` : ''}`, 'bad', { tag: 'broken', x: c.x, y: c.y });
+      }
+    }
     // Geplante Wartungen beginnen am Abend
     if (Math.floor(this.hour) === MAINT_HOUR) {
       for (const c of this.cranes) {
@@ -3858,7 +3884,7 @@ export class Sim {
     const n = 100 + Math.floor(this.rnd() * 900);
     const reefers = reefer ? Math.round(st.containers * Math.min(0.5, REEFER_SHARE * (this.spec === 'cold' ? 1.4 : 1))) : 0;
     // Gefahrgut kommt nur, wenn es eine Fläche dafür gibt
-    const haz = this.level >= 3 && this.hazCapacity >= 4 && this.rnd() < 0.5 ? Math.round(st.containers * HAZ_SHARE) : 0;
+    const haz = this.level >= LV.cargo && this.hazCapacity >= 4 && this.rnd() < 0.5 ? Math.round(st.containers * HAZ_SHARE) : 0;
     const exp = this.level >= 2 ? Math.round(st.containers * EXPORT_SHARE) : 0;
     this.ships.push({
       id: this.nextId++,
@@ -3926,7 +3952,7 @@ export class Sim {
       this.nextShipIn = 60;
       return;
     }
-    const reefer = this.level >= 3 && this.reeferCapacity >= 12 && this.rnd() < (this.season.index === 1 ? 0.5 : 0.3) * (this.spec === 'cold' ? 1.5 : 1) * (this.traits.includes('coldregion') ? 1.5 : 1);
+    const reefer = this.level >= LV.cargo && this.reeferCapacity >= 12 && this.rnd() < (this.season.index === 1 ? 0.5 : 0.3) * (this.spec === 'cold' ? 1.5 : 1) * (this.traits.includes('coldregion') ? 1.5 : 1);
     this.addShip('coaster', null, reefer);
     // Ist die Konkurrenz pünktlicher als du, kommen weniger freie Schiffe
     const mine = this.myRate;
@@ -4392,8 +4418,8 @@ export class Sim {
       if (takeIn) this.exportNeed--;
       else {
         g.procFee = g.apron.shift()!;
-        // Zoll ab Stufe 2: ein Teil der Import-Container muss geprüft werden
-        if (this.level >= 2 && g.procFee < 100000 && this.rnd() < CUSTOMS_SHARE) {
+        // Zoll ab LV.customs: ein Teil der Import-Container muss geprüft werden
+        if (this.level >= LV.customs && g.procFee < 100000 && this.rnd() < CUSTOMS_SHARE) {
           if (this.custQueue.length < this.customsTiles * CUSTOMS_QUEUE) g.procCust = 2;
           else {
             g.procCust = 1;
@@ -4557,18 +4583,21 @@ export class Sim {
 
   private updateLevel() {
     const next = LEVELS[this.level];
-    if (!next || this.handled < next.need) return;
+    if (!next || this.handled < next.need || !milestoneDone(this)) return;
     this.level++;
     this.money += next.bonus;
     this.today.bonus += next.bonus;
     this.version++;
     this.makeOffers();
     this.emit(`Neue Stufe: ${next.name}. Bonus +${eur(next.bonus)}`, 'good', { tag: 'level', amount: next.bonus });
-    if (this.level === GOAL_LEVEL && this.status === 'play' && !this.scenario) {
-      this.status = 'won';
-      this.endReason = `Weltklasse-Hafen an Tag ${this.day}, Ziel war Tag ${this.goalDay}.`;
-      this.emit(undefined, 'good', { tag: 'won' });
-    }
+  }
+
+  /** Vollendung: alles ausgebaut. Wird einmal gefeiert, danach geht das Spiel frei weiter. */
+  private checkCompletion() {
+    if (this.completedDay || this.scenario || this.sandbox) return;
+    if (!completion(this).done) return;
+    this.completedDay = this.day;
+    this.emit(undefined, 'good', { tag: 'complete' });
   }
 
   // ───────────────────────── Markt ─────────────────────────
@@ -4596,6 +4625,13 @@ export class Sim {
   // ───────────────────────── Szenarien ─────────────────────────
 
   private checkScenario() {
+    // Tagesaufgabe: nach einem Spieltag ist Schluss, gewertet wird der Umschlag
+    if (this.daily && this.status === 'play' && this.gm >= this.dailyEnd) {
+      this.status = 'won';
+      this.endReason = `Tagesaufgabe geschafft: ${this.dailyScore.toLocaleString('de-DE')} Container in einem Tag.`;
+      this.emit(undefined, 'good', { tag: 'won' });
+      return;
+    }
     if (!this.scenario || this.status !== 'play' || this.tickCount % 50 !== 0) return;
     const sc = SCENARIOS.find((s) => s.id === this.scenario);
     if (!sc || !sc.done(this)) return;
@@ -4627,7 +4663,7 @@ export class Sim {
   }
 
   private rollDecision() {
-    if (this.level < 2 || this.pending || this.status === 'lost' || (this.level >= 3 && !this.spec) || this.rnd() > EVENT_CHANCE) return;
+    if (this.level < 2 || this.pending || this.status === 'lost' || (this.level >= LV.spec && !this.spec) || this.rnd() > EVENT_CHANCE) return;
     const pen = DIFFS[this.diff].penalty;
     const list: Decision[] = [
       {
@@ -4755,7 +4791,7 @@ export class Sim {
 
   // ───────────────────────── Ziel, Pleite, Kredit ─────────────────────────
 
-  /** Bis zu diesem Tag (einschließlich) muss der Weltklasse-Hafen stehen. */
+  /** Frist eines Szenarios (das normale Spiel hat keine) */
   get goalDay(): number {
     const sc = this.scenario ? SCENARIOS.find((s) => s.id === this.scenario) : null;
     return sc ? sc.days : DIFFS[this.diff].goalDays;
@@ -4810,18 +4846,17 @@ export class Sim {
     } else {
       this.debtDays = 0;
     }
-    if (this.day > this.goalDay) {
-      const sc = this.scenario ? SCENARIOS.find((s) => s.id === this.scenario) : null;
-      this.lose(sc ? `Ziel verpasst: ${sc.goal} bis Tag ${this.goalDay}.` : `Ziel verpasst: Der Weltklasse-Hafen sollte bis Tag ${this.goalDay} stehen.`);
-    }
+    // Nur Szenarien haben eine Frist. Das normale Spiel läuft ohne Ende weiter.
+    const sc = this.scenario ? SCENARIOS.find((s) => s.id === this.scenario) : null;
+    if (sc && this.day > this.goalDay) this.lose(`Ziel verpasst: ${sc.goal} bis Tag ${this.goalDay}.`);
   }
 
   private makeOffer(): Contract {
     const l = this.pick(LINES);
     const roll = this.rnd();
-    const big = this.level >= 3 && roll < 0.3;
-    const reefer = this.level >= 3 && !big && roll > 0.65;
-    const ship: ShipTypeId = big && this.level >= 4 && this.rnd() < 0.4 ? 'mega' : big ? 'panamax' : 'feeder';
+    const big = this.level >= LV.big && roll < 0.3;
+    const reefer = this.level >= LV.cargo && !big && roll > 0.65;
+    const ship: ShipTypeId = big && this.level >= LV.mega && this.rnd() < 0.4 ? 'mega' : big ? 'panamax' : 'feeder';
     const interval = big ? this.pick([480, 600, 720]) : this.pick([240, 300, 360, 480]);
     const dwell = Math.round((big ? this.pick([600, 720]) : this.pick([360, 420, 480])) * DIFFS[this.diff].dwell);
     // Daueraufträge: viele Anläufe nach festem Fahrplan
@@ -4940,6 +4975,7 @@ export class Sim {
     this.rollDecision();
     this.updateMarket();
     this.rollWorld();
+    this.checkCompletion();
     this.emit(`Tagesabschluss: Betriebskosten −${eur(cost)}${interest ? `, Zinsen −${eur(interest)}` : ''}`, 'info', { tag: 'day' });
     this.checkEnd();
   }
@@ -5015,7 +5051,7 @@ export class Sim {
       }
     }
     // Spezialisierung ab Stufe 3
-    if (this.level >= 3 && !this.spec && !this.pending && this.status !== 'lost') {
+    if (this.level >= LV.spec && !this.spec && !this.pending && this.status !== 'lost') {
       this.pending = {
         id: 'spec',
         title: 'Wähle die Richtung deines Hafens',
@@ -5039,7 +5075,8 @@ export class Sim {
 
   serialize(): SaveData {
     return {
-      v: 2,
+      v: 3,
+      completedDay: this.completedDay,
       kind: Array.from(this.kind),
       stock: Array.from(this.stock),
       stockExp: Array.from(this.stockExp),
@@ -5056,6 +5093,7 @@ export class Sim {
       plantLvl: this.plants.map((p) => p.lvl ?? 1),
       foodDone: this.foodDone,
       scenario: this.scenario,
+      daily: this.daily ? { key: this.daily, start: this.dailyStart, end: this.dailyEnd } : undefined,
       devs: {
         cranes: this.cranes.map((c) => [c.cap, c.paid, c.build ?? 0]),
         trucks: this.trucks.map((t) => [t.cap, t.paid, t.build ?? 0]),
@@ -5247,6 +5285,17 @@ export class Sim {
     s.lastDay = Math.floor(d.gm / MIN_PER_DAY);
     s.mission = d.mission;
     s.level = d.level ?? 1;
+    // Alte Spielstände (bis v2) hatten 7 Stufen: auf die neue Reihe abbilden, Sieg gibt es nicht mehr
+    if ((d.v ?? 1) < 3) {
+      s.level = Math.min(MAX_LEVEL, [1, 1, 2, 4, 6, 7, 8, 9][s.level] ?? s.level);
+      if (d.status === 'won' && !d.scenario) d.status = 'play';
+    }
+    s.completedDay = d.completedDay ?? 0;
+    if (d.daily) {
+      s.daily = d.daily.key;
+      s.dailyStart = d.daily.start;
+      s.dailyEnd = d.daily.end;
+    }
     s.handled = d.handled ?? d.containersDone;
     s.exportsLoaded = d.exportsLoaded ?? 0;
     s.reefersHandled = d.reefersHandled ?? 0;

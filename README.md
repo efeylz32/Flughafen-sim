@@ -7,24 +7,34 @@ beseitige die Engpässe, bevor die Schiffe zu lange liegen.
 Schiff → Kran → Trucks → Stapelplatz → Trucks → Gate oder Bahn. Die langsamste Stufe bestimmt den Durchsatz.
 Das Spielkonzept steht im Doc „Hafen-Imperium: Spielkonzept“.
 
-| Stufe | Name | Ab umgeschlagenen Containern | Neu |
-|---|---|---|---|
-| 1 | Anleger | 0 | Kai, Kran, Straße, Stapelplatz, Gate, Trucks |
-| 2 | Regionalhafen | 1.500 | Export (Schiffe beladen), Verträge mit Reedereien, Containerbrücke, Wetter |
-| 3 | Handelshafen | 7.000 | Kühlfracht mit Kühlplätzen, Gleisanschluss, Baggern für große Schiffe, Portalkran |
-| 4 | Seehafen | 17.000 | Fahrerlose Fahrzeuge, Mega-Frachter (8 Kai-Felder), 4 Verträge |
-| 5 | Weltklasse-Hafen | 36.000 | Ziel erreicht, 5 Verträge. Das Spiel geht weiter. |
-| 6 | Mega-Hub | 70.000 | 6 Verträge |
-| 7 | Welthafen | 120.000 | 7 Verträge |
+Es gibt **keinen Sieg und keine Frist**. Der Hafen wächst über 12 Stufen. Jede Stufe braucht genug umgeschlagene
+Container und ab Stufe 3 einen **Meilenstein**. Das Ende ist die **Vollendung**: höchste Stufe, alle Verbesserungen auf
+Maximum, das ganze Land, 8 Super-Brücken, mindestens 4 Hallen auf Stufe 3 und 100 Mega-Frachter. Danach geht es frei
+weiter. Ein Tipp auf die Stufe oben zeigt den Fortschritt.
 
-Der Aufstiegsbonus ist klein (40.000 € bis 600.000 €). Löhne steigen je Stufe um 8 % (Tariflohn).
+| Stufe | Name | Container | Meilenstein | Neu |
+|---|---|---|---|---|
+| 1 | Anleger | 0 | – | Kai, Kran, Straße, Stapelplatz, Gate, Trucks |
+| 2 | Regionalhafen | 1.500 | – | Export, Verträge, Containerbrücke, Verarbeitung, Verschleiß, Wetter |
+| 3 | Küstenhafen | 7.000 | 5 Schiffe pünktlich | Strom, Bahn, Baggern, Lieferaufträge, Wartung, Überführungen |
+| 4 | Handelshafen | 20.000 | 3 Verträge erfüllt | Kühlfracht, Gefahrgut, große Schiffe, Portalkran, Befüll- und Kühlhalle, Autobahn, Richtung |
+| 5 | Seehafen | 45.000 | 2 große Schiffe | Zoll, Versicherung, Hallen Stufe 2 |
+| 6 | Großhafen | 90.000 | 200 Kühlcontainer | Mega-Frachter, Super-Brücke, fahrerlose Fahrzeuge |
+| 7 | Containerdrehkreuz | 160.000 | 1 Mega-Frachter | Hallen Stufe 3 |
+| 8 | Mega-Hub | 260.000 | 40 Züge | 5 Verträge |
+| 9 | Kontinentalhafen | 400.000 | 20 Lieferaufträge | weitere Verbesserungsstufen |
+| 10 | Welthafen | 580.000 | 10 Kräne | 6 Verträge |
+| 11 | Weltmarktführer | 800.000 | 10 Mega-Frachter | letzte Verbesserungsstufen |
+| 12 | Port Empire | 1.100.000 | Ruf 90 | 7 Verträge |
+
+Der Aufstiegsbonus ist klein (30.000 € bis 500.000 €). Löhne steigen je Stufe um 8 % (Tariflohn).
 
 - **Export:** Schiffe wollen auch beladen werden. Export-Container kommen über das Gate, Trucks bringen sie zum Kran (250 € pro Stück).
 - **Schiffe und Verträge:** Ohne Vertrag kommen nur Küstenfrachter mit 60 Containern. Stufe 1 ist bewusst zäh: Verträge gibt es erst ab Stufe 2. Feeder, Panamax und Mega-Frachter kommen nur als Dauerauftrag nach Fahrplan. Pünktlich gibt es Bonus, sonst Strafe. Zweimal in Folge zu spät: Die Reederei kündigt, Ruf −5.
 - **Bauzeit:** Kräne, Gates, Hallen, Werkstatt, Portalkran und Gleis brauchen nach dem Kauf eine Weile (1 bis 6 Spielstunden), bis sie arbeiten. Auch Kran-Umbauten dauern. Straße, Lager und Kai sind sofort fertig.
 - **Preissteigerung:** Mit jeder Hafenstufe wird alles 15 % teurer (Bauen, Aufrüsten, Verbesserungen).
 - **Gebraucht kaufen und Höchstzustand:** Kräne und Trucks gibt es gebraucht zum halben Preis, mit einem Höchstzustand von 50 bis 75 %. Jedes Gerät hat einen Höchstzustand wie ein Akku: Er sinkt mit der Nutzung, und die Werkstatt repariert nur bis dorthin. Alte Geräte sind langsamer und fallen ab Stufe 2 öfter zufällig aus. Eine Generalüberholung (35 % vom Neupreis) hebt den Höchstwert wieder auf 90 %.
-- **Richtung (ab Stufe 3):** Du wählst einmal Umschlag-Hub, Logistik-Hafen oder Kühlhafen. Jede Richtung hat Vor- und Nachteile, die anderen sind damit zu.
+- **Richtung (ab Stufe 4):** Du wählst einmal Umschlag-Hub, Logistik-Hafen oder Kühlhafen. Jede Richtung hat Vor- und Nachteile, die anderen sind damit zu.
 - **Verbesserungen mit Haken:** Akkord-Schichten (+20 % Kranmoves, aber doppelter Krankenstand, schlechtere Stimmung, mehr Unfälle) und Billigdiesel (Trucks günstiger, aber mehr Verschleiß).
 - **Vertragsbedingungen:** Manche Verträge verlangen, dass der Export mitgeladen wird, sind Eilaufträge (kürzere Liegezeit) oder exklusiv (solange sie laufen, kommen keine freien Schiffe). Dafür gibt es mehr Bonus.
 - **Personal:** Erfahrung wächst mit der Zeit, neue Leute fangen bei 30 % an und drücken den Schnitt. Schichtbetrieb: Nachtschicht kostet 20 % Lohnzuschlag, ohne sie läuft nachts alles mit halber Kraft. Lohnpolitik (Sparkurs, Tarif, Übertarif) und Krankenstand bestimmen die Stimmung, bei sehr schlechter Stimmung streikt die Belegschaft.
@@ -33,17 +43,17 @@ Der Aufstiegsbonus ist klein (40.000 € bis 600.000 €). Löhne steigen je Stu
 - **Lagergebühren und Stapel:** Container im Lager bringen täglich 6 € Gebühr. Hohe Stapel verlängern das Abholen, wenn kein Portalkran im Umkreis steht.
 - **Kreditwürdigkeit:** Guter Ruf und hohe Pünktlichkeit senken den Zinsfaktor.
 - **Unfälle und Kontrollen:** Alte oder überlastete Kräne können Container fallen lassen (Sperrung, Kosten, Ruf). Alle 10 bis 18 Tage kommt eine Kontrolle: alte Geräte und überlastete Belegschaft kosten Strafe, sonst gibt es Ruf.
-- **Doppelspur (ab Stufe 2) und Autobahn (ab Stufe 3):** Die Doppelspur (1.800 € pro Feld, lässt sich über bestehende Straßen malen) lässt je Richtung zwei Trucks durch. Die Autobahn (4.000 € pro Feld) baut automatisch zwei Fahrbahnen nebeneinander mit fester Richtung (Rechtsverkehr), Trucks fahren dort 70 % schneller. Sie hat keine Zufahrt zu Gebäuden, nur an den Enden geht es auf normale Straßen. Beim Ziehen bestimmt die Zugrichtung, ob die Fahrbahnen waagerecht oder senkrecht liegen. Trucks wählen die Route weiter nach der Zahl der Felder, nicht nach dem Tempo.
+- **Doppelspur (ab Stufe 2) und Autobahn (ab Stufe 4):** Die Doppelspur (1.800 € pro Feld, lässt sich über bestehende Straßen malen) lässt je Richtung zwei Trucks durch. Die Autobahn (4.000 € pro Feld) baut automatisch zwei Fahrbahnen nebeneinander mit fester Richtung (Rechtsverkehr), Trucks fahren dort 70 % schneller. Sie hat keine Zufahrt zu Gebäuden, nur an den Enden geht es auf normale Straßen. Beim Ziehen bestimmt die Zugrichtung, ob die Fahrbahnen waagerecht oder senkrecht liegen. Trucks wählen die Route weiter nach der Zahl der Felder, nicht nach dem Tempo.
 - **Vorschau mit Bestätigung:** Kräne, Gates, Hallen, Werkstatt, Gleis, Portalkran und Trucks werden erst als Vorschau gesetzt. Du kannst sie verschieben (ziehen oder woanders tippen) und drehen. Ein zweiter Klick auf die Vorschau, Enter oder der Knopf „Platzieren“ baut wirklich, Esc bricht ab.
 - **Zeit-Routing:** Trucks wählen die schnellste Route, nicht die kürzeste. Autobahnen lohnen sich dadurch auch als Umweg.
 - **Weiterbildung:** Pro Rolle im Personal-Fenster: kostet Geld, hebt die Erfahrung um 20 %, dafür fehlt 3 Tage eine Kraft.
 - **Vorziehen:** Ein wartendes Schiff antippen und vorziehen (Lotsengebühr). Es bekommt den nächsten freien Liegeplatz, die anderen Wartenden werden ungeduldiger.
 - **Blaupausen:** „Kopieren“ (Rahmen ziehen) merkt sich Kai, Straßen, Lager, Gebäude und Kräne (ohne Zonen, Aufrüstungen und Trucks). „Einfügen“ zeigt die Vorschau, die du verschiebst und mit einem zweiten Klick baust. Der Plan bleibt im Browser gespeichert. Was nicht passt, wird übersprungen.
-- **Sandbox:** Im Neues-Spiel-Menü: 1, 10 oder 100 Mio. € Startgeld, alle Werkzeuge ab Stufe 5, kein Ziel, keine Pleite.
+- **Sandbox:** Im Neues-Spiel-Menü: 1, 10 oder 100 Mio. € Startgeld, höchste Stufe, alle Werkzeuge, keine Pleite.
 - **Optik:** Rauch über arbeitenden Hallen und aus den Schornsteinen der Schiffe am Kai.
 - **Hafen-Eigenschaften:** Jedes neue Spiel bekommt zwei zufällige Besonderheiten, etwa Sturmküste, Bahnknoten, Starke Gewerkschaft oder Günstiges Hinterland.
 - **Weltlage:** Ab Stufe 2 kommen Ereignisse für mehrere Tage: Embargo auf eine Ware, Streik im Nachbarhafen (mehr Schiffe), neuer Zoll, neue Handelsroute, gesperrter Kanal.
-- **Strom:** Kräne, Kühlplätze und Hallen verbrauchen Strom (0,30 € pro kWh). Solarflächen (ab Stufe 2) liefern bei Sonne, Batterien (ab Stufe 3) überbrücken Stromausfälle. Ohne Batterie stehen bei Ausfall Kräne und Hallen, Kühlcontainer verderben schneller.
+- **Strom:** Kräne, Kühlplätze und Hallen verbrauchen Strom (0,30 € pro kWh). Solarflächen (ab Stufe 3) liefern bei Sonne, Batterien (ab Stufe 4) überbrücken Stromausfälle. Ohne Batterie stehen bei Ausfall Kräne und Hallen, Kühlcontainer verderben schneller.
 - **Leitstand:** Verläufe der letzten 48 Stunden, Leistung jedes Krans, Gates und jeder Halle, Strom und Regeln. Regeln wie „Wenn Stapelplatz über 80 %, dann alle Trucks auf Ausgang“ prüft der Leitstand stündlich.
 - **Container-Ziele:** Gibt es einen Gleisanschluss, soll rund ein Drittel der Import-Container mit der Bahn weiter (braune Container). Sie gehen nur zum Zug, die anderen nur übers Gate.
 - **Lagerzweck und Umstapeln:** Mit „Lagerzweck“ malst du Stapelfelder als Straße, Bahn oder Export an. Trucks stellen dann sortiert ab. Liegen auf einem Feld verschiedene Arten, muss beim Abholen umgestapelt werden, das kostet Zeit (der Portalkran halbiert es).
@@ -59,9 +69,9 @@ Der Aufstiegsbonus ist klein (40.000 € bis 600.000 €). Löhne steigen je Stu
 - **Abriss:** Große Gebäude und Kräne fragen vor dem Abriss nach.
 - **Flotte:** Im Leitstand listet „Flotte“ alle Trucks mit Zustand, Rolle (antippen wechselt), Aufrüsten, Überholen und Tauschen gegen einen neuen.
 - **Bilanz:** Durchschnitt der letzten Tage und Potenzial: Was Kräne, Gates mit Bahn und Trucks pro Tag schaffen könnten und was davon genutzt wird.
-- **Gefahrgut (ab Stufe 3):** Schiffe bringen Gefahrgut (700 € pro Container), wenn es eine Gefahrgutfläche gibt. Sie braucht 2 Felder Abstand zu Gates, Hallen und Werkstatt, fasst nur 4 Container pro Feld und kostet im Betrieb mehr. Ohne Fläche kommt es nicht an Bord, liegt es einmal im Kran-Puffer ohne freien Platz, steht das Schiff.
-- **Leerlager und Befüllkette (Leerlager ab Stufe 2, Befüllhalle ab Stufe 3):** Beim Auspacken in der Packhalle bleibt ein leerer Container übrig. Das Leerlager (12 pro Feld) nimmt ihn auf. Die Befüllhalle macht aus einem leeren Container und einer Ladung Ware einen Export-Container (+150 €). Die Ware kommt aus der Packhalle oder wird von einem Zug am Gleisanschluss gebracht (12 Ladungen pro Zug, nur wenn es eine Befüllhalle gibt). Der Export-Container geht wie gewohnt aufs Schiff. Läuft das Leerlager voll, bringen Trucks leere Container für 90 € zurück an die Reederei.
-- **Kranmodelle:** Leichtkran (40k, 13 Moves/h), Mobilkran (80k, 20), Containerbrücke (Aufrüstung ab Stufe 2, 40, zwei Felder), Super-Brücke (Aufrüstung ab Stufe 4, 60). Jedes Modell hat eigene Betriebskosten und Pufferplätze.
+- **Gefahrgut (ab Stufe 4):** Schiffe bringen Gefahrgut (700 € pro Container), wenn es eine Gefahrgutfläche gibt. Sie braucht 2 Felder Abstand zu Gates, Hallen und Werkstatt, fasst nur 4 Container pro Feld und kostet im Betrieb mehr. Ohne Fläche kommt es nicht an Bord, liegt es einmal im Kran-Puffer ohne freien Platz, steht das Schiff.
+- **Leerlager und Befüllkette (Leerlager ab Stufe 2, Befüllhalle ab Stufe 4):** Beim Auspacken in der Packhalle bleibt ein leerer Container übrig. Das Leerlager (12 pro Feld) nimmt ihn auf. Die Befüllhalle macht aus einem leeren Container und einer Ladung Ware einen Export-Container (+150 €). Die Ware kommt aus der Packhalle oder wird von einem Zug am Gleisanschluss gebracht (12 Ladungen pro Zug, nur wenn es eine Befüllhalle gibt). Der Export-Container geht wie gewohnt aufs Schiff. Läuft das Leerlager voll, bringen Trucks leere Container für 90 € zurück an die Reederei.
+- **Kranmodelle:** Leichtkran (40k, 13 Moves/h), Mobilkran (80k, 20), Containerbrücke (Aufrüstung ab Stufe 2, 40, zwei Felder), Super-Brücke (Aufrüstung ab Stufe 6, 60). Jedes Modell hat eigene Betriebskosten und Pufferplätze.
 - **Verbesserungen:** Kleine Upgrades in Stufen (Knopf mit dem Zahnrad): Twin-Spreader, Gate-Scanner, Stapeltechnik, Vertrieb, Leitstelle, Motoren, Kühltechnik, Wartungsplan. Jede Stufe kostet mehr und braucht eine Mindest-Hafenstufe.
 - **Wetter:** Bei Sturm stehen die Kräne (die Liegezeit läuft dann nicht), bei Nebel läuft kein Schiff ein. Es gibt zwei Stunden Vorwarnung.
 - **Kühlfracht:** Kühlcontainer brauchen Kühlplätze und verderben dort nach 10 Stunden. Sie bringen 400 €.
@@ -70,12 +80,12 @@ Der Aufstiegsbonus ist klein (40.000 € bis 600.000 €). Löhne steigen je Stu
 - **Verarbeitung (ab Stufe 2):** Die Packhalle packt Container aus, die Veredelung macht aus zwei davon Fertigware für 900 €. Trucks fahren die Ware dazwischen.
 - **Aufgaben für Trucks:** Jeder Truck fährt auf Automatik oder bekommt eine feste Aufgabe (Kran räumen, Ausgang, Export, Verarbeitung). Feste Aufgaben sind 25 % schneller und sparen die Funkzeit der Leitstelle.
 - **Personal und Schwierigkeit:** Fahrer, Kranführer und Gate-Kräfte kosten Stundenlohn und können krank werden. Drei Schwierigkeitsgrade im Menü.
-- **Ziel und Pleite:** Weltklasse-Hafen (Stufe 5) bis Tag 80/65/50 (je Schwierigkeit), danach ohne Frist weiter bis Stufe 7. Ist das Konto 5/3/2 Tagesabschlüsse in Folge im Minus, ist es die Pleite.
+- **Pleite:** Ist das Konto 5/3/2 Tagesabschlüsse in Folge im Minus (je Schwierigkeit), ist das Spiel verloren. Ein anderes Ende gibt es nicht, nur die Vollendung.
 - **Kredit und Bilanz:** Kredit in Schritten von 100.000 €, Grenze wächst mit der Stufe, Zinsen täglich. Die Bilanz zeigt Tagesfinanzen und den Verlauf der letzten Tage.
 - **Sammelzuweisung:** Werkzeug „Aufgaben“, Rahmen über Trucks ziehen.
 - **Einbahnstraßen und Land:** Straßen auf eine Richtung schalten. Eine Einbahnstraße hat zwei Spuren und lässt doppelt so viele Trucks durch. Land ist in Streifen geteilt und muss gekauft werden.
 - **Verschleiß (ab Stufe 2):** Kräne und Trucks werden langsamer und fallen bei 100 % aus. Die Werkstatt mit Mechaniker repariert.
-- **Kühlhalle (ab Stufe 3):** Kühlcontainer zu Lebensmitteln für 750 €.
+- **Kühlhalle (ab Stufe 4):** Kühlcontainer zu Lebensmitteln für 750 €.
 - **Karten:** Küste, Insel (Kai an allen vier Küsten, keine Bahn, mehr Startgeld, ab Stufe 2 mehr Schiffe), Felsen (Sprengen kostet, etwas mehr Startgeld).
 - **Konkurrenz und Entscheidungen (ab Stufe 2):** Hafen Nordstadt wirbt Reedereien ab, wenn du unpünktlicher bist. Ereignisse wie Streik oder Zollverdacht verlangen eine Entscheidung.
 - **Zonen:** Lagerflächen, Kräne, Gates, Hallen, Gleise und Trucks in einer von vier Farben anmalen. Fahrten verbinden nur gleiche Zonen, Trucks mit Zone fahren nur dort. Mit dem Zonen-Werkzeug zeigt eine Übersicht, was in jeder Zone steht und was dem Kreislauf fehlt.
@@ -83,16 +93,16 @@ Der Aufstiegsbonus ist klein (40.000 € bis 600.000 €). Löhne steigen je Stu
 - **Große Kräne:** Die aufgerüstete Containerbrücke steht über zwei Kai-Feldern (das Feld daneben muss frei sein) und hat Platz für 8 statt 4 Container.
 - **Drehen:** Gate, Packhalle und Veredelung lassen sich vor dem Bauen drehen (Knopf über der Leiste oder Taste R).
 - **Wartebalken:** Über wartenden Schiffen läuft die Geduld ab, über liegenden Schiffen die zugesagte Liegezeit, über Trucks im Stau die Wartezeit.
-- **Portalkran (ab Stufe 3):** Auf eine Lager- oder Kühlfläche gesetzt, stapelt er 9 statt 6 Container pro Feld im Umkreis und halbiert die Umschlagzeit der Trucks dort. Braucht einen Kranführer.
+- **Portalkran (ab Stufe 4):** Auf eine Lager- oder Kühlfläche gesetzt, stapelt er 9 statt 6 Container pro Feld im Umkreis und halbiert die Umschlagzeit der Trucks dort. Braucht einen Kranführer.
 - **Markt:** Elektronik, Kleidung und Lebensmittel haben eigene Preise, die sich täglich ändern (mit Boom und Einbruch). In der Veredelung wählst du, was produziert wird. Kurse stehen in der Bilanz.
 - **Tagesbericht:** Nach jedem Tag eine Karte mit Ergebnis, Containern, Pünktlichkeit, häufigstem Engpass und Stau.
 - **Szenarien:** Marode übernommen (Schulden tilgen), Insel-Express (600 Container an einem Tag), Kühlkette (150 Lebensmittel).
-- **Kreuzungen und Überführungen (ab Stufe 2):** Wo drei oder vier Straßen zusammenkommen, warten Trucks kurz auf Querverkehr. Eine Überführung (20k) auf der Kreuzung hebt das auf, nochmal tippen baut sie ab.
-- **Zoll (ab Stufe 2):** Etwa jeder achte Import-Container muss geprüft werden. Ohne Zollhof prüft das Gate selbst und braucht dreimal so lange. Jedes Zollhof-Feld (30k) prüft 8 Container pro Stunde, die Gebühr gibt es nach der Prüfung.
-- **Wartungsfenster (ab Stufe 2):** Im Kranblatt eine Wartung für 22 Uhr planen. Der Kran steht zwei Stunden still, verliert Verschleiß und hat drei Tage lang deutlich weniger Ausfälle und Unfälle.
-- **Versicherung:** In der Bilanz Keine, Basis oder Voll wählen. Die Tagesprämie wächst mit der Zahl der Kräne, erstattet werden 50 bzw. 85 % von Kranunfällen und verdorbenen Kühlcontainern.
-- **Lieferaufträge (ab Stufe 2):** Firmen aus dem Hinterland bestellen feste Mengen in 2 bis 4 Tagen: per Lkw, per Bahn, als Export oder (ab Stufe 3) Ware aus den Hallen. Höchstens zwei gleichzeitig, im Verträge-Fenster.
-- **Hallen-Stufen (ab Hafenstufe 3 und 4):** Hallen lassen sich zweimal ausbauen: schneller und mit mehr Puffer. Während des Ausbaus steht die Halle.
+- **Kreuzungen und Überführungen (ab Stufe 3):** Wo drei oder vier Straßen zusammenkommen, warten Trucks kurz auf Querverkehr. Eine Überführung (20k) auf der Kreuzung hebt das auf, nochmal tippen baut sie ab.
+- **Zoll (ab Stufe 5):** Etwa jeder achte Import-Container muss geprüft werden. Ohne Zollhof prüft das Gate selbst und braucht dreimal so lange. Jedes Zollhof-Feld (30k) prüft 8 Container pro Stunde, die Gebühr gibt es nach der Prüfung.
+- **Wartungsfenster (ab Stufe 3):** Im Kranblatt eine Wartung für 22 Uhr planen. Der Kran steht zwei Stunden still, verliert Verschleiß und hat drei Tage lang deutlich weniger Ausfälle und Unfälle.
+- **Versicherung (ab Stufe 5):** In der Bilanz Keine, Basis oder Voll wählen. Die Tagesprämie wächst mit der Zahl der Kräne, erstattet werden 50 bzw. 85 % von Kranunfällen und verdorbenen Kühlcontainern.
+- **Lieferaufträge (ab Stufe 3):** Firmen aus dem Hinterland bestellen feste Mengen in 2 bis 4 Tagen: per Lkw, per Bahn, als Export oder (ab Stufe 4) Ware aus den Hallen. Höchstens zwei gleichzeitig, im Verträge-Fenster.
+- **Hallen-Stufen (ab Hafenstufe 5 und 7):** Hallen lassen sich zweimal ausbauen: schneller und mit mehr Puffer. Während des Ausbaus steht die Halle.
 - **Bauen ohne Fummelei:** Straßen, Kai, Gleise und Baggern laufen beim Ziehen gerade und gehen erst um die Ecke, wenn der Finger 2 Felder daneben ist. Lager, Kühlplätze, Gefahrgut, Leerlager, Solar, Stellplätze, Lagerzweck und Zonen zieht man als Rechteck auf (mit Größe und Kosten), gebaut wird beim Loslassen. Trucks setzt ein Tipp ohne Bestätigung.
 - **Ein Tipp zum Ziel:** Die Missionskarte hat einen „Los“-Knopf, der das passende Werkzeug wählt. Die Engpass-Karte hat einen Knopf zum Beheben, bei Trucks kauft er direkt einen neuen.
 - **Grafik:** Unter Einstellungen „Auto“ (scharf, wird bei Ruckeln automatisch gröber), „Scharf“ oder „Flüssig“, dazu „Akku sparen“ mit höchstens 30 Bildern pro Sekunde.
@@ -100,7 +110,12 @@ Der Aufstiegsbonus ist klein (40.000 € bis 600.000 €). Löhne steigen je Stu
 - **Logbuch:** Im Leitstand stehen die letzten 200 Meldungen mit Tag und Uhrzeit. Antippen springt zum Ort, falls es einen gibt.
 - **Warum steht das?** Kran, Gate, Halle und Truck nennen im Info-Blatt den konkreten Grund, warum sie nicht arbeiten, und was hilft.
 - **Kurztipps:** Beim ersten Benutzen eines neuen Werkzeugs (Strom, Portalkran, Befüllkette, Gleise …) erklärt eine Karte das Wichtigste. Einmal pro Gerät.
-- **Erfolge und Bestenliste:** 19 Erfolge und eine lokale Bestenliste der Siege, gespeichert nur im Browser.
+- **Tagesaufgabe:** Jeden Tag ein neuer Hafen, für alle gleich: ein Spieltag Zeit, so viele Container wie möglich. Der Bestwert pro Tag wird gespeichert.
+- **Szenarien:** Marode übernommen, Insel-Express, Kühlkette, Sturmsaison (25 Schiffe pünktlich an der Sturmküste) und Zollrazzia (400 Container durch den Zoll).
+- **Musik und Feiern:** Ruhige Hintergrundmusik, im Browser erzeugt (Optionen: Musik an/aus). Konfetti beim Aufstieg, bei der Vollendung und bei erfüllten Verträgen und Missionen.
+- **Einstieg:** Die ersten Missionen zeigen mit goldenen Feldern und Pfeil auf der Karte, wo gebaut wird. Gesperrte Werkzeuge erscheinen erst kurz bevor sie frei werden.
+- **Sturmschäden:** Bei Sturm kann es Kräne treffen. Die Versicherung übernimmt einen Teil.
+- **Erfolge und Bestenliste:** Erfolge und eine lokale Bestenliste der Vollendungen, Szenarien und Tagesaufgaben, gespeichert nur im Browser.
 
 Alle Werte stehen in `src/sim/data.ts`. Das Balancing ist grob und noch nicht durch Spielen abgestimmt.
 
@@ -143,7 +158,7 @@ npm run build:single  # zusätzlich eine einzelne, selbstständige Datei dist/ha
 Im Menü gibt es zwei Startarten:
 
 - **Demo-Hafen mit Engpass:** Fertig gebaut, aber mit zu wenig Trucks und nur einem Gate. Finde den Engpass.
-- **Neuer leerer Hafen:** Mit 19 geführten Missionen vom ersten Kai-Feld bis zum Weltklasse-Hafen.
+- **Neuer leerer Hafen:** Mit 27 geführten Missionen vom ersten Kai-Feld bis zum Containerdrehkreuz, danach frei.
 
 ## Bedienung
 

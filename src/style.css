@@ -587,3 +587,57 @@ html, body { touch-action: none; overscroll-behavior: none; }
   html, body { height: 100vh; height: 100lvh; }
   #app { bottom: auto; height: 100vh; height: 100lvh; }
 }
+
+/* Fortschritt */
+.prog .pgrow { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; margin-top: 6px; }
+.prog .pgrow span { color: #34455a; }
+.prog .pgrow.ok b { color: var(--good); }
+.prog .progress { height: 10px; border-radius: 5px; background: #e6ebf2; overflow: hidden; margin: 4px 0 2px; }
+.prog .progress span { display: block; height: 100%; border-radius: 5px; background: linear-gradient(90deg, #f6b42c, #ffd25a); }
+.prog .lvlist { display: flex; flex-direction: column; gap: 4px; }
+.prog .lv { display: grid; grid-template-columns: 28px 1fr; grid-template-rows: auto auto; column-gap: 8px; align-items: center; padding: 6px 8px; border-radius: 10px; background: #f4f7fb; opacity: .65; }
+.prog .lv .n { grid-row: 1 / 3; width: 26px; height: 26px; border-radius: 50%; background: #d5dde7; color: #fff; font-family: var(--display); font-weight: 800; display: flex; align-items: center; justify-content: center; }
+.prog .lv .t { font-family: var(--display); font-weight: 800; font-size: 15px; }
+.prog .lv .c { font-size: 12px; color: var(--muted); }
+.prog .lv.done { opacity: 1; } .prog .lv.done .n { background: var(--good); }
+.prog .lv.next { opacity: 1; background: #fff6dc; box-shadow: inset 0 0 0 2px #f2b336; } .prog .lv.next .n { background: #f2b336; }
+.pill.level { cursor: pointer; }
+.pill.level.waiting .bar { background: #f2b336; animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .55; } }
+
+.bn .bneye { margin-left: 8px; width: 28px; height: 24px; border: 0; border-radius: 8px; background: #eef2f7; color: var(--muted); display: inline-flex; align-items: center; justify-content: center; padding: 0; }
+.bn .bneye svg { width: 17px; height: 17px; }
+.bn .bneye.on { background: linear-gradient(180deg, #4b8df0, #2a6fdb); color: #fff; }
+
+/* Konfetti */
+.confetti { position: fixed; inset: 0; pointer-events: none; z-index: 60; overflow: hidden; }
+.confetti i { position: absolute; top: -20px; left: var(--x); width: var(--w); height: calc(var(--w) * .55); border-radius: 2px; opacity: .95;
+  animation: confetti var(--d) cubic-bezier(.25,.6,.4,1) forwards; }
+@keyframes confetti { to { transform: translate(var(--dx), 110vh) rotate(var(--r)); opacity: .9; } }
+
+/* Info-Fenster im neuen Stil: dunkle Kopfzeile mit Spielschrift, helle Inhalte, plastische Knöpfe */
+#hud .dialog.deals { padding-top: 0; border-radius: 24px; box-shadow: 0 24px 60px rgba(0,0,0,.35); }
+#hud .dialog.deals > .dhead { position: sticky; top: 0; z-index: 2; margin: 0 -22px 6px; padding: 14px 16px 14px 20px; background: linear-gradient(165deg, #1d4373, #0f2747); border-radius: 0; box-shadow: 0 3px 0 rgba(0,0,0,.12); }
+#hud .dialog.deals > .dhead h2 { color: #fff; font-family: var(--display); font-weight: 800; font-size: 23px; letter-spacing: .01em; }
+#hud .dialog.deals > .dhead .x { background: rgba(255,255,255,.14); color: #fff; }
+#hud .dialog.deals h3 { font-family: var(--display); color: #2a4a72; font-size: 14px; letter-spacing: .06em; }
+#hud .dialog:not(.menu) .primary { background: linear-gradient(180deg, #4b8df0, #2a6fdb); color: #fff; box-shadow: 0 4px 0 #17468f, 0 6px 14px rgba(42,111,219,.25); font-family: var(--display); }
+#hud .dialog:not(.menu) .secondary { background: linear-gradient(180deg, #f6f9fd, #e5ecf5); box-shadow: 0 3px 0 #c3cede; font-family: var(--display); }
+#hud .dialog:not(.menu) .primary:active, #hud .dialog:not(.menu) .secondary:active { transform: translateY(2px); box-shadow: none; }
+#hud .dialog:not(.menu) .primary:disabled { background: #b9c3d0; box-shadow: none; }
+.deal { border: 1px solid #e3e9f1; }
+
+/* Aufstieg, Vollendung, Entscheidungen: dunkel und feierlich */
+#hud .dialog.levelup { background: linear-gradient(165deg, #183a65 0%, #0f2747 60%, #0a1c35 100%); color: #eef4fb; border: 1px solid rgba(255,255,255,.12); box-shadow: 0 28px 70px rgba(0,0,0,.5); }
+#hud .dialog.levelup h1 { color: #fff; font-family: var(--display); font-weight: 800; font-size: 32px; text-align: center; }
+#hud .dialog.levelup .sub { color: #a8c0dc; text-align: center; }
+#hud .levelup .eyebrow { color: #ffd36a; font-family: var(--display); }
+#hud .levelup .trophy { background: radial-gradient(circle at 35% 30%, #ffe08a, #f2a51e 70%); box-shadow: 0 0 0 6px rgba(242,179,54,.25), 0 0 40px rgba(255,200,60,.55), inset 0 -5px 0 rgba(0,0,0,.15); animation: trophyIn .7s cubic-bezier(.2,1.4,.4,1) both; }
+@keyframes trophyIn { from { transform: scale(.3) rotate(-25deg); opacity: 0; } to { transform: none; opacity: 1; } }
+#hud .levelup .news { background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.09); color: #c9d9ec; }
+#hud .levelup .news b { color: #fff; font-family: var(--display); }
+#hud .levelup .primary { background: linear-gradient(180deg, #ffdc6e 0%, #f7b52c 55%, #ee9a12 100%); color: #3a2200; box-shadow: 0 4px 0 #a45f00, 0 10px 22px rgba(240,160,30,.35); }
+#hud .levelup .secondary { background: linear-gradient(180deg, #2f5f95, #234b78); color: #fff; box-shadow: 0 4px 0 #0f2845; }
+#hud .decision .opts button { background: linear-gradient(180deg, #2f5f95, #234b78); color: #fff; box-shadow: 0 4px 0 #0f2845; font-family: var(--display); font-size: 16px; }
+#hud .dialog.menu.mainmenu .daily { background: linear-gradient(180deg, #33ad73, #208455); box-shadow: 0 4px 0 #0f4d30, 0 8px 16px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.18); font-size: 16px; padding: 11px 14px; }
+#hud .dialog.menu.mainmenu .daily .mi { color: #fff3c2; }

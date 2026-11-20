@@ -1,11 +1,12 @@
 import { Sound } from './audio/sound';
+import { Music } from './audio/music';
 import { Renderer, View } from './render/renderer';
-import { BuildTool, DiffId, GRID_H, GRID_W, MapId, ProductId, Role, ROLE_NAMES, T, TICKS_PER_SEC, TILE, Tool, TruckRole } from './sim/data';
+import { BuildTool, DiffId, GRID_H, GRID_W, MAX_LEVEL, MapId, ProductId, Role, ROLE_NAMES, T, TICKS_PER_SEC, TILE, Tool, TruckRole } from './sim/data';
 import { Progress } from './achievements';
 import { CRANE_MODELS, PLANTS, TRAITS, DIFFS, dimsOf, MAPS, movesPerHour, sizeOf, TechId } from './sim/data';
 import { buildDemo, buildShowcase } from './sim/demo';
 import { isVertical, qOf, qTile, sideOf } from './sim/quay';
-import { setupScenario } from './sim/scenario-setup';
+import { dailyKey, setupDaily, setupScenario } from './sim/scenario-setup';
 import { SCENARIOS } from './sim/scenarios';
 import { GameEvent, Removed, Sim } from './sim/sim';
 import type { UI } from './ui/ui';
@@ -18,7 +19,7 @@ interface BpItem {
   rot?: boolean;
   ow?: number;
 }
-import { MISSION_GO } from './sim/missions';
+import { MISSION_GO, missionHint } from './sim/missions';
 
 export interface Blueprint {
   w: number;
@@ -57,6 +58,8 @@ export class Game {
   sim = new Sim();
   renderer = new Renderer();
   sound = new Sound();
+  /** Ruhige Hintergrundmusik, eigene Einstellung */
+  music = new Music();
   ui!: UI;
   /** 0 = Pause */
   speed = 1;
@@ -114,6 +117,8 @@ export class Game {
     this.perfN = 0;
     this.perfWarm = 0;
   }
+  private hintTimer = 0;
+  private hintTiles: number[] = [];
   private perfT = 0;
   private perfN = 0;
   private perfWarm = 0;
@@ -157,10 +162,17 @@ export class Game {
       if (n >= 400) this.acc = 0;
     }
     for (const e of this.sim.drainEvents()) this.onEvent(e);
+    this.music.update(this.sound.context, this.sound.output);
     this.flushPending(dtSec);
     this.pruneUndo();
 
     if (this.ghost) this.hover = { ...this.ghost, ok: this.previewOk(this.ghost.x, this.ghost.y) };
+    // Einstieg: Missions-Hinweise auf der Karte, zweimal pro Sekunde neu
+    this.hintTimer -= dtSec;
+    if (this.hintTimer <= 0) {
+      this.hintTimer = 0.5;
+      this.hintTiles = this.inGame && !this.showcase && this.sim.mission < 6 ? missionHint(this.sim) : [];
+    }
     this.renderer.draw(this.sim, {
       overlay: this.overlay,
       tool: this.tool,
@@ -175,6 +187,7 @@ export class Game {
       dt: dtSec,
       rect: this.rect,
       painting: !!this.stroke,
+      hint: this.hintTiles,
     });
     this.ui.update(dtSec);
     // Erfolge etwa einmal pro Sekunde prüfen
@@ -197,6 +210,11 @@ export class Game {
     if (this.showcase) return;
     if (e.text) {
       this.ui.toast(e.text, e.kind);
+      // Kleine Feier bei erfüllten Verträgen, Lieferaufträgen und Missionen
+      if (e.kind === 'good' && (e.tag === 'mission' || (e.tag === 'contract' && /erfüllt/.test(e.text)))) {
+        this.ui.celebrate(false);
+        this.sound.play('mission');
+      }
       this.log.push({ day: this.sim.day, clock: this.sim.clock, text: e.text, kind: e.kind, x: e.x, y: e.y });
       if (this.log.length > 200) this.log.shift();
     }
@@ -225,6 +243,13 @@ export class Game {
         this.sound.play('mission');
         const s = this.sim;
         const sc = SCENARIOS.find((x) => x.id === s.scenario);
+        if (s.daily) {
+          const best = this.saveDailyBest(s.daily, s.dailyScore);
+          this.progress.addRecord({ title: `Tagesaufgabe ${s.daily.slice(6, 8)}.${s.daily.slice(4, 6)}.`, day: 1, handled: s.dailyScore, money: Math.round(s.money), date: new Date().toISOString().slice(0, 10) });
+          if (best) this.ui.celebrate(true);
+          this.ui.showEnd();
+          break;
+        }
         this.progress.addRecord({
           title: sc ? `Szenario: ${sc.name}` : `${DIFFS[s.diff].name} · ${MAPS[s.map].name}`,
           day: s.day,
@@ -233,6 +258,19 @@ export class Game {
           date: new Date().toISOString().slice(0, 10),
         });
         this.ui.showEnd();
+        break;
+      }
+      case 'complete': {
+        this.sound.play('level');
+        const s = this.sim;
+        this.progress.addRecord({
+          title: `Vollendet · ${DIFFS[s.diff].name} · ${MAPS[s.map].name}`,
+          day: s.day,
+          handled: s.handled,
+          money: Math.round(s.money - s.loan),
+          date: new Date().toISOString().slice(0, 10),
+        });
+        this.ui.showEnd('complete');
         break;
       }
       case 'lost':
@@ -371,6 +409,36 @@ export class Game {
     this.save();
   }
 
+  /** Tägliche Herausforderung starten: für alle gleich, ein Spieltag Zeit */
+  newDaily() {
+    this.sim = setupDaily(dailyKey());
+    this.resetTransient();
+    this.setTool('view');
+    this.setSpeed(1);
+    this.inGame = true;
+    this.fitCamera();
+    this.save();
+  }
+  /** Bestwerte der Tagesaufgabe, nach Datum */
+  dailyBest(key = dailyKey()): number {
+    try {
+      return (JSON.parse(localStorage.getItem('hafen-imperium-daily') ?? '{}') as Record<string, number>)[key] ?? 0;
+    } catch {
+      return 0;
+    }
+  }
+  private saveDailyBest(key: string, score: number): boolean {
+    try {
+      const all = JSON.parse(localStorage.getItem('hafen-imperium-daily') ?? '{}') as Record<string, number>;
+      const better = score > (all[key] ?? 0);
+      if (better) all[key] = score;
+      localStorage.setItem('hafen-imperium-daily', JSON.stringify(all));
+      return better;
+    } catch {
+      return false;
+    }
+  }
+
   setProduct(plantId: number, p: ProductId) {
     this.sim.setProduct(plantId, p);
     this.sound.play('click');
@@ -396,9 +464,9 @@ export class Game {
     this.sim = new Sim(Math.floor(Math.random() * 1e9), 'easy', map);
     this.sim.sandbox = true;
     this.sim.status = 'free';
-    this.sim.level = 5;
+    this.sim.level = MAX_LEVEL;
     this.sim.money = money;
-    this.sim.mission = 30;
+    this.sim.mission = 99;
     this.sim.limitLand();
     this.sim.owned.fill(1);
     this.sim.nextShipIn = 5;
