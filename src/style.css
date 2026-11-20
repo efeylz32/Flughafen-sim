@@ -636,8 +636,8 @@ html, body { touch-action: none; overscroll-behavior: none; }
 @keyframes trophyIn { from { transform: scale(.3) rotate(-25deg); opacity: 0; } to { transform: none; opacity: 1; } }
 #hud .levelup .news { background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.09); color: #c9d9ec; }
 #hud .levelup .news b { color: #fff; font-family: var(--display); }
-#hud .levelup .primary { background: linear-gradient(180deg, #ffdc6e 0%, #f7b52c 55%, #ee9a12 100%); color: #3a2200; box-shadow: 0 4px 0 #a45f00, 0 10px 22px rgba(240,160,30,.35); }
-#hud .levelup .secondary { background: linear-gradient(180deg, #2f5f95, #234b78); color: #fff; box-shadow: 0 4px 0 #0f2845; }
+#hud .dialog.levelup .primary { background: linear-gradient(180deg, #ffdc6e 0%, #f7b52c 55%, #ee9a12 100%); color: #3a2200; box-shadow: 0 4px 0 #a45f00, 0 10px 22px rgba(240,160,30,.35); }
+#hud .dialog.levelup .secondary { background: linear-gradient(180deg, #2f5f95, #234b78); color: #fff; box-shadow: 0 4px 0 #0f2845; }
 #hud .decision .opts button { background: linear-gradient(180deg, #2f5f95, #234b78); color: #fff; box-shadow: 0 4px 0 #0f2845; font-family: var(--display); font-size: 16px; }
 #hud .dialog.menu.mainmenu .daily { background: linear-gradient(180deg, #33ad73, #208455); box-shadow: 0 4px 0 #0f4d30, 0 8px 16px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.18); font-size: 16px; padding: 11px 14px; }
 #hud .dialog.menu.mainmenu .daily .mi { color: #fff3c2; }

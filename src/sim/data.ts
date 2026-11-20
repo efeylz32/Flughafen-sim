@@ -117,7 +117,7 @@ export const CRANE_MODELS: Record<
 > = {
   light: { name: 'Leichtkran', move: 4.5, run: 600, buffer: 3, big: false, next: 'mobile', upCost: 50_000, upLevel: 1, color: 0xe0a526, text: 'Billig und genügsam, aber langsam' },
   mobile: { name: 'Mobilkran', move: 3, run: 1_200, buffer: 4, big: false, next: 'bridge', upCost: 120_000, upLevel: 2, color: 0xe2582c, text: 'Der Standard für kleine Liegeplätze' },
-  bridge: { name: 'Containerbrücke', move: 1.5, run: 2_500, buffer: 8, big: true, next: 'super', upCost: 200_000, upLevel: 6, color: 0x2f6db0, text: 'Steht auf zwei Kai-Feldern, doppelt so schnell' },
+  bridge: { name: 'Containerbrücke', move: 1.5, run: 2_500, buffer: 8, big: true, next: 'super', upCost: 750_000, upLevel: 6, color: 0x2f6db0, text: 'Steht auf zwei Kai-Feldern, doppelt so schnell' },
   super: { name: 'Super-Brücke', move: 1, run: 3_800, buffer: 10, big: true, next: null, upCost: 0, upLevel: 0, color: 0x1f7a6d, text: 'Für Mega-Frachter: 60 Moves pro Stunde' },
 };
 /** Moves pro Stunde eines Modells (ohne Verschleiß und Verbesserungen) */
@@ -126,16 +126,16 @@ export const movesPerHour = (m: CraneModel) => Math.round(60 / CRANE_MODELS[m].m
 /** Kleine Verbesserungen in Stufen. Jede Stufe kostet mehr und braucht eine Mindest-Hafenstufe. */
 export type TechId = 'spreader' | 'scanner' | 'stack' | 'sales' | 'radio' | 'engine' | 'cool' | 'maint' | 'akkord' | 'diesel';
 export const TECH: Record<TechId, { name: string; text: string; per: string; cost: number[]; level: number[] }> = {
-  spreader: { name: 'Twin-Spreader', text: 'Kräne laden und löschen schneller.', per: '+10 % Kranmoves', cost: [30_000, 60_000, 120_000, 240_000, 420_000], level: [1, 2, 4, 6, 9] },
-  scanner: { name: 'Gate-Scanner', text: 'Gates fertigen Container schneller ab.', per: '+20 % Gate-Tempo', cost: [25_000, 50_000, 100_000, 200_000, 360_000], level: [1, 2, 4, 7, 10] },
-  stack: { name: 'Stapeltechnik', text: 'Höher stapeln: mehr Container pro Lagerfeld.', per: '+1 Container pro Feld', cost: [40_000, 90_000, 180_000, 340_000], level: [2, 4, 7, 10] },
-  sales: { name: 'Vertrieb', text: 'Bessere Konditionen bei Spediteuren.', per: '+5 % auf Containergebühren', cost: [50_000, 100_000, 200_000, 350_000, 550_000], level: [2, 3, 5, 8, 11] },
-  radio: { name: 'Leitstelle', text: 'Digitaler Funk: Automatik-Trucks bekommen schneller ihren nächsten Auftrag.', per: '−30 % Funkzeit', cost: [20_000, 50_000, 120_000], level: [1, 3, 6] },
-  engine: { name: 'Motoren', text: 'Stärkere Zugmaschinen.', per: '+8 % Truck-Tempo', cost: [30_000, 70_000, 140_000, 260_000, 420_000], level: [1, 2, 4, 7, 10] },
-  cool: { name: 'Kühltechnik', text: 'Bessere Aggregate an den Kühlplätzen.', per: '+30 % Haltbarkeit', cost: [30_000, 60_000, 120_000], level: [4, 5, 8] },
+  spreader: { name: 'Twin-Spreader', text: 'Kräne laden und löschen schneller.', per: '+10 % Kranmoves', cost: [30_000, 60_000, 120_000, 400_000, 2_500_000], level: [1, 2, 4, 6, 9] },
+  scanner: { name: 'Gate-Scanner', text: 'Gates fertigen Container schneller ab.', per: '+20 % Gate-Tempo', cost: [25_000, 50_000, 100_000, 900_000, 2_200_000], level: [1, 2, 4, 7, 10] },
+  stack: { name: 'Stapeltechnik', text: 'Höher stapeln: mehr Container pro Lagerfeld.', per: '+1 Container pro Feld', cost: [40_000, 90_000, 900_000, 2_400_000], level: [2, 4, 7, 10] },
+  sales: { name: 'Vertrieb', text: 'Bessere Konditionen bei Spediteuren.', per: '+5 % auf Containergebühren', cost: [50_000, 100_000, 200_000, 1_400_000, 3_500_000], level: [2, 3, 5, 8, 11] },
+  radio: { name: 'Leitstelle', text: 'Digitaler Funk: Automatik-Trucks bekommen schneller ihren nächsten Auftrag.', per: '−30 % Funkzeit', cost: [20_000, 50_000, 500_000], level: [1, 3, 6] },
+  engine: { name: 'Motoren', text: 'Stärkere Zugmaschinen.', per: '+8 % Truck-Tempo', cost: [30_000, 70_000, 140_000, 900_000, 2_400_000], level: [1, 2, 4, 7, 10] },
+  cool: { name: 'Kühltechnik', text: 'Bessere Aggregate an den Kühlplätzen.', per: '+30 % Haltbarkeit', cost: [30_000, 60_000, 1_200_000], level: [4, 5, 8] },
   akkord: { name: 'Akkord-Schichten', text: 'Kräne arbeiten schneller, aber die Belegschaft wird öfter krank, die Stimmung sinkt und überlastete Kräne haben eher Unfälle.', per: '+20 % Kranmoves, doppelter Krankenstand', cost: [60_000], level: [3] },
   diesel: { name: 'Billigdiesel', text: 'Trucks sind günstiger im Betrieb, verschleißen aber schneller.', per: '−40 % Truck-Betriebskosten, +30 % Verschleiß', cost: [40_000], level: [2] },
-  maint: { name: 'Wartungsplan', text: 'Vorbeugende Wartung.', per: '−20 % Verschleiß', cost: [30_000, 60_000, 120_000, 240_000], level: [2, 4, 6, 9] },
+  maint: { name: 'Wartungsplan', text: 'Vorbeugende Wartung.', per: '−20 % Verschleiß', cost: [30_000, 60_000, 450_000, 2_000_000], level: [2, 4, 6, 9] },
 };
 export const TECH_IDS = Object.keys(TECH) as TechId[];
 

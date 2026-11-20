@@ -80,7 +80,7 @@ export class Bot {
     if (st.yard > 0.75 && s.money > 12_000 + reserve) this.addYardRow();
     if (st.trucks > 0.85 && s.jamShare < 0.2 && s.money > 25_000 + reserve && s.trucks.length < 40) this.try('truck', 2 + (s.trucks.length % 17), k + 1);
     // Kleine Verbesserungen, wenn Geld übrig ist
-    for (const id of ['spreader', 'scanner', 'engine', 'radio', 'stack', 'sales', 'maint'] as const) {
+    for (const id of ['spreader', 'scanner', 'engine', 'radio', 'stack', 'sales', 'maint', 'cool'] as const) {
       const c = s.canBuyTech(id);
       if (c.ok && s.money > c.cost * 3 + reserve) s.buyTech(id);
     }

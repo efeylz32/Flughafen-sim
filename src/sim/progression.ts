@@ -48,13 +48,15 @@ export const COMPLETE_SUPER = 8;
 
 /** Die Vollendung: alles ausgebaut. Jeder Punkt mit Stand und Ziel. */
 export function completion(s: Sim): { items: CompletionItem[]; share: number; done: boolean } {
-  const techMax = TECH_IDS.reduce((n, id) => n + TECH[id].cost.length, 0);
-  const techNow = TECH_IDS.reduce((n, id) => n + Math.min(s.tech[id], TECH[id].cost.length), 0);
+  // Akkord und Billigdiesel sind Tauschgeschäfte mit Nachteilen: die zählen nicht
+  const ids = TECH_IDS.filter((id) => id !== 'akkord' && id !== 'diesel');
+  const techMax = ids.reduce((n, id) => n + TECH[id].cost.length, 0);
+  const techNow = ids.reduce((n, id) => n + Math.min(s.tech[id], TECH[id].cost.length), 0);
   const plots = s.owned.length;
   const owned = s.owned.reduce((n, v) => n + (v ? 1 : 0), 0);
   const items: CompletionItem[] = [
     { label: `Hafenstufe ${MAX_LEVEL}: ${LEVELS[MAX_LEVEL - 1].name}`, value: s.level, goal: MAX_LEVEL },
-    { label: 'Alle Verbesserungen auf der höchsten Stufe', value: techNow, goal: techMax },
+    { label: 'Alle Verbesserungen auf der höchsten Stufe (ohne Akkord und Billigdiesel)', value: techNow, goal: techMax },
     { label: 'Das ganze Land gekauft', value: owned, goal: plots },
     { label: `${COMPLETE_SUPER} Super-Brücken`, value: s.cranes.filter((c) => c.model === 'super').length, goal: COMPLETE_SUPER },
     { label: 'Mindestens 4 Hallen, alle auf Stufe 3', value: s.plants.filter((p) => (p.lvl ?? 1) >= 3).length, goal: Math.max(4, s.plants.length) },
