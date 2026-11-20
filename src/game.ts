@@ -418,7 +418,10 @@ export class Game {
     const chk = this.sim.canExpand();
     if (!chk.ok) return chk.reason ?? 'Nicht möglich';
     this.sim = this.sim.expand();
+    // Das Logbuch bleibt: Die Meldungen vor dem Umzug sind weiter nützlich
+    const log = this.log;
     this.resetTransient();
+    this.log = log;
     this.setTool('view');
     this.fitCamera();
     this.save();
