@@ -960,6 +960,18 @@ export class Renderer {
       g.roundRect(x * TILE + 2.5, y * TILE + 2.5, 8, 8, 2).fill(ZONES[z].color);
     };
     if (!this.calm) for (const e of [...sim.gates, ...sim.plants, ...sim.rails]) tag(e.x, e.y, e.zone);
+    // Lagerfelder ohne Straße am Block: rotes Warnzeichen, dort kommt kein Truck hin
+    if (!this.calm) {
+      for (let i = 0; i < sim.kind.length; i++) {
+        const k = sim.kind[i];
+        if ((k !== T.Yard && k !== T.Reefer && k !== T.Hazmat && k !== T.Empty) || sim.reachable(i)) continue;
+        const cx = (i % GRID_W) * TILE + TILE / 2;
+        const cy = ((i / GRID_W) | 0) * TILE + TILE / 2;
+        g.circle(cx, cy, 8).fill(0xd9473f).stroke({ width: 2, color: 0xffffff });
+        g.roundRect(cx - 1.4, cy - 5, 2.8, 6, 1.2).fill(0xffffff);
+        g.circle(cx, cy + 3.4, 1.5).fill(0xffffff);
+      }
+    }
 
     // Überführungen: helles Deck mit Schatten und Geländer über der Kreuzung
     for (let i = 0; i < sim.overpass.length; i++) {

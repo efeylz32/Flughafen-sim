@@ -1236,8 +1236,13 @@ export class Sim {
     for (const i of this.yardTiles) s += this.stock[i] + this.stockExp[i];
     return s;
   }
+  /** Kühlplätze, die ein Truck erreicht (Block mit Straße am Rand). Nur dafür bringen Schiffe Kühlfracht. */
   get reeferCapacity(): number {
-    return this.reeferTiles.reduce((n, i) => n + this.capAt(i), 0);
+    return this.reeferTiles.reduce((n, i) => n + (this.reachable(i) ? this.capAt(i) : 0), 0);
+  }
+  /** Kommt ein Truck an dieses Lagerfeld heran? */
+  reachable(i: number): boolean {
+    return this.storeAccess(i).length > 0;
   }
   get reeferStock(): number {
     let s = 0;
@@ -1257,7 +1262,7 @@ export class Sim {
     return this.emptyTiles;
   }
   get hazCapacity(): number {
-    return this.hazTiles.reduce((n, i) => n + this.capAt(i), 0);
+    return this.hazTiles.reduce((n, i) => n + (this.reachable(i) ? this.capAt(i) : 0), 0);
   }
   get hazStock(): number {
     return this.hazTiles.reduce((n, i) => n + this.stock[i], 0);
@@ -2379,7 +2384,7 @@ export class Sim {
     return kind === T.Reefer ? this.reeferTiles : kind === T.Hazmat ? this.hazTiles : kind === T.Empty ? this.emptyTiles : this.yardTiles;
   }
   private hasFreeStore(kind: T, zone = 0): boolean {
-    return this.tilesOf(kind).some((i) => this.zone[i] === zone && this.freeAt(i) > 0);
+    return this.tilesOf(kind).some((i) => this.zone[i] === zone && this.freeAt(i) > 0 && this.reachable(i));
   }
 
   /** Nächstgelegenes Lagerfeld mit freiem Platz ab Straßenfeld `from`. */
@@ -3275,7 +3280,11 @@ export class Sim {
     if (this.closedQ[q]) return 'Der Liegeplatz ist gesperrt.';
     if (c.state === 'blocked') {
       const kind = c.bufHaz ? T.Hazmat : c.bufReef ? T.Reefer : T.Yard;
-      if (!this.hasFreeStore(kind, c.zone)) return 'Puffer voll und das passende Lager ist voll. Baue Lager oder mehr Ausgänge.';
+      const name = kind === T.Hazmat ? 'Die Gefahrgutfläche hat' : kind === T.Reefer ? 'Die Kühlplätze haben' : 'Das Lager hat';
+      if (this.tilesOf(kind).some((i) => this.zone[i] === c.zone && this.freeAt(i) > 0 && !this.reachable(i)) && !this.hasFreeStore(kind, c.zone))
+        return `${name} keine Straße am Rand: Kein Truck kommt hin. Lege eine Straße daneben (rotes Zeichen auf der Karte).`;
+      if (!this.hasFreeStore(kind, c.zone)) return `Puffer voll und ${kind === T.Hazmat ? 'die Gefahrgutfläche ist' : kind === T.Reefer ? 'die Kühlplätze sind' : 'das Lager ist'} voll. Baue mehr Platz oder mehr Ausgänge.`;
+      if (!this.trucks.some((t) => t.job && t.job.srcKind === 'crane' && t.job.src === c.id)) return 'Puffer voll, aber kein Truck holt ab. Prüfe, ob Kran und Lager über Straßen verbunden sind, oder kaufe Trucks.';
       if (this.trucks.every((t) => t.job || t.wear >= 1 || !t.staffed)) return 'Puffer voll: Kein freier Truck holt ab. Kaufe Trucks oder gib welchen die Rolle „Kran räumen“.';
       return 'Puffer voll: Trucks sind unterwegs, aber zu langsam. Prüfe Wege und Staus.';
     }
@@ -4363,23 +4372,33 @@ export class Sim {
             this.money += ef;
             this.today.exportFees += ef;
             this.emit(undefined, 'good', { tag: 'export', x: c.x, y: c.y - 1, amount: ef });
-          } else if (ship.reefers > 0 && this.rnd() < ship.reefers / imports) {
-            ship.reefers--;
-            c.bufReef++;
-          } else if (ship.haz > 0 && this.rnd() < ship.haz / imports) {
-            ship.haz--;
-            c.bufHaz++;
-          } else if (ship.containers > 0) {
-            ship.containers--;
-            c.buffer++;
-            // Ziel festlegen: Ein Teil der Container soll mit der Bahn weiter
-            if (this.railShare > 0 && this.rnd() < this.railShare) c.bufRail++;
-          } else if (ship.reefers > 0) {
-            ship.reefers--;
-            c.bufReef++;
           } else {
-            ship.haz--;
-            c.bufHaz++;
+            // Kühl- und Gefahrgut belegen höchstens den halben Puffer. Sonst blockiert Ladung, die gerade
+            // nicht wegkommt (Lager voll oder ohne Straße), den ganzen Kran.
+            const half = Math.ceil(this.bufCap(c) / 2);
+            const okR = ship.reefers > 0 && c.bufReef < half;
+            const okH = ship.haz > 0 && c.bufHaz < half;
+            if (okR && this.rnd() < ship.reefers / imports) {
+              ship.reefers--;
+              c.bufReef++;
+            } else if (okH && this.rnd() < ship.haz / imports) {
+              ship.haz--;
+              c.bufHaz++;
+            } else if (ship.containers > 0) {
+              ship.containers--;
+              c.buffer++;
+              // Ziel festlegen: Ein Teil der Container soll mit der Bahn weiter
+              if (this.railShare > 0 && this.rnd() < this.railShare) c.bufRail++;
+            } else if (okR) {
+              ship.reefers--;
+              c.bufReef++;
+            } else if (okH) {
+              ship.haz--;
+              c.bufHaz++;
+            } else {
+              // Nur noch Sonderfracht an Bord, ihr Platz am Kran ist voll
+              c.state = 'blocked';
+            }
           }
         }
       } else if (imports > 0) {

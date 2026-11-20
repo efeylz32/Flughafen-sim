@@ -255,8 +255,8 @@ export const ROLES: Record<Role, { name: string; plural: string; wage: number; n
 };
 
 // Verschleiß (ab Stufe 2): Bei 100 % fällt das Gerät aus, vorher wird es langsamer.
-export const WEAR_TRUCK_PER_GM = 0.0004;
-export const WEAR_CRANE_PER_MOVE = 0.0015;
+export const WEAR_TRUCK_PER_GM = 0.00025;
+export const WEAR_CRANE_PER_MOVE = 0.0008;
 export const WEAR_SLOWDOWN = 0.4;
 /** So viel Verschleiß baut eine besetzte Werkstatt pro Spielminute ab */
 export const REPAIR_PER_GM = 1 / 90;

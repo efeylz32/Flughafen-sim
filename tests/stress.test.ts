@@ -2,31 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { BuildTool, COAST_ROW, GRID_H, GRID_W } from '../src/sim/data';
 import { Sim } from '../src/sim/sim';
 import { Bot } from './bot';
+import { checkState } from './invariants';
 
 const TOOLS: BuildTool[] = ['kai', 'crane', 'lcrane', 'road', 'yard', 'reefer', 'gate', 'rail', 'truck', 'unpack', 'pack', 'cold', 'workshop', 'road2', 'hwy', 'solar', 'battery', 'customs', 'track', 'parking', 'rtg', 'hazard', 'emptyyard', 'fill'];
 
-function check(s: Sim, step: string) {
-  const bad: string[] = [];
-  if (!Number.isFinite(s.money)) bad.push('Geld ' + s.money);
-  for (let i = 0; i < s.kind.length; i++) {
-    if (s.stockRail[i] > s.stock[i]) bad.push(`stockRail>stock @${i}`);
-  }
-  for (const c of s.cranes) for (const k of ['buffer', 'bufReef', 'bufHaz', 'bufRail', 'expBuf'] as const) if (c[k] < 0 || !Number.isFinite(c[k])) bad.push(`crane ${k}=${c[k]}`);
-  for (const c of s.cranes) if (c.bufRail > c.buffer) bad.push(`crane bufRail ${c.bufRail}>${c.buffer}`);
-  for (const p of s.plants) for (const k of ['inBuf', 'outBuf', 'inEmpty', 'emptyOut'] as const) if (p[k] < 0) bad.push(`plant ${k}=${p[k]}`);
-  for (const t of s.trucks) {
-    if (t.tile < 0 || t.tile >= GRID_W * GRID_H || !Number.isFinite(t.fx)) bad.push(`truck pos ${t.tile}`);
-    if (t.load < 0) bad.push('truck load');
-  }
-  for (const g of s.gates) if (g.inApron < 0 || g.emptyIn < 0) bad.push('gate neg');
-  for (const r of s.rails) if (r.platform < 0 || r.goods < 0 || r.emptyIn < 0) bad.push('rail neg');
-  const arr = s as unknown as Record<string, Int16Array | Uint16Array | Int32Array>;
-  for (const k of ['resOut', 'resIn', 'resOutRail', 'resInExp', 'resOutExp']) {
-    const a = arr[k];
-    if (a && a.some((v) => v < 0)) bad.push(`${k} negativ`);
-  }
-  if (bad.length) throw new Error(`${step}: ${[...new Set(bad)].slice(0, 6).join('; ')}`);
-}
+const check = checkState;
 
 describe('Stresstest', () => {
   for (const seed of [1, 2, 3]) {

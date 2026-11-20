@@ -681,7 +681,7 @@ describe('Verschleiß', () => {
     const sim = bigPort(2, 6);
     run(sim, 24);
     const worn = Math.max(...sim.trucks.map((t) => t.wear), ...sim.cranes.map((c) => c.wear));
-    expect(worn).toBeGreaterThan(0.3);
+    expect(worn).toBeGreaterThan(0.15);
     sim.trucks[0].wear = 1;
     sim.build('workshop', 30, k + 2);
     expect(sim.staff.mech).toBe(1);
@@ -1868,5 +1868,26 @@ describe('Hafenerweiterung und Großprojekte', () => {
     expect(s.hasDeepBerth(6)).toBe(true);
     const c = Sim.deserialize(JSON.parse(JSON.stringify(s.serialize())));
     expect(c.projects).toEqual(['cruise', 'canal']);
+  });
+});
+
+describe('Sonderfracht blockiert den Hafen nicht', () => {
+  it('Gefahrgutfläche ohne Straße zählt nicht als Platz, Kran entlädt normale Container weiter', () => {
+    const sim = bigPort(4, 8);
+    sim.money = 1e7;
+    // Abseits jeder Straße
+    expect(sim.build('hazard', 26, k + 8).ok).toBe(true);
+    expect(sim.build('hazard', 27, k + 8).ok).toBe(true);
+    expect(sim.reachable(sim.idx(26, k + 8))).toBe(false);
+    expect(sim.hazCapacity).toBe(0);
+    // Ein Kran hat schon halb Gefahrgut geladen, das nicht wegkommt
+    const c = sim.cranes[0];
+    c.bufHaz = Math.ceil(sim.bufCap(c) / 2);
+    const before = sim.handled;
+    run(sim, 12);
+    // Der Hafen arbeitet trotzdem weiter
+    expect(sim.handled).toBeGreaterThan(before + 20);
+    expect(c.bufHaz).toBeLessThanOrEqual(Math.ceil(sim.bufCap(c) / 2));
+    expect(sim.craneWhy(c)).not.toMatch(/zu langsam/);
   });
 });
