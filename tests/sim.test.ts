@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { COAST_ROW, GRID_H, GRID_W, MAX_LEVEL, setGridSize, T, TECH, TECH_IDS, TICKS_PER_SEC } from '../src/sim/data';
+import { COAST_ROW, GRID_H, GRID_W, MAX_LEVEL, setGridSize, T, TECH, TECH_IDS, TICKS_PER_SEC, type TruckRole } from '../src/sim/data';
 import { completion } from '../src/sim/progression';
 import { buildDemo } from '../src/sim/demo';
 import { Sim, type UsedOffer } from '../src/sim/sim';
@@ -348,10 +348,10 @@ describe('Kühlfracht', () => {
 });
 
 describe('Bahn', () => {
-  it('Gleisanschluss nur am rechten Rand, der Zug holt Container ab', () => {
+  it('Bahnhof am Rand ist sofort angeschlossen, der Zug holt Container ab', () => {
     const sim = bigPort(4);
-    expect(sim.canBuild('rail', 20, k + 2)).toMatchObject({ ok: false });
-    expect(sim.build('rail', GRID_W - 1, k + 2).ok).toBe(true);
+    expect(sim.build('rail', GRID_W - 4, k + 2).ok).toBe(true);
+    expect(sim.railLinked(sim.rails[0])).toBe(true);
     run(sim, 24);
     expect(sim.trainsDone).toBeGreaterThanOrEqual(1);
     const rail = sim.today.rail + sim.history.reduce((n, h) => n + h.rail, 0);
@@ -488,15 +488,50 @@ describe('Verarbeitung und Aufgaben', () => {
     for (const t of sim.trucks) if (t.job) expect(t.job.srcKind).toBe('crane');
   });
 
-  it('feste Aufgaben sind schneller als die Automatik', () => {
-    // Mit wenigen Trucks und vielen Schiffen sind die Trucks der Engpass
-    const auto = bigPort(1, 4);
-    const fixed = bigPort(1, 4);
-    for (const s of [auto, fixed]) s.nextShipIn = 0;
+  it('feste Aufgaben fahren schneller, die Automatik spart dafür Leerfahrten', () => {
+    // 1. Gleiche Strecke: Ein Truck mit fester Aufgabe ist schneller am Ziel
+    const drive = (role: TruckRole) => {
+      const sim = new Sim(11);
+      for (let x = 4; x <= 30; x++) sim.build('road', x, k + 1);
+      sim.build('truck', 4, k + 1);
+      sim.finishAll();
+      const t = sim.trucks[0];
+      sim.setRole(t.id, role);
+      const go = (sim as unknown as { driveTo(t: unknown, tgt: number, dt: number): string }).driveTo.bind(sim);
+      let n = 0;
+      while ((t.tile !== sim.idx(30, k + 1) || t.next >= 0) && n < 5000) {
+        go(t, sim.idx(30, k + 1), 0.4);
+        n++;
+      }
+      return n;
+    };
+    expect(drive('crane')).toBeLessThan(drive('auto') * 0.9);
+    // 2. Weite Wege mit zwei Strecken (Kran → Lager → Gate): Die Automatik verkettet die Fahrten,
+    //    feste Aufgaben fahren jede zweite Strecke leer zurück
+    const far = () => {
+      const sim = new Sim(11);
+      sim.level = 1;
+      sim.money = 5_000_000;
+      for (let x = 6; x < 12; x++) sim.build('kai', x, k);
+      sim.build('crane', 7, k);
+      sim.build('crane', 9, k);
+      for (let x = 4; x <= GRID_W - 1; x++) sim.build('road', x, k + 1);
+      for (let y = k + 2; y <= k + 4; y++) for (let x = 28; x <= 33; x++) sim.build('yard', x, y);
+      sim.build('gate', 14, k + 2);
+      sim.build('gate', 16, k + 2);
+      for (let i = 0; i < 2; i++) sim.build('truck', 6 + i, k + 1);
+      sim.updateMissions(true);
+      sim.mission = Math.max(sim.mission, 6);
+      sim.finishAll();
+      sim.nextShipIn = 0;
+      return sim;
+    };
+    const auto = far();
+    const fixed = far();
     fixed.trucks.forEach((t, i) => fixed.setRole(t.id, i % 2 ? 'out' : 'crane'));
     run(auto, 48);
     run(fixed, 48);
-    expect(fixed.containersDone).toBeGreaterThan(auto.containersDone);
+    expect(auto.containersDone).toBeGreaterThan(fixed.containersDone);
   });
 });
 
@@ -700,7 +735,8 @@ describe('Karten', () => {
   it('Insel hat Wasser am Rand, Felsen kosten beim Sprengen', () => {
     const isl = new Sim(4, 'normal', 'island');
     expect(isl.kind[isl.idx(0, k + 5)]).toBe(0);
-    expect(isl.canBuild('rail', GRID_W - 1, k + 2)).toMatchObject({ ok: false });
+    // Am Rand ist Wasser: ein Bahnhof direkt am Rand geht nicht
+    expect(isl.canBuild('rail', GRID_W - 4, k + 2)).toMatchObject({ ok: false });
     const rocks = new Sim(4, 'normal', 'rocks');
     const i = rocks.kind.findIndex((v) => v === 10);
     expect(i).toBeGreaterThan(0);
@@ -919,7 +955,7 @@ describe('Speichern', () => {
   it('Roundtrip erhält Stufe, Verträge, Aufrüstungen und Baggerung', () => {
     const sim = bigPort(4);
     sim.build('dredge', 6, k - 1);
-    sim.build('rail', GRID_W - 1, k + 2);
+    sim.build('rail', GRID_W - 4, k + 2);
     sim.upgrade('crane', sim.cranes[0].id);
     sim.finishAll();
     (sim as unknown as { makeOffers(): void }).makeOffers();
@@ -1393,7 +1429,7 @@ describe('Gefahrgut, Leerlager und Befüllkette', () => {
     sim.build('emptyyard', 24, k + 2);
     sim.build('emptyyard', 25, k + 2);
     sim.build('fill', 27, k + 2);
-    sim.build('rail', GRID_W - 1, k + 2);
+    sim.build('rail', GRID_W - 4, k + 2);
     sim.build('hazard', 2, k + 2);
     sim.build('hazard', 3, k + 2);
     for (let i = 0; i < 8; i++) sim.build('truck', 6 + i, k + 1);
@@ -1635,7 +1671,7 @@ describe('Container-Ziele und Umstapeln', () => {
     sim.level = 4;
     sim.money = 1e7;
     for (let x = 21; x <= GRID_W - 1; x++) sim.build('road', x, k + 1);
-    sim.build('rail', GRID_W - 1, k + 2);
+    sim.build('rail', GRID_W - 4, k + 2);
     sim.finishAll();
     return sim;
   }
@@ -1665,22 +1701,56 @@ describe('Container-Ziele und Umstapeln', () => {
 });
 
 describe('Gleise ins Land und Außenanbindung', () => {
-  it('ein Bahnhof im Hafen braucht ein durchgehendes Gleis zum Rand, Straßen kreuzen als Bahnübergang', () => {
+  it('Bahnhof im Hafen: Gleise mit Kurve bis zu einem Rand schließen ihn an, Straßen kreuzen als Bahnübergang', () => {
     const sim = new Sim();
     sim.level = 4;
     sim.money = 1e7;
-    expect(sim.canBuild('rail', 25, k + 3).ok).toBe(false);
-    for (let x = 26; x < GRID_W; x++) sim.build('track', x, k + 3);
-    expect(sim.canBuild('rail', 25, k + 3).ok).toBe(true);
-    sim.build('rail', 25, k + 3);
+    // Bahnhof mitten im Land: darf gebaut werden, ist aber noch nicht angeschlossen
+    expect(sim.build('rail', 10, k + 3).ok).toBe(true);
+    const r = sim.rails[0];
+    expect(r.w).toBe(4);
+    expect(r.h).toBe(2);
+    expect(sim.railLinked(r)).toBe(false);
+    // Vom östlichen Ende ein Stück nach rechts, dann um die Kurve nach unten bis zum Rand
+    for (let x = 14; x <= 18; x++) sim.build('track', x, k + 3);
+    for (let y = k + 4; y < GRID_H; y++) sim.build('track', 18, y);
+    expect(sim.railLinked(r)).toBe(true);
+    const rt = sim.railRoute(r)!;
+    expect(rt.out).toBe(1);
     // Straße quer übers Gleis: Bahnübergang, Gleis bleibt durchgehend
-    expect(sim.build('road', 30, k + 3).ok).toBe(true);
-    expect(sim.railX[sim.idx(30, k + 3)]).toBe(1);
-    expect(sim.railLinked(sim.rails[0])).toBe(true);
-    sim.demolish(30, k + 3);
-    expect(sim.kind[sim.idx(30, k + 3)]).toBe(T.Track);
-    sim.demolish(31, k + 3);
-    expect(sim.railLinked(sim.rails[0])).toBe(false);
+    expect(sim.build('road', 18, k + 8).ok).toBe(true);
+    expect(sim.railX[sim.idx(18, k + 8)]).toBe(1);
+    expect(sim.railLinked(r)).toBe(true);
+    sim.demolish(18, k + 8);
+    expect(sim.kind[sim.idx(18, k + 8)]).toBe(T.Track);
+    sim.demolish(18, k + 9);
+    expect(sim.railLinked(r)).toBe(false);
+    // Gedreht: senkrechter Bahnhof, Gleis nach unten
+    sim.rot = true;
+    expect(sim.build('rail', 25, k + 3).ok).toBe(true);
+    sim.rot = false;
+    const v = sim.rails[1];
+    expect(v.h).toBe(4);
+    for (let y = k + 7; y < GRID_H; y++) sim.build('track', 25, y);
+    expect(sim.railLinked(v)).toBe(true);
+    // Speichern und Laden behält Größe und Anschluss
+    const back = Sim.deserialize(JSON.parse(JSON.stringify(sim.serialize())));
+    expect(back.rails.map((x) => [x.w, x.h])).toEqual([[4, 2], [2, 4]]);
+    expect(back.railLinked(back.rails[1])).toBe(true);
+  });
+
+  it('alter Spielstand mit Bahnhof auf einem Feld lädt weiter', () => {
+    const sim = new Sim();
+    sim.level = 4;
+    sim.money = 1e7;
+    const data = sim.serialize();
+    data.kind[sim.idx(GRID_W - 1, k + 3)] = T.Rail;
+    data.rails = [{ x: GRID_W - 1, y: k + 3, platform: 5, value: 500 }];
+    const back = Sim.deserialize(JSON.parse(JSON.stringify(data)));
+    expect(back.rails.length).toBe(1);
+    expect([back.rails[0].w, back.rails[0].h]).toEqual([1, 1]);
+    expect(back.railLinked(back.rails[0])).toBe(true);
+    expect(back.rails[0].platform).toBe(5);
   });
 
   it('Gate mit Straße ins Hinterland arbeitet schneller', () => {

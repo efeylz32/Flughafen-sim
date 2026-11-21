@@ -68,7 +68,9 @@ export function buildShowcase(sim: Sim): void {
   b('cold', 30, k + 4);
   b('fill', 18, k + 4);
   b('workshop', 32, k + 4);
-  b('rail', 35, k + 3);
+  // Containerbahnhof unter der Hafenstraße, Gleis bis zum rechten Rand
+  b('rail', 28, k + 7);
+  for (let x = 32; x <= 35; x++) b('track', x, k + 7);
   for (let x = 6; x <= 29; x++) if (x % 1 === 0 && x - 6 < 26) b('truck', x, k + 1);
   sim.rot = false;
   sim.finishAll();

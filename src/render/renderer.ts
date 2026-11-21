@@ -1,5 +1,5 @@
 import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture, TilingSprite } from 'pixi.js';
-import { CRANE_MODELS, YARD_USES, DIFFS, SHIP_PATIENCE_GM, TRUCK_PATIENCE_GM, ZONES, COAST_ROW, CRANE_EXP_BUFFER, GRID_H, GRID_W, MapId, MIN_PER_DAY, PLOT_W, RAIL_CAP, RAIL_TRAVEL_GM, dimsOf, T, TICK_GM, TILE, YARD_CAP_PER_TILE, RTG_CAP } from '../sim/data';
+import { CRANE_MODELS, YARD_USES, DIFFS, SHIP_PATIENCE_GM, TRUCK_PATIENCE_GM, ZONES, COAST_ROW, CRANE_EXP_BUFFER, GRID_H, GRID_W, MapId, MIN_PER_DAY, PLOT_W, RAIL_CAP, RAIL_TRAVEL_GM, RAIL_STAY_GM, dimsOf, T, TICK_GM, TILE, YARD_CAP_PER_TILE, RTG_CAP } from '../sim/data';
 import type { Crane, Hauler, Rail, Ship, Sim, Truck } from '../sim/sim';
 import { N as QN, S as QS_, W as QW, qOf, qOfWater, qTile, sideOf, OUT, Q_MAX } from '../sim/quay';
 /** Drehung der Kai-Grafik: Wasser liegt im Norden, Süden, Westen oder Osten */
@@ -154,8 +154,9 @@ interface CraneView {
 }
 interface TrainView {
   root: Container;
-  cargo: Sprite[];
+  parts: { c: Container; cargo: Sprite[] }[];
   n: number;
+  wagons: number;
 }
 interface StoreView {
   sprites: Sprite[];
@@ -612,6 +613,19 @@ export class Renderer {
     }
 
     const exits = new Set(sim.hinterlandExits());
+    // Gleise: Wohin verbindet sich ein Feld? Bits 1 Ost, 2 Süd, 4 West, 8 Nord
+    const hooks = new Map<number, number>();
+    for (const rl of sim.rails) {
+      for (const e of sim.railEnds(rl)) if (sim.inBounds(e.x, e.y)) hooks.set(e.y * GRID_W + e.x, (hooks.get(e.y * GRID_W + e.x) ?? 0) | (1 << ((e.dir + 2) % 4)));
+      const rt = sim.railRoute(rl);
+      if (rt && rt.tiles.length) {
+        const last = rt.tiles[rt.tiles.length - 1];
+        hooks.set(last, (hooks.get(last) ?? 0) | (1 << rt.out));
+      }
+    }
+    const isRw = (x: number, y: number) => sim.inBounds(x, y) && sim.isRailway(y * GRID_W + x);
+    const railMask = (x: number, y: number) =>
+      (isRw(x + 1, y) ? 1 : 0) | (isRw(x, y + 1) ? 2 : 0) | (isRw(x - 1, y) ? 4 : 0) | (isRw(x, y - 1) ? 8 : 0) | (hooks.get(y * GRID_W + x) ?? 0);
     for (let y = COAST_ROW; y < GRID_H; y++) {
       for (let x = 0; x < GRID_W; x++) {
         const k = sim.kind[y * GRID_W + x];
@@ -750,9 +764,17 @@ export class Renderer {
             }
             // Bahnübergang: Schienen über die Straße, weiß-rote Markierung
             if (sim.railX[y * GRID_W + x]) {
-              g.rect(px, py + 19.6, TILE, 1.5).fill(0x8f979f);
-              g.rect(px, py + 25.4, TILE, 1.5).fill(0x8f979f);
-              for (let k = 0; k < 4; k++) g.rect(px + 2 + k * 8, py + 14, 4, 2).fill(k % 2 ? 0xd9473f : 0xffffff);
+              const m = railMask(x, y);
+              const vert = (m & 10) !== 0 && (m & 5) === 0;
+              if (vert) {
+                g.rect(px + TILE / 2 - 4, py, 1.5, TILE).fill(0x8f979f);
+                g.rect(px + TILE / 2 + 2.5, py, 1.5, TILE).fill(0x8f979f);
+                for (let k = 0; k < 4; k++) g.rect(px + 9, py + 2 + k * 8, 2, 4).fill(k % 2 ? 0xd9473f : 0xffffff);
+              } else {
+                g.rect(px, py + TILE / 2 - 4, TILE, 1.5).fill(0x8f979f);
+                g.rect(px, py + TILE / 2 + 2.5, TILE, 1.5).fill(0x8f979f);
+                for (let k = 0; k < 4; k++) g.rect(px + 2 + k * 8, py + 9, 4, 2).fill(k % 2 ? 0xd9473f : 0xffffff);
+              }
             }
             // Ausbaustufen: Doppelspur mit gelber Doppellinie, Autobahn dunkel mit weißen Randlinien
             const tier = sim.roadTier[y * GRID_W + x];
@@ -860,12 +882,9 @@ export class Renderer {
             break;
           }
           case T.Track: {
-            // Gleis: Schotter, Schwellen, zwei Schienen
-            g.rect(px, py, TILE, TILE).fill(0xcbc6ba);
-            g.rect(px, py + 15, TILE, 16).fill(0xb7ad97);
-            for (let sx = px + 2; sx < px + TILE; sx += 6) g.rect(sx, py + 17.5, 2.6, 11).fill(0x6e5d4b);
-            g.rect(px, py + 19.6, TILE, 1.5).fill(0x8f979f);
-            g.rect(px, py + 25.4, TILE, 1.5).fill(0x8f979f);
+            // Gleis: verbindet sich mit Nachbargleisen, Bahnübergängen, Bahnhofsenden und dem Kartenrand
+            g.rect(px, py, TILE, TILE).fill(C.grassA);
+            this.drawTrack(g, px, py, railMask(x, y));
             break;
           }
           case T.Solar: {
@@ -942,20 +961,8 @@ export class Renderer {
             break;
           }
           case T.Rail: {
-            // Schotterbett und Gleis führen nach rechts aus der Karte
-            const far = DECOR + 500;
-            g.rect(W - 4, py + 15, far, 16).fill(0xb7ad97);
-            g.rect(px, py, TILE, TILE).fill(0xcbc6ba);
-            g.rect(px, py + 15, TILE, 16).fill(0xb7ad97);
-            for (let x = px + 5; x < W + far; x += 6) g.rect(x, py + 17.5, 2.6, 11).fill(0x6e5d4b);
-            g.rect(px + 4, py + 19.6, far + TILE, 1.5).fill(0x8f979f);
-            g.rect(px + 4, py + 25.4, far + TILE, 1.5).fill(0x8f979f);
-            g.roundRect(px + 1, py + 17, 4, 12, 1).fill(0xd9473f);
-            // Bahnsteigdach
-            g.roundRect(px + 3.5, py + 4.5, 26, 9, 2).fill({ color: 0x000000, alpha: 0.22 });
-            g.roundRect(px + 2, py + 2, 26, 9, 2).fill(0x5f6f82);
-            g.rect(px + 2, py + 2, 26, 2.2).fill(0x7c8da1);
-            g.rect(px, py, TILE, 1.5).fill(C.yellow);
+            // Containerbahnhof: Betonfläche, Gleis, Ladefläche und Portalkran kommen in drawBuildings
+            g.rect(px, py, TILE, TILE).fill(0xcfd4d8);
             break;
           }
           case T.Gate:
@@ -1128,7 +1135,140 @@ export class Renderer {
   }
 
   /** Gebäude über mehrere Felder: Halle mit Sheddach, Werkstatt, Gate mit Spuren. */
+  /** Ein Gleisfeld: gerade, Kurve, Abzweig oder Ende. mask: 1 Ost, 2 Süd, 4 West, 8 Nord */
+  private drawTrack(g: Graphics, px: number, py: number, mask: number) {
+    const c = TILE / 2;
+    const ballast = 0xb7ad97;
+    const sleeper = 0x6e5d4b;
+    const rail = 0x8f979f;
+    const gauge = 3.2;
+    const dirs = [1, 2, 4, 8].filter((b) => mask & b);
+    const straight = (b: number, from = 0) => {
+      // halbes oder ganzes Gleisstück von der Mitte (from) zur Kante in Richtung b
+      const horiz = b === 1 || b === 4;
+      const sgn = b === 1 || b === 2 ? 1 : -1;
+      const a0 = c + sgn * from;
+      const a1 = sgn > 0 ? TILE : 0;
+      const lo = Math.min(a0, a1);
+      const len = Math.abs(a1 - a0);
+      if (horiz) {
+        g.rect(px + lo, py + c - 7, len, 14).fill(ballast);
+        for (let s = lo + 2; s < lo + len; s += 6) g.rect(px + s, py + c - 5.5, 2.4, 11).fill(sleeper);
+        g.rect(px + lo, py + c - gauge - 0.7, len, 1.5).fill(rail);
+        g.rect(px + lo, py + c + gauge - 0.8, len, 1.5).fill(rail);
+      } else {
+        g.rect(px + c - 7, py + lo, 14, len).fill(ballast);
+        for (let s = lo + 2; s < lo + len; s += 6) g.rect(px + c - 5.5, py + s, 11, 2.4).fill(sleeper);
+        g.rect(px + c - gauge - 0.7, py + lo, 1.5, len).fill(rail);
+        g.rect(px + c + gauge - 0.8, py + lo, 1.5, len).fill(rail);
+      }
+    };
+    if (dirs.length === 2 && (mask === 5 || mask === 10)) {
+      straight(mask === 5 ? 1 : 2, -c);
+      return;
+    }
+    if (dirs.length === 2) {
+      // Kurve: Bogen um die Ecke zwischen den beiden Seiten
+      const e = mask & 1 ? 1 : 0;
+      const s = mask & 2 ? 1 : 0;
+      const ox = px + (e ? TILE : 0);
+      const oy = py + (s ? TILE : 0);
+      const a0 = e && s ? Math.PI : e ? Math.PI / 2 : s ? -Math.PI / 2 : 0;
+      const a1 = a0 + Math.PI / 2;
+      // Jeder Bogen beginnt mit moveTo, sonst zieht die Grafik eine Linie vom letzten Punkt her
+      g.moveTo(ox + Math.cos(a0) * (c + 7), oy + Math.sin(a0) * (c + 7))
+        .arc(ox, oy, c + 7, a0, a1)
+        .lineTo(ox + Math.cos(a1) * (c - 7), oy + Math.sin(a1) * (c - 7))
+        .arc(ox, oy, c - 7, a1, a0, true)
+        .closePath()
+        .fill(ballast);
+      for (let k = 0; k <= 4; k++) {
+        const an = a0 + ((a1 - a0) * (k + 0.5)) / 5;
+        g.moveTo(ox + Math.cos(an) * (c - 5.5), oy + Math.sin(an) * (c - 5.5)).lineTo(ox + Math.cos(an) * (c + 5.5), oy + Math.sin(an) * (c + 5.5)).stroke({ width: 2.4, color: sleeper });
+      }
+      g.moveTo(ox + Math.cos(a0) * (c - gauge), oy + Math.sin(a0) * (c - gauge)).arc(ox, oy, c - gauge, a0, a1).stroke({ width: 1.5, color: rail });
+      g.moveTo(ox + Math.cos(a0) * (c + gauge), oy + Math.sin(a0) * (c + gauge)).arc(ox, oy, c + gauge, a0, a1).stroke({ width: 1.5, color: rail });
+      return;
+    }
+    if (!dirs.length) {
+      straight(1, -c);
+      return;
+    }
+    // Ende oder Abzweig: Mittelstück und je ein halbes Gleis pro Richtung
+    g.rect(px + c - 7, py + c - 7, 14, 14).fill(ballast);
+    for (const b of dirs) straight(b, 0);
+    if (dirs.length === 1) {
+      // Prellbock am offenen Ende
+      const b = dirs[0];
+      const horiz = b === 1 || b === 4;
+      const x0 = horiz ? px + (b === 1 ? c - 3 : c + 1) : px + c - 6;
+      const y0 = horiz ? py + c - 6 : py + (b === 2 ? c - 3 : c + 1);
+      g.roundRect(x0, y0, horiz ? 2.5 : 12, horiz ? 12 : 2.5, 1).fill(0xd9473f);
+    }
+  }
+
+  /** Containerbahnhof: Ladegleis mit Bahnsteigkante, Ladefläche, Prellböcke an offenen Enden */
+  private drawStation(g: Graphics, sim: Sim, r: Rail) {
+    const vert = r.h > r.w;
+    const L = (vert ? r.h : r.w) * TILE;
+    const S = (vert ? r.w : r.h) * TILE;
+    // Senkrecht: gespiegelt zeichnen, das Gleis liegt dann in der linken Spalte
+    if (vert) g.setTransform(0, 1, 1, 0, r.x * TILE, r.y * TILE);
+    else g.setTransform(1, 0, 0, 1, r.x * TILE, r.y * TILE);
+    const c = TILE / 2;
+    g.rect(0, 0, L, S).fill(0xcfd4d8);
+    // Ladegleis über die ganze Länge
+    g.rect(0, c - 7, L, 14).fill(0xb7ad97);
+    for (let s = 2; s < L; s += 6) g.rect(s, c - 5.5, 2.4, 11).fill(0x6e5d4b);
+    g.rect(0, c - 3.9, L, 1.5).fill(0x8f979f);
+    g.rect(0, c + 2.4, L, 1.5).fill(0x8f979f);
+    if (S > TILE) {
+      // Bahnsteigkante und Ladefläche mit Markierungen
+      g.rect(0, TILE - 2, L, 2).fill(C.yellow);
+      g.rect(0, TILE, L, S - TILE).fill(0xbfc5ca);
+      for (let s = TILE; s < L; s += TILE) g.rect(s - 0.5, TILE + 3, 1, S - TILE - 6).fill({ color: 0xffffff, alpha: 0.5 });
+      g.rect(0, 0, L, 1.2).fill({ color: 0x000000, alpha: 0.12 });
+    } else {
+      // Alter kleiner Bahnhof: Dach über dem Gleis
+      g.roundRect(3.5, 4.5, L - 6, 9, 2).fill({ color: 0x000000, alpha: 0.22 });
+      g.roundRect(2, 2, L - 6, 9, 2).fill(0x5f6f82);
+    }
+    // Prellbock, wo kein Gleis weiterführt
+    const ends = sim.railEnds(r);
+    const route = sim.railRoute(r);
+    ends.forEach((e, k) => {
+      const open = route ? route.end === k : false;
+      const linked = sim.inBounds(e.x, e.y) && sim.isRailway(e.y * GRID_W + e.x);
+      if (open || linked) return;
+      g.roundRect(k === 0 ? 1 : L - 4, c - 6, 3, 12, 1).fill(0xd9473f);
+    });
+    g.resetTransform();
+  }
+
   private drawBuildings(g: Graphics, sim: Sim) {
+    for (const rl of sim.rails) this.drawStation(g, sim, rl);
+    // Gleise führen am Kartenrand weiter hinaus
+    for (const rl of sim.rails) {
+      const rt = sim.railRoute(rl);
+      if (!rt) continue;
+      let ex: number;
+      let ey: number;
+      if (rt.tiles.length) {
+        ex = rt.tiles[rt.tiles.length - 1] % GRID_W;
+        ey = (rt.tiles[rt.tiles.length - 1] / GRID_W) | 0;
+      } else {
+        const e = sim.railEnds(rl)[rt.end];
+        ex = e.x - [1, 0, -1, 0][rt.out];
+        ey = e.y - [0, 1, 0, -1][rt.out];
+      }
+      const dx = [1, 0, -1, 0][rt.out];
+      const dy = [0, 1, 0, -1][rt.out];
+      for (let k = 1; k <= 40; k++) {
+        const tx = (ex + dx * k) * TILE;
+        const ty = (ey + dy * k) * TILE;
+        this.drawTrack(g, tx, ty, rt.out % 2 === 0 ? 5 : 10);
+      }
+    }
     for (const p of sim.plants) {
       const x = p.x * TILE;
       const y = p.y * TILE;
@@ -1848,56 +1988,117 @@ export class Renderer {
     }
   }
 
-  private makeTrain(r: Rail): TrainView {
+  /** Zug: Lok vorne und hinten (Wendezug), dazwischen Tragwagen mit je zwei Stellplätzen */
+  private makeTrain(r: Rail, wagons: number): TrainView {
     const root = new Container();
-    const g = new Graphics();
-    const y = r.y * TILE + 23;
-    // Lok
-    g.roundRect(2, y - 5, 30, 14, 3).fill({ color: 0x000000, alpha: 0.22 });
-    g.roundRect(0, y - 7, 30, 14, 3).fill(0xa8322b);
-    g.roundRect(1.2, y - 5.8, 27.6, 11.6, 2.4).fill(0xd9473f);
-    g.roundRect(3, y - 4.6, 7, 9.2, 1.5).fill(0x25384f);
-    g.rect(13, y - 3.2, 13, 6.4).fill(0xf2c230);
-    g.circle(1.5, y - 3.5, 1.2).fill(0xfff4c2);
-    g.circle(1.5, y + 3.5, 1.2).fill(0xfff4c2);
-    // Fünf Tragwagen mit je zwei Stellplätzen
-    const cargo: Sprite[] = [];
-    for (let k = 0; k < 5; k++) {
-      const x = 34 + k * 26;
-      g.rect(x - 2, y - 1, 2, 2).fill(0x2b323b);
-      g.roundRect(x + 1.5, y - 4, 23, 11, 1.5).fill({ color: 0x000000, alpha: 0.2 });
-      g.roundRect(x, y - 5.5, 23, 11, 1.5).fill(0x3a424c);
-      g.rect(x + 1, y - 4.5, 21, 9).fill(0x6c7682);
+    const parts: { c: Container; cargo: Sprite[] }[] = [];
+    const loco = () => {
+      const c = new Container();
+      const g = new Graphics();
+      g.roundRect(-13, -5, 28, 13, 3).fill({ color: 0x000000, alpha: 0.22 });
+      g.roundRect(-14, -6.5, 28, 13, 3).fill(0xa8322b);
+      g.roundRect(-13, -5.4, 26, 10.8, 2.4).fill(0xd9473f);
+      g.roundRect(6, -4.4, 6, 8.8, 1.5).fill(0x25384f);
+      g.rect(-9, -3, 13, 6).fill(0xf2c230);
+      c.addChild(g);
+      return c;
+    };
+    parts.push({ c: loco(), cargo: [] });
+    for (let k = 0; k < wagons; k++) {
+      const c = new Container();
+      const g = new Graphics();
+      g.roundRect(-12, -4, 25, 11, 1.5).fill({ color: 0x000000, alpha: 0.2 });
+      g.roundRect(-12.5, -5.5, 25, 11, 1.5).fill(0x3a424c);
+      g.rect(-11.5, -4.5, 23, 9).fill(0x6c7682);
+      c.addChild(g);
+      const cargo: Sprite[] = [];
       for (let j = 0; j < 2; j++) {
-        const sp = this.box(this.boxH, BOX[hash(r.id + k, j) % BOX.length], x + 1.6 + j * 10.2, y - 4, 1);
+        const sp = this.box(this.boxH, BOX[hash(r.id + k, j) % BOX.length], -10.9 + j * 11, -4, 1);
         sp.visible = false;
+        c.addChild(sp);
         cargo.push(sp);
       }
+      parts.push({ c, cargo });
     }
-    root.addChild(g, ...cargo);
-    return { root, cargo, n: -1 };
+    const back = loco();
+    back.scale.x = -1;
+    parts.push({ c: back, cargo: [] });
+    for (const p of parts) root.addChild(p.c);
+    return { root, parts, n: -1, wagons };
+  }
+
+  /** Weg des Zuges in Feldmitten: Bahnhofsgleis (vom hinteren Ende), Gleise bis zum Rand, dann weit hinaus */
+  private trainPath(sim: Sim, r: Rail): [number, number][] | null {
+    const rt = sim.railRoute(r);
+    if (!rt) return null;
+    const pts: [number, number][] = [];
+    const vert = r.h > r.w;
+    const len = vert ? r.h : r.w;
+    // Bahnhofsgleis: von dem Ende, das nicht nach draußen führt, zum anderen
+    for (let k = 0; k < len; k++) {
+      const kk = rt.end === 1 ? k : len - 1 - k;
+      pts.push(vert ? [r.x + 0.5, r.y + kk + 0.5] : [r.x + kk + 0.5, r.y + 0.5]);
+    }
+    for (const t of rt.tiles) pts.push([(t % GRID_W) + 0.5, ((t / GRID_W) | 0) + 0.5]);
+    const [lx, ly] = pts[pts.length - 1];
+    const dx = [1, 0, -1, 0][rt.out];
+    const dy = [0, 1, 0, -1][rt.out];
+    for (let k = 1; k <= 45; k++) pts.push([lx + dx * k, ly + dy * k]);
+    return pts;
   }
 
   private syncTrains(sim: Sim, a: number) {
     const seen = new Set<number>();
+    const wagons = Math.max(4, Math.ceil(sim.railCap / 8));
     for (const r of sim.rails) {
       seen.add(r.id);
       let v = this.trains.get(r.id);
+      if (v && v.wagons !== wagons) {
+        v.root.destroy({ children: true });
+        this.trains.delete(r.id);
+        v = undefined;
+      }
       if (!v) {
-        v = this.makeTrain(r);
+        v = this.makeTrain(r, wagons);
         this.trains.set(r.id, v);
         this.trainLayer.addChild(v.root);
       }
-      v.root.visible = r.state !== 'away';
-      if (!v.root.visible) continue;
-      // Der Zug rollt von rechts ein und wieder nach rechts hinaus
+      const path = r.state === 'away' ? null : this.trainPath(sim, r);
+      v.root.visible = !!path;
+      if (!path) continue;
+      // Kopf des Zuges: beim Einfahren von draußen bis ans hintere Bahnhofsende, beim Ausfahren zurück
+      const SP = 0.9;
+      const trainLen = (v.parts.length - 1) * SP;
+      const stand = 0.15;
+      const far = path.length - 1;
       const t = Math.max(0, r.timer - a * TICK_GM) / RAIL_TRAVEL_GM;
-      const u = r.state === 'arriving' ? t : r.state === 'leaving' ? 1 - t : 0;
-      v.root.position.set(r.x * TILE + 3 + u * u * (W - r.x * TILE + 900), 0);
-      const n = r.state === 'leaving' ? Math.ceil((r.lastLoad / RAIL_CAP) * v.cargo.length) : 0;
+      const u = r.state === 'arriving' ? t * t : r.state === 'leaving' ? (1 - t) * (1 - t) : 0;
+      const head = stand + u * (far - stand);
+      const at = (s: number): [number, number, number] => {
+        const ss = Math.max(0, Math.min(far - 0.001, s));
+        const i = Math.floor(ss);
+        const f = ss - i;
+        const [x0, y0] = path[i];
+        const [x1, y1] = path[i + 1];
+        return [(x0 + (x1 - x0) * f) * TILE, (y0 + (y1 - y0) * f) * TILE, Math.atan2(y1 - y0, x1 - x0)];
+      };
+      v.parts.forEach((p, k) => {
+        const s = head + k * SP;
+        const [x, y, an] = at(s);
+        p.c.position.set(x, y);
+        // Fahrzeuge zeigen zum Bahnhof hin (Lok vorne), Wagen folgen der Kurve
+        p.c.rotation = an + Math.PI;
+        p.c.visible = s < far - 1 || r.state !== 'leaving' || u < 1;
+      });
+      void trainLen;
+      // Beladung: während des Haltens füllen sich die Wagen nach und nach, beim Ausfahren voll mit der Fracht
+      const share = r.state === 'leaving' ? r.lastLoad / sim.railCap : r.state === 'loading' ? Math.min(1, r.platform / sim.railCap) * Math.min(1, 1 - Math.max(0, r.timer) / RAIL_STAY_GM + 0.2) : 0;
+      const slots = v.parts.reduce((n, p) => n + p.cargo.length, 0);
+      const n = Math.ceil(share * slots);
       if (n !== v.n) {
         v.n = n;
-        for (let k = 0; k < v.cargo.length; k++) v.cargo[k].visible = k < n;
+        let k = 0;
+        for (const p of v.parts) for (const c of p.cargo) c.visible = k++ < n;
       }
     }
     for (const [id, v] of this.trains) {
@@ -2084,6 +2285,50 @@ export class Renderer {
       g.rect((i % GRID_W) * TILE, ((i / GRID_W) | 0) * TILE, TILE, TILE).fill({ color: C.bad, alpha: Math.min(0.42, 0.1 + j * 0.035) });
     }
 
+    // Bahnhöfe: Container auf der Ladefläche, Portalkran fährt beim Beladen über Gleis und Ladefläche
+    for (const rl of sim.rails) {
+      if (rl.w === 1 && rl.h === 1) continue;
+      const vert = rl.h > rl.w;
+      const L = (vert ? rl.h : rl.w) * TILE;
+      const S = (vert ? rl.w : rl.h) * TILE;
+      if (vert) g.setTransform(0, 1, 1, 0, rl.x * TILE, rl.y * TILE);
+      else g.setTransform(1, 0, 0, 1, rl.x * TILE, rl.y * TILE);
+      // Bis zu zwei Reihen Container, eine Kiste steht für mehrere
+      const per = Math.max(1, Math.ceil(sim.railCap / 24));
+      const n = Math.min(24, Math.ceil(rl.platform / per));
+      const cols = Math.floor((L - 6) / 10.5);
+      for (let k = 0; k < n; k++) {
+        const col = k % cols;
+        const row = Math.floor(k / cols) % 2;
+        const bx = 4 + col * 10.5;
+        const by = TILE + 5 + row * 12;
+        g.roundRect(bx + 0.8, by + 0.8, 9, 9.5, 1).fill({ color: 0x000000, alpha: 0.25 });
+        g.roundRect(bx, by, 9, 9.5, 1).fill(BOX[(rl.id + k) % BOX.length]);
+      }
+      // Portalkran: zwei Stützen außen, Träger quer über Gleis und Ladefläche
+      const busy = rl.state === 'loading' && rl.platform > 0;
+      const gx = busy ? L * (0.15 + 0.7 * (0.5 + 0.5 * Math.sin(view.time * 0.7 + rl.id))) : L - 14;
+      // Schatten, Fahrwerke an beiden Enden, zwei Träger quer darüber, Laufkatze
+      g.rect(gx - 5, 0, 14, S + 2).fill({ color: 0x000000, alpha: 0.16 });
+      g.roundRect(gx - 9, -4, 18, 5, 1.5).fill(0x24496f);
+      g.roundRect(gx - 9, S - 1, 18, 5, 1.5).fill(0x24496f);
+      g.rect(gx - 6.5, -2, 2.6, S + 4).fill(0x3b78b8);
+      g.rect(gx + 3.9, -2, 2.6, S + 4).fill(0x3b78b8);
+      g.rect(gx - 6.5, -2, 2.6, S + 4).fill({ color: 0xffffff, alpha: 0 });
+      const ty = busy ? TILE * (0.5 + 0.5 * (0.5 + 0.5 * Math.sin(view.time * 1.9 + rl.id))) : TILE / 2;
+      g.roundRect(gx - 5.5, ty - 4.5, 11, 9, 1.5).fill(0xe9edf1);
+      g.roundRect(gx - 3.5, ty - 2.5, 7, 5, 1).fill(0x2b323b);
+      g.resetTransform();
+      // Nicht angeschlossen: Warnzeichen über dem Bahnhof
+      if (!sim.railLinked(rl)) {
+        const wx = (rl.x + rl.w / 2) * TILE;
+        const wy = rl.y * TILE - 2;
+        g.circle(wx, wy, 8 + Math.sin(view.time * 4) * 0.8).fill(0xd9473f).stroke({ width: 2, color: 0xffffff });
+        g.rect(wx - 1.2, wy - 4.5, 2.4, 5.5).fill(0xffffff);
+        g.circle(wx, wy + 3.4, 1.4).fill(0xffffff);
+      }
+    }
+
     // Gates: wartende Container, Schranke, Ampel
     for (const gt of sim.gates) {
       const lanes = Math.max(gt.w, gt.h);
@@ -2163,12 +2408,10 @@ export class Renderer {
         g.rect((i % GRID_W) * TILE + 1.5, ((i / GRID_W) | 0) * TILE + 1.5, TILE - 3, TILE - 3).stroke({ width: 1.2, color: 0xffffff, alpha: 0.4 });
       }
     } else if (view.tool === 'rail') {
-      // Bahnhof: am rechten Rand oder am Ende eines durchgehenden Gleises
-      for (let y = COAST_ROW; y < GRID_H; y++) {
-        for (let x = 0; x < GRID_W; x++) {
-          if (sim.kind[y * GRID_W + x] !== T.Land || (x !== GRID_W - 1 && !sim.trackToEdge(x + 1, y))) continue;
-          g.rect(x * TILE + 1.5, y * TILE + 1.5, TILE - 3, TILE - 3).stroke({ width: 1.5, color: 0xffffff, alpha: 0.5 + 0.2 * Math.sin(view.time * 4) });
-        }
+      // Bahnhof: vorhandene Gleise leuchten, daran lässt er sich anschließen
+      for (let i = COAST_ROW * GRID_W; i < sim.kind.length; i++) {
+        if (!sim.isRailway(i)) continue;
+        g.rect((i % GRID_W) * TILE + 1.5, ((i / GRID_W) | 0) * TILE + 1.5, TILE - 3, TILE - 3).stroke({ width: 1.5, color: 0xffffff, alpha: 0.5 + 0.2 * Math.sin(view.time * 4) });
       }
     } else if (view.tool === 'crane') {
       for (let i = 0; i < sim.kind.length; i++) {

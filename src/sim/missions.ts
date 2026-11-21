@@ -113,7 +113,7 @@ export const MISSIONS: Mission[] = [
   reach(3),
   {
     title: 'Schicke einen Zug mit Containern los',
-    text: 'Baue einen Gleisanschluss am Kartenrand und verbinde ihn mit einer Straße.',
+    text: 'Baue einen Bahnhof (Wege), verbinde sein Gleis mit Gleisen bis zu einem Kartenrand und leg eine Straße daneben.',
     done: (s) => s.trainsDone >= 1,
   },
   reach(4),

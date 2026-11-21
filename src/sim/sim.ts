@@ -334,6 +334,7 @@ export interface Gate {
 /** Speditions-Lkw von außen: kommen über eine Ausfahrt zum Gate und fahren wieder hinaus */
 export interface Hauler {
   id: number;
+  carry?: number;
   gate: number;
   tile: number;
   next: number;
@@ -368,6 +369,9 @@ export interface Rail {
   buildMax?: number;
   x: number;
   y: number;
+  /** Größe: 4 × 2 (waagerecht) oder 2 × 4 (senkrecht); alte Spielstände 1 × 1 */
+  w: number;
+  h: number;
   platform: number;
   value: number;
   resIn: number;
@@ -420,6 +424,8 @@ export interface UsedOffer {
 }
 
 export interface Truck {
+  /** Angefangene Strecke, die beim nächsten Feld weitergefahren wird (solange er nicht anhält) */
+  carry?: number;
   id: number;
   /** Erst ab diesem Tick wieder nach Arbeit suchen */
   retryAt?: number;
@@ -653,6 +659,8 @@ export interface Removed {
   upgraded?: boolean;
   /** Gebäude war gedreht */
   rot?: boolean;
+  /** Bahnhof aus einem alten Spielstand (ein Feld) */
+  legacy?: boolean;
   /** Straßenart und Einbahnrichtung für Rückgängig */
   tier?: number;
   ow?: number;
@@ -731,7 +739,7 @@ export interface SaveData {
   strikeLeft?: number;
   pending?: Decision | null;
   gates: { x: number; y: number; served: number; rot?: boolean }[];
-  rails?: { x: number; y: number; platform: number; value: number }[];
+  rails?: { x: number; y: number; w?: number; h?: number; platform: number; value: number }[];
   trucks: { tile: number; agv?: boolean; role?: TruckRole; wear?: number }[];
   plants?: { x: number; y: number; kind: PlantKind; rot?: boolean }[];
   premiumDone?: number;
@@ -1416,6 +1424,59 @@ export class Sim {
   bridgeable(x: number, y: number): boolean {
     return this.kind[this.idx(x, y)] === T.Water && y > COAST_ROW && x >= 2 && x <= GRID_W - 3 && y <= GRID_H - 4;
   }
+  /** Kann hier ein Zug fahren? Gleis oder Bahnübergang */
+  isRailway(i: number): boolean {
+    return this.kind[i] === T.Track || (this.kind[i] === T.Road && this.railX[i] === 1);
+  }
+  /** Die beiden Gleisenden eines Bahnhofs: das Feld direkt davor und die Richtung nach draußen (0 Ost, 1 Süd, 2 West, 3 Nord) */
+  railEnds(r: Rail): { x: number; y: number; dir: number }[] {
+    if (r.h > r.w) return [{ x: r.x, y: r.y - 1, dir: 3 }, { x: r.x, y: r.y + r.h, dir: 1 }];
+    return [{ x: r.x - 1, y: r.y, dir: 2 }, { x: r.x + r.w, y: r.y, dir: 0 }];
+  }
+  /**
+   * Weg des Zuges: von einem Bahnhofsende über die Gleise bis zu einem Kartenrand (links, rechts oder unten).
+   * tiles beginnt am Bahnhof und endet am Rand, out ist die Richtung, in der der Zug die Karte verlässt.
+   */
+  railRoute(r: Rail): { end: number; tiles: number[]; out: number } | null {
+    if (this.railRouteCache.v !== this.version) this.railRouteCache = { v: this.version, m: new Map() };
+    if (this.railRouteCache.m.has(r.id)) return this.railRouteCache.m.get(r.id)!;
+    let best: { end: number; tiles: number[]; out: number } | null = null;
+    const ends = this.railEnds(r);
+    ends.forEach((e, ei) => {
+      // Der Bahnhof liegt selbst am Rand: direkt angeschlossen
+      if (!this.inBounds(e.x, e.y)) {
+        if (e.y >= 0 && (e.x < 0 || e.x >= GRID_W || e.y >= GRID_H)) {
+          if (!best || best.tiles.length > 0) best = { end: ei, tiles: [], out: e.dir };
+        }
+        return;
+      }
+      const start = this.idx(e.x, e.y);
+      if (!this.isRailway(start)) return;
+      const prev = new Map<number, number>([[start, -1]]);
+      const queue = [start];
+      for (let qi = 0; qi < queue.length; qi++) {
+        const c = queue[qi];
+        const cx = c % GRID_W;
+        const cy = (c / GRID_W) | 0;
+        const out = cx === 0 ? 2 : cx === GRID_W - 1 ? 0 : cy === GRID_H - 1 ? 1 : -1;
+        if (out >= 0) {
+          const tiles: number[] = [];
+          for (let t = c; t >= 0; t = prev.get(t)!) tiles.push(t);
+          tiles.reverse();
+          if (!best || tiles.length < best.tiles.length) best = { end: ei, tiles, out };
+          break;
+        }
+        for (const n of [cx < GRID_W - 1 ? c + 1 : -1, cy < GRID_H - 1 ? c + GRID_W : -1, cx > 0 ? c - 1 : -1, cy > 0 ? c - GRID_W : -1]) {
+          if (n < 0 || prev.has(n) || !this.isRailway(n)) continue;
+          prev.set(n, c);
+          queue.push(n);
+        }
+      }
+    });
+    this.railRouteCache.m.set(r.id, best);
+    return best;
+  }
+  private railRouteCache: { v: number; m: Map<number, { end: number; tiles: number[]; out: number } | null> } = { v: -1, m: new Map() };
   /** Liegt ab (x, y) bis zum rechten Kartenrand durchgehend Gleis (oder ein Bahnübergang)? */
   trackToEdge(x: number, y: number): boolean {
     for (let xx = x; xx < GRID_W; xx++) {
@@ -1426,7 +1487,7 @@ export class Sim {
   }
   /** Ist der Gleisanschluss mit dem Netz verbunden? */
   railLinked(r: Rail): boolean {
-    return r.x === GRID_W - 1 || this.trackToEdge(r.x + 1, r.y);
+    return this.railRoute(r) !== null;
   }
   /** Wie viele Leercontainer von außen gebraucht werden (für die Befüllhalle) */
   emptiesWanted(): number {
@@ -1730,7 +1791,7 @@ export class Sim {
     if (t) t.role = role;
   }
   railAt(x: number, y: number): Rail | undefined {
-    return this.rails.find((r) => r.x === x && r.y === y);
+    return this.rails.find((r) => covers(r, x, y));
   }
   truckAtTile(tile: number): Truck | undefined {
     return this.trucks.find((t) => t.tile === tile);
@@ -1975,8 +2036,8 @@ export class Sim {
         else if ((tool === 'gate' || tool === 'unpack' || tool === 'pack' || tool === 'cold' || tool === 'fill' || tool === 'workshop') && this.nearHaz(x, y, sw, sh)) reason = `Zu nah an einer Gefahrgutfläche (${HAZ_DIST} Felder Abstand)`;
         break;
       case 'rail':
+        // Anschließen kann man danach mit Gleisen in jede Richtung bis zu einem Kartenrand
         if (k !== T.Land) reason = k === T.Water ? 'Nicht auf dem Wasser' : 'Das Feld ist belegt';
-        else if (x !== GRID_W - 1 && !this.trackToEdge(x + 1, y)) reason = 'Der Gleisanschluss braucht ein durchgehendes Gleis bis zum rechten Kartenrand (Werkzeug „Gleis“)';
         break;
       case 'rtg':
         // Der Portalkran überspannt 3 × 3 Felder: alle müssen Lager sein
@@ -2034,6 +2095,11 @@ export class Sim {
     });
   }
 
+  /** Bahnhof aus alten Spielständen: ein Feld, Gleis nach links und rechts */
+  placeLegacyRail(x: number, y: number) {
+    this.kind[this.idx(x, y)] = T.Rail;
+    this.rails.push({ id: this.nextId++, x, y, w: 1, h: 1, platform: 0, value: 0, resIn: 0, state: 'away', timer: 60, lastLoad: 0, zone: 0, goods: 0, resOutG: 0, emptyIn: 0, resOutE: 0 });
+  }
   /** Setzt ein Objekt ohne Prüfung und ohne Kosten. Liefert bei Trucks die neue ID. */
   private place(tool: BuildTool, x: number, y: number, rot = this.rot): number | undefined {
     const [bw, bh] = dimsOf(tool, rot);
@@ -2113,8 +2179,8 @@ export class Sim {
         this.addStaff('gate');
         return undefined;
       case 'rail':
-        this.kind[i] = T.Rail;
-        this.rails.push({ id: this.nextId++, x, y, platform: 0, value: 0, resIn: 0, state: 'away', timer: 60, lastLoad: 0, zone: 0, goods: 0, resOutG: 0, emptyIn: 0, resOutE: 0 });
+        for (const f of this.footprintOf({ x, y, w: bw, h: bh })) this.kind[f] = T.Rail;
+        this.rails.push({ id: this.nextId++, x, y, w: bw, h: bh, platform: 0, value: 0, resIn: 0, state: 'away', timer: 60, lastLoad: 0, zone: 0, goods: 0, resOutG: 0, emptyIn: 0, resOutE: 0 });
         return undefined;
       case 'dredge':
         this.depth[qOfWater(x, y)] = 1;
@@ -2351,8 +2417,10 @@ export class Sim {
       }
       case T.Rail: {
         const r = this.railAt(x, y);
-        out.push({ tool: 'rail', x, y, refund: this.give(this.costOf('rail'), factor), platform: r?.platform ?? 0, value: r?.value ?? 0 });
+        if (!r) break;
+        out.push({ tool: 'rail', x: r.x, y: r.y, refund: this.give(this.costOf('rail'), factor), platform: r.platform, value: r.value, rot: r.h > r.w, legacy: r.w === 1 && r.h === 1 });
         this.rails = this.rails.filter((q) => q !== r);
+        for (const f of this.footprintOf(r)) this.kind[f] = T.Land;
         break;
       }
       default:
@@ -2426,7 +2494,7 @@ export class Sim {
       } else if (r.tool === 'rtg') {
         if ((k !== T.Yard && k !== T.Reefer) || this.rtgAt(r.x, r.y)) return fail('Der Platz ist belegt');
       } else if (r.tool !== 'dredge') {
-        const [w, h] = dimsOf(r.tool, !!r.rot);
+        const [w, h] = r.legacy ? [1, 1] : dimsOf(r.tool, !!r.rot);
         for (const f of this.footprintOf({ x: r.x, y: r.y, w, h })) {
           if ((willBe.get(f) ?? this.kind[f]) !== T.Land) return fail('Das Feld ist inzwischen belegt');
           willBe.set(f, TILE_OF[r.tool]!);
@@ -2435,7 +2503,7 @@ export class Sim {
       }
     }
     for (const r of order) {
-      const id = this.place(r.tool, r.x, r.y, !!r.rot);
+      const id = r.legacy ? (this.placeLegacyRail(r.x, r.y), undefined) : this.place(r.tool, r.x, r.y, !!r.rot);
       const i = this.idx(r.x, r.y);
       if (r.tool === 'yard' || r.tool === 'reefer' || r.tool === 'hazard' || r.tool === 'emptyyard') {
         this.stock[i] = r.stock ?? 0;
@@ -2950,6 +3018,7 @@ export class Sim {
     t.job = null;
     t.load = 0;
     t.next = -1;
+    t.carry = 0;
     t.prog = 0;
     t.stuck = 0;
   }
@@ -3412,6 +3481,7 @@ export class Sim {
     const tgt = j.tgt[j.stage];
 
     if (t.tile === tgt && t.next < 0) {
+      t.carry = 0;
       t.wait = TRUCK_HANDLE_GM * (t.role === 'auto' || t.job?.help ? 1 : ROUTINE_HANDLE);
       const storeTile = j.stage === 0 ? (j.srcKind === 'store' ? j.src : -1) : j.dstKind === 'store' ? j.dst : -1;
       if (storeTile >= 0 && this.rtgCovers(storeTile)) t.wait *= RTG_HANDLE;
@@ -3468,6 +3538,7 @@ export class Sim {
         const b = (pickDir + 3) % 4;
         if (this.lane[pick * 4 + a] + this.lane[pick * 4 + b] > 0 && this.crossTraffic(t, pick, pickDir)) {
           t.stuck += dt;
+          t.carry = 0;
           this.crossWait += dt;
           this.roadJam[t.tile] += dt;
           return 'ok';
@@ -3476,6 +3547,7 @@ export class Sim {
       // Die Spur im nächsten Feld ist belegt: warten. Das ist der Stau.
       if (this.lane[pick * 4 + pickDir] >= this.laneCap(pick, pickDir) && t.stuck < TRUCK_PATIENCE_GM) {
         t.stuck += dt;
+        t.carry = 0;
         this.roadJam[t.tile] += dt;
         return 'ok';
       }
@@ -3492,7 +3564,9 @@ export class Sim {
       }
       this.lane[pick * 4 + pickDir]++;
       t.next = pick;
-      t.prog = 0;
+      // Ohne Halt geht die angefangene Strecke direkt ins nächste Feld über
+      t.prog = t.carry ?? 0;
+      t.carry = 0;
       t.stuck = 0;
     }
 
@@ -3511,6 +3585,7 @@ export class Sim {
       t.dir = ny > cy ? 1 : ny < cy ? 3 : nx > cx ? 0 : 2;
       t.tile = t.next;
       t.next = -1;
+      t.carry = Math.min(0.99, t.prog - 1);
       t.prog = 0;
       t.fx = nx;
       t.fy = ny;
@@ -3546,6 +3621,7 @@ export class Sim {
       t.parked = false;
     }
     if (t.tile === t.parkTgt && t.next < 0) {
+      t.carry = 0;
       t.parked = true;
       return;
     }
@@ -5136,6 +5212,7 @@ export class Sim {
       }
       const target = h.phase === 'in' ? h.tgt : h.exit;
       if (h.tile === target && h.next < 0) {
+        h.carry = 0;
         if (h.phase === 'in') {
           h.phase = 'wait';
           h.wait = HAUL_HANDLE_GM;
@@ -5186,12 +5263,14 @@ export class Sim {
         const b = (pickDir + 3) % 4;
         if (this.lane[pick * 4 + a] + this.lane[pick * 4 + b] > 0 && this.crossTraffic(h, pick, pickDir)) {
           h.stuck += dt;
+          h.carry = 0;
           this.roadJam[h.tile] += dt;
           return 'ok';
         }
       }
       if (this.lane[pick * 4 + pickDir] >= this.laneCap(pick, pickDir) && h.stuck < TRUCK_PATIENCE_GM) {
         h.stuck += dt;
+        h.carry = 0;
         this.roadJam[h.tile] += dt;
         return 'ok';
       }
@@ -5207,7 +5286,8 @@ export class Sim {
       }
       this.lane[pick * 4 + pickDir]++;
       h.next = pick;
-      h.prog = 0;
+      h.prog = h.carry ?? 0;
+      h.carry = 0;
       h.stuck = 0;
     }
     h.prog += speed * ROAD_SPEED[this.roadTier[h.next]] * dt;
@@ -5221,6 +5301,7 @@ export class Sim {
       h.dir = ny > cy ? 1 : ny < cy ? 3 : nx > cx ? 0 : 2;
       h.tile = h.next;
       h.next = -1;
+      h.carry = Math.min(0.99, h.prog - 1);
       h.prog = 0;
       h.fx = nx;
       h.fy = ny;
@@ -6036,7 +6117,7 @@ export class Sim {
       strikeLeft: this.strikeLeft,
       pending: this.pending,
       gates: this.gates.map((g) => ({ x: g.x, y: g.y, served: g.served, rot: g.h > g.w })),
-      rails: this.rails.map((r) => ({ x: r.x, y: r.y, platform: r.platform, value: r.value })),
+      rails: this.rails.map((r) => ({ x: r.x, y: r.y, w: r.w, h: r.h, platform: r.platform, value: r.value })),
       trucks: this.trucks.map((t) => ({ tile: t.tile, agv: t.agv, role: t.role, wear: t.wear })),
       plants: this.plants.map((p) => ({ x: p.x, y: p.y, kind: p.kind, rot: p.w !== sizeOf(p.kind)[0] })),
       premiumDone: this.premiumDone,
@@ -6132,7 +6213,9 @@ export class Sim {
       s.gates[s.gates.length - 1].served = g.served;
     }
     for (const r of d.rails ?? []) {
-      s.place('rail', r.x, r.y);
+      // Alte Spielstände: Bahnhof auf einem Feld, so lassen
+      if (!r.w) s.placeLegacyRail(r.x, r.y);
+      else s.place('rail', r.x, r.y, (r.h ?? 2) > r.w);
       const rl = s.rails[s.rails.length - 1];
       rl.platform = r.platform;
       rl.value = r.value;

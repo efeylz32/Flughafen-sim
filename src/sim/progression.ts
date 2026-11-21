@@ -9,6 +9,12 @@ import type { Sim } from './sim';
 export interface Milestone {
   /** Kurzer Text für die Anzeige, z. B. „3 Verträge erfüllt“ */
   text: string;
+  /** Ganz kurz für die Stufenanzeige oben */
+  short: string;
+  /** Wie man es schafft */
+  hint: string;
+  /** Wohin der Knopf führt: Verträge-Fenster oder ein Werkzeug */
+  go?: 'deals' | 'tool:reefer' | 'tool:rail' | 'tool:crane';
   /** Aktueller Stand und Ziel, für einen Fortschrittsbalken */
   value(s: Sim): number;
   goal: number;
@@ -19,16 +25,16 @@ export const MILESTONES: (Milestone | null)[] = [
   null,
   null,
   null,
-  { text: '5 Schiffe pünktlich abgefertigt', value: (s) => s.shipsOnTime, goal: 5 },
-  { text: '3 Verträge vollständig erfüllt', value: (s) => s.contractsDone, goal: 3 },
-  { text: '2 große Schiffe abgefertigt', value: (s) => s.bigShipsDone, goal: 2 },
-  { text: '200 Kühlcontainer umgeschlagen', value: (s) => s.reefersHandled, goal: 200 },
-  { text: '1 Mega-Frachter abgefertigt', value: (s) => s.megaDone, goal: 1 },
-  { text: '40 Züge beladen losgeschickt', value: (s) => s.trainsDone, goal: 40 },
-  { text: '20 Lieferaufträge erfüllt', value: (s) => s.ordersDone, goal: 20 },
-  { text: '10 Kräne im Hafen', value: (s) => s.cranes.length, goal: 10 },
-  { text: '10 Mega-Frachter abgefertigt', value: (s) => s.megaDone, goal: 10 },
-  { text: 'Ruf von 90', value: (s) => Math.round(s.rep), goal: 90 },
+  { text: '5 Schiffe pünktlich abgefertigt', short: 'pünktliche Schiffe', hint: 'Fertige Schiffe innerhalb der zugesagten Liegezeit ab. Mehr Kräne und genug Trucks helfen.', value: (s) => s.shipsOnTime, goal: 5 },
+  { text: '3 Verträge vollständig erfüllt', short: 'Verträge', hint: 'Ohne Vertrag kommen nur kleine Küstenfrachter. Nimm Verträge an und fertige alle Schiffe eines Vertrags pünktlich ab.', go: 'deals', value: (s) => s.contractsDone, goal: 3 },
+  { text: '2 große Schiffe abgefertigt', short: 'große Schiffe', hint: 'Große Schiffe kommen nur über Verträge. Sie brauchen 6 Kai-Felder in einer Reihe, davor ausgebaggert.', go: 'deals', value: (s) => s.bigShipsDone, goal: 2 },
+  { text: '200 Kühlcontainer umgeschlagen', short: 'Kühlcontainer', hint: 'Baue Kühlplätze an die Straße. Dann bringen Schiffe Kühlfracht, die rechtzeitig raus muss.', go: 'tool:reefer', value: (s) => s.reefersHandled, goal: 200 },
+  { text: '1 Mega-Frachter abgefertigt', short: 'Mega-Frachter', hint: 'Mega-Frachter kommen über Verträge. Sie brauchen 8 Kai-Felder in einer Reihe, ausgebaggert, am besten mit Containerbrücken.', go: 'deals', value: (s) => s.megaDone, goal: 1 },
+  { text: '40 Züge beladen losgeschickt', short: 'Züge', hint: 'Baue einen Bahnhof und verbinde ihn mit Gleisen bis zu einem Kartenrand. Trucks bringen Container auf die Ladefläche.', go: 'tool:rail', value: (s) => s.trainsDone, goal: 40 },
+  { text: '20 Lieferaufträge erfüllt', short: 'Lieferaufträge', hint: 'Lieferaufträge findest du im Verträge-Fenster weiter unten.', go: 'deals', value: (s) => s.ordersDone, goal: 20 },
+  { text: '10 Kräne im Hafen', short: 'Kräne', hint: 'Baue weitere Kräne auf freie Kai-Felder.', go: 'tool:crane', value: (s) => s.cranes.length, goal: 10 },
+  { text: '10 Mega-Frachter abgefertigt', short: 'Mega-Frachter', hint: 'Mehr Verträge mit Mega-Frachtern annehmen und sie pünktlich abfertigen.', go: 'deals', value: (s) => s.megaDone, goal: 10 },
+  { text: 'Ruf von 90', short: 'Ruf', hint: 'Pünktlich abfertigen, Verträge erfüllen, nichts verderben lassen. Verspätungen kosten Ruf.', value: (s) => Math.round(s.rep), goal: 90 },
 ];
 
 /** Ist der Meilenstein für die nächste Stufe geschafft (oder gibt es keinen)? */

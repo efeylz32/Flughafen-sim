@@ -812,6 +812,7 @@ export class Game {
     for (const p of sim.plants) if (inside(p.x, p.y, p.w, p.h)) add(p.kind, p.x, p.y, { rot: p.w !== sizeOf(p.kind)[0] });
     for (const s of sim.shops) if (inside(s.x, s.y, s.w, s.h)) add('workshop', s.x, s.y);
     for (const t of sim.rtgs) if (inside(t.x, t.y)) add('rtg', t.x, t.y);
+    for (const rl of sim.rails) if (inside(rl.x, rl.y, rl.w, rl.h)) add('rail', rl.x, rl.y, { rot: rl.h > rl.w });
     for (const c of sim.cranes) if (inside(c.x, c.y)) add(c.model === 'light' ? 'lcrane' : 'crane', c.x, c.y);
     if (!items.length) return this.fail('Im Rahmen ist nichts zum Kopieren');
     this.blueprint = { w: x1 - x0 + 1, h: y1 - y0 + 1, items };

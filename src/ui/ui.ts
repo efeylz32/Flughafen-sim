@@ -18,7 +18,6 @@ import { INSURANCE, OVERPASS_LEVEL, PLANT_LEVELS, MAX_ORDERS, ORDER_KINDS,
   PLANTS,
   ROLE_NAMES,
   TruckRole,
-  RAIL_CAP,
   RAIL_TRAVEL_GM,
   SHIP_TYPES,
   Tool,
@@ -173,7 +172,7 @@ const TOOLS: ToolDef[] = [
   { cat: 'build', tool: 'battery', label: 'Batterie', sub: '40k', color: '#2f9e6b' },
   { cat: 'build', tool: 'customs', label: 'Zollhof', sub: '30k', color: '#3d6b4f' },
   { cat: 'build', tool: 'workshop', label: 'Werkstatt', sub: '40k · 2×2', color: '#5b6b82' },
-  { cat: 'ways', tool: 'rail', label: 'Bahnhof', sub: '150k', color: '#5f6f82' },
+  { cat: 'ways', tool: 'rail', label: 'Bahnhof', sub: '150k · 4×2', color: '#5f6f82' },
   { cat: 'ways', tool: 'track', label: 'Gleis', sub: '3k', color: '#8f7a5b' },
   { cat: 'ways', tool: 'parking', label: 'Stellplatz', sub: '2k', color: '#2f6db0' },
   { cat: 'ways', tool: 'oneway', label: 'Einbahn', sub: 'Gratis', color: '#4b525c' },
@@ -209,8 +208,8 @@ function jobText(j: Job | null): string {
   if (!j) return 'Wartet auf einen Auftrag';
   const store = j.cargo === 'reef' ? 'Kühlplatz' : j.cargo === 'haz' ? 'Gefahrgutfläche' : j.cargo === 'empty' ? 'Leerlager' : 'Stapelplatz';
   const cargo = { imp: 'Container', rimp: 'Bahn-Container', reef: 'Kühlcontainer', haz: 'Gefahrgut', empty: 'Leercontainer', exp: 'Export-Container', ware: 'ausgepackte Ware', prem: 'Fertigware', food: 'Lebensmittel' }[j.cargo];
-  if (j.stage === 0) return `Fährt zu: ${j.srcKind === 'crane' ? 'Kran' : j.srcKind === 'gate' ? 'Gate' : j.srcKind === 'plant' ? 'Verarbeitung' : j.srcKind === 'rail' ? 'Gleisanschluss' : store}`;
-  const dst = j.dstKind === 'store' ? store : j.dstKind === 'gate' ? 'Gate' : j.dstKind === 'rail' ? 'Gleisanschluss' : j.dstKind === 'plant' ? 'Verarbeitung' : 'Kran';
+  if (j.stage === 0) return `Fährt zu: ${j.srcKind === 'crane' ? 'Kran' : j.srcKind === 'gate' ? 'Gate' : j.srcKind === 'plant' ? 'Verarbeitung' : j.srcKind === 'rail' ? 'Bahnhof' : store}`;
+  const dst = j.dstKind === 'store' ? store : j.dstKind === 'gate' ? 'Gate' : j.dstKind === 'rail' ? 'Bahnhof' : j.dstKind === 'plant' ? 'Verarbeitung' : 'Kran';
   return `${j.help ? 'Hilft beim Räumen: ' : ''}Bringt ${cargo} zu: ${dst}`;
 }
 
@@ -228,8 +227,8 @@ const TIPS: Record<string, [string, string]> = {
   emptyyard: ['Leerlager', 'Hier landen leere Container. Die Befüllhalle holt sie, Trucks von außen bringen und holen welche.'],
   hazard: ['Gefahrgut', 'Gefahrgut-Container dürfen nur auf diese Felder. Ohne Platz bleibt der Kran blockiert.'],
   reefer: ['Kühlplätze', 'Kühlcontainer brauchen Strom und dürfen nicht zu lange warten, sonst verdirbt die Ware.'],
-  track: ['Gleise', 'Gleise verbinden das Bahnterminal mit dem Hinterland. Am Bahnterminal holen Züge viele Container auf einmal.'],
-  rail: ['Bahnterminal', 'Ein Teil der Container geht per Bahn. Das entlastet die Gates.'],
+  track: ['Gleise', 'Gleise verbinden den Bahnhof mit dem Hinterland: von einem Ende des Bahnhofs bis zu einem Kartenrand, gern mit Kurven. Über Straßen entstehen Bahnübergänge.'],
+  rail: ['Containerbahnhof', '4 × 2 Felder, drehbar. Oben das Ladegleis, unten die Ladefläche. Verbinde ein Ende des Gleises mit Gleisen bis zu einem Kartenrand (links, rechts oder unten), dann kommen Züge und holen viele Container auf einmal ab. Trucks liefern an den Straßen rundherum.'],
   parking: ['Stellplätze', 'Freie Trucks warten hier statt auf der Straße. Das hält die Wege frei.'],
   hwy: ['Autobahn', 'Schnell und breit, aber teuer. Lohnt sich für die Hauptachse vom Gate ins Lager.'],
   tower: ['Lotsenturm', 'Der Lotse schickt jedes Schiff an den Liegeplatz, der am meisten schafft: Kran-Tempo, abzüglich Stau, Trucks und Container, die dort noch warten. Ist der linke Liegeplatz noch zugestaut, geht das nächste Schiff an einen ruhigeren. Einer reicht für den ganzen Hafen.'],
@@ -407,7 +406,7 @@ export class UI {
     const status = el('div', 'status');
     this.clockEl = el('div', 'pill small clock');
     this.levelEl = el('div', 'pill small level');
-    this.levelEl.innerHTML = `<span class="lname"></span><span class="track"><span class="bar"></span></span>`;
+    this.levelEl.innerHTML = `<span class="lname"></span><span class="track"><span class="bar"></span></span><span class="lmore">›</span>`;
     this.levelName = this.levelEl.querySelector('.lname')!;
     this.levelBar = this.levelEl.querySelector('.bar')!;
     this.levelEl.addEventListener('click', () => this.showProgress());
@@ -1323,14 +1322,35 @@ export class UI {
     const next = LEVELS[sim.level];
     const ms = MILESTONES[sim.level + 1];
     const comp = completion(sim);
+    // Checkliste für die nächste Stufe: Container und Meilenstein, mit Abhaken und Weg zur Lösung
+    const req = (done: boolean, title: string, v: number, goal: number, hint = '', go = '') =>
+      `<div class="req ${done ? 'ok' : ''}"><span class="ck">${done ? '✓' : ''}</span><div class="rq"><div class="rt"><b>${title}</b><span>${num(Math.min(v, goal))} / ${num(goal)}</span></div>${bar(v, goal)}${!done && hint ? `<small>${hint}</small>` : ''}${!done && go ? `<button class="primary rgo" data-pgo="${go}">${go === 'deals' ? 'Zu den Verträgen' : 'Jetzt bauen'}</button>` : ''}</div></div>`;
+    const N = sim.level + 1;
+    const unlocks: string[] = [];
+    if (next) {
+      const tools = TOOLS.filter((t) => (UNLOCK as Record<string, number>)[t.tool] === N).map((t) => t.label);
+      if (tools.length) unlocks.push(`<b>Neu zu bauen:</b> ${[...new Set(tools)].join(', ')}`);
+      for (const n of LEVEL_NEWS[sim.level] ?? []) unlocks.push(`<b>${n.title}:</b> ${n.text}`);
+      if (next.contracts > LEVELS[sim.level - 1].contracts) unlocks.push(`<b>Verträge:</b> ${next.contracts} gleichzeitig statt ${LEVELS[sim.level - 1].contracts}`);
+      const projs = PROJECT_IDS.filter((id) => PROJECTS[id].level === N).map((id) => PROJECTS[id].name);
+      if (projs.length) unlocks.push(`<b>Großprojekt:</b> ${projs.join(', ')}`);
+      const law = LAWS.find((l) => l.level === N);
+      if (law) unlocks.push(`<b>${law.name}:</b> größere Karte möglich`);
+    }
+    const msDone = !ms || ms.value(sim) >= ms.goal;
+    const contDone = !!next && sim.handled >= next.need;
     const html = `
       ${
         next
-          ? `<h3>Nächste Stufe: ${next.name}</h3>
-        <div class="pgrow"><span>Container umgeschlagen</span><b>${num(Math.min(sim.handled, next.need))} / ${num(next.need)}</b></div>${bar(sim.handled, next.need)}
-        ${ms ? `<div class="pgrow"><span>Meilenstein: ${ms.text}</span><b>${num(Math.min(ms.value(sim), ms.goal))} / ${num(ms.goal)}</b></div>${bar(ms.value(sim), ms.goal)}` : ''}
-        <p class="sub">Bonus beim Aufstieg: ${eur(next.bonus)}.</p>`
-          : '<h3>Höchste Stufe erreicht</h3>'
+          ? `<div class="nextcard">
+        <div class="lvpair"><div class="lvb now"><span class="n">${sim.level}</span><span><small>Deine Stufe</small><b>${sim.levelName}</b></span></div><span class="arr">→</span><div class="lvb"><span class="n">${N}</span><span><small>Nächste Stufe</small><b>${next.name}</b></span></div></div>
+        ${contDone && !msDone ? `<div class="waitnote">Container sind geschafft. Es fehlt nur noch: <b>${ms!.text}</b></div>` : ''}
+        ${req(contDone, 'Container umgeschlagen', sim.handled, next.need, 'Jeder Container, der über Gate, Bahn oder aufs Schiff geht, zählt.')}
+        ${ms ? req(msDone, ms.text, ms.value(sim), ms.goal, ms.hint, ms.go ?? '') : ''}
+        <p class="sub">Bonus beim Aufstieg: ${eur(next.bonus)}.</p>
+      </div>
+      ${unlocks.length ? `<h3>Das bringt Stufe ${N}</h3><ul class="unlocks">${unlocks.map((x) => `<li>${x}</li>`).join('')}</ul>` : ''}`
+          : `<div class="nextcard"><div class="lvpair"><div class="lvb now"><span class="n">${sim.level}</span><span><small>Deine Stufe</small><b>${sim.levelName}</b></span></div></div><p class="sub">Höchste Stufe erreicht. Jetzt geht es um die Vollendung.</p></div>`
       }
       <h3>Alle Stufen</h3>
       <div class="lvlist">${LEVELS.map((l, i) => `<div class="lv ${i < sim.level ? 'done' : i === sim.level ? 'next' : ''}"><span class="n">${i + 1}</span><span class="t">${l.name}</span><span class="c">${i === 0 ? 'Start' : `${num(l.need)} Container${MILESTONES[i + 1] ? ` · ${MILESTONES[i + 1]!.text}` : ''}`}</span></div>`).join('')}</div>
@@ -1355,6 +1375,13 @@ export class UI {
     this.progModal.addEventListener('click', (e) => {
       const t = e.target as HTMLElement;
       if (t === this.progModal || t.closest('.x')) this.progModal.classList.add('hidden');
+      const go = t.closest<HTMLElement>('[data-pgo]')?.dataset.pgo;
+      if (go) {
+        this.progModal.classList.add('hidden');
+        if (go === 'deals') this.showDeals();
+        else if (go.startsWith('tool:')) this.game.setTool(go.slice(5) as Tool);
+        this.game.sound.play('click');
+      }
     });
     return this.progModal;
   }
@@ -1738,7 +1765,10 @@ export class UI {
 
     // Hafenstufe
     const next = LEVELS[sim.level];
-    setText(this.levelName, `Stufe ${sim.level}`);
+    // Container geschafft, Meilenstein fehlt: gleich oben sagen, worauf die Stufe wartet
+    const msNext = MILESTONES[sim.level + 1];
+    const waitMs = !!next && sim.handled >= next.need && !!msNext && msNext.value(sim) < msNext.goal;
+    setText(this.levelName, waitMs ? `Stufe ${sim.level} · ${msNext!.short} ${num(msNext!.value(sim))}/${num(msNext!.goal)}` : `Stufe ${sim.level}`);
     setStyle(this.levelBar, 'width', `${Math.round(sim.levelProgress * 100)}%`);
     const lvlTitle =
       (next ? `${sim.levelName}: ${num(sim.handled)} von ${num(next.need)} Containern bis ${next.name}` : `${sim.levelName}: ${num(sim.handled)} Container umgeschlagen`) +
@@ -2498,11 +2528,19 @@ export class UI {
             : r.state === 'loading'
               ? `Der Zug wird beladen, Abfahrt in ${Math.ceil(r.timer)} Minuten`
               : 'Der Zug fährt ab';
-      html = `<h3>Gleisanschluss <span class="tag">bis zu ${RAIL_CAP} Container pro Zug</span></h3>
+      const route = sim.railRoute(r);
+      const cap = sim.railCap;
+      const side = route ? ['rechten', 'unteren', 'linken', 'oberen'][route.out] : '';
+      html = `<h3>Containerbahnhof <span class="tag">bis zu ${cap} Container pro Zug</span></h3>
         ${buildRow(r.build)}
-        <div class="progress"><span style="width:${Math.round((r.platform / RAIL_CAP) * 100)}%"></span></div>
-        <div class="meta">Am Bahnsteig: ${r.platform} von ${RAIL_CAP} · Wert ${eur(r.value)}</div>
-        <div class="meta">${st}</div>`;
+        ${
+          route
+            ? `<div class="meta pos">Angeschlossen: ${route.tiles.length ? `${route.tiles.length} Gleisfelder bis zum ${side} Kartenrand` : `liegt direkt am ${side} Kartenrand`}</div>`
+            : '<div class="why alert"><b>Nicht angeschlossen</b><br>Lege Gleise von einem Ende des Ladegleises bis zu einem Kartenrand (links, rechts oder unten). Ohne Anschluss kommt kein Zug.</div>'
+        }
+        <div class="progress"><span style="width:${Math.round((r.platform / cap) * 100)}%"></span></div>
+        <div class="meta">Auf der Ladefläche: ${r.platform} von ${cap} · Wert ${eur(r.value)}</div>
+        ${route ? `<div class="meta">${st}</div>` : ''}`;
     } else {
       const t = sim.trucks.find((t) => t.id === sel.id);
       if (!t) return gone();

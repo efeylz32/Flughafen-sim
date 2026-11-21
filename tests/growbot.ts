@@ -142,7 +142,10 @@ export class GrowBot {
     if (s.level >= 3 && s.solarTiles < 8 && s.money > 200_000 + R) this.fillRow([k + 15, k + 16], 'solar', 2);
     if (s.level >= 4 && s.batteryCap === 0 && s.money > 200_000 + R) this.fillRow([k + 15, k + 16], 'battery', 1);
     if (s.level >= LV.customs && s.customsTiles < 3 && s.money > 150_000 + R) this.fillRow([k + 14], 'customs', 1);
-    if (s.level >= 3 && s.rails.length === 0 && s.owned[GRID_W - 1] && s.money > 500_000 + R) this.try('rail', GRID_W - 1, k + 2);
+    // Bahnhof am rechten Rand: das östliche Gleisende liegt am Kartenrand, damit ist er angeschlossen
+    if (s.level >= 3 && s.rails.length === 0 && s.owned[GRID_W - 1] && s.money > 500_000 + R) {
+      for (const y of [k + 5, k + 11, k + 2, k + 8, k + 14]) if (this.try('rail', GRID_W - 4, y)) break;
+    }
 
     // Verbesserungen und Großprojekte
     for (const id of TECH_IDS) {

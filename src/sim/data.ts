@@ -214,6 +214,8 @@ export const SIZE: Partial<Record<BuildTool, [number, number]>> = {
   cold: [2, 2],
   workshop: [2, 2],
   fill: [3, 2],
+  /** Containerbahnhof: oben das Ladegleis, unten die Ladefläche */
+  rail: [4, 2],
 };
 export const sizeOf = (tool: string): [number, number] => SIZE[tool as BuildTool] ?? [1, 1];
 /** Größe mit Drehung: gedreht sind Breite und Höhe vertauscht */
@@ -284,7 +286,7 @@ export const PLOT_PRICE_STEP = 30_000;
 // Karten
 export type MapId = 'coast' | 'island' | 'rocks' | 'river';
 export const MAPS: Record<MapId, { name: string; text: string; ships: number; bonus: number }> = {
-  coast: { name: 'Küste', text: 'Viel Platz, Bahnanschluss am rechten Rand.', ships: 1, bonus: 0 },
+  coast: { name: 'Küste', text: 'Viel Platz, Bahn und Straßen ins Hinterland an drei Seiten.', ships: 1, bonus: 0 },
   island: { name: 'Insel', text: 'Kai an allen vier Küsten, aber wenig Land und keine Bahn. Ab Stufe 2 kommen Schiffe öfter. 150.000 € mehr Startgeld.', ships: 0.8, bonus: 150_000 },
   rocks: { name: 'Felsen', text: 'Felsen versperren Bauland. Sprengen kostet 8.000 € pro Feld. 50.000 € mehr Startgeld.', ships: 1, bonus: 50_000 },
   river: { name: 'Fluss', text: 'Ein Fluss teilt das Land und Hügel liegen im Weg. Brücken und Tunnel kosten, verbinden aber. 100.000 € mehr Startgeld.', ships: 1, bonus: 100_000 },
@@ -312,8 +314,9 @@ export const CRANE_EXP_BUFFER = 4;
 export const CRANE_BUFFER_BIG = 8;
 
 // Transport
-export const TRUCK_SPEED = 2; // Felder pro gm
-export const AGV_SPEED = 3;
+// Tempo in Feldern pro Spielminute. Angefangene Felder werden weitergefahren, daher wirken alle Boni gleichmäßig.
+export const TRUCK_SPEED = 1.3;
+export const AGV_SPEED = 2.5;
 export const TRUCK_HANDLE_GM = 0.4;
 export const TRUCK_CAP = 2; // Container pro Fahrt
 /** Nach so vielen Spielminuten im Stau drängelt sich ein Truck durch, damit nichts für immer feststeckt. */
@@ -500,7 +503,7 @@ export const LEVEL_NEWS: { title: string; text: string }[][] = [
   ],
   [
     { title: 'Strom', text: 'Solarfelder liefern Strom für Kräne und Hallen. Bei Stromausfall hilft später eine Batterie.' },
-    { title: 'Bahn', text: 'Gleisanschluss am Kartenrand und Gleise: Ein Zug holt viele Container auf einmal ab.' },
+    { title: 'Bahn', text: 'Containerbahnhof und Gleise bis zum Kartenrand: Ein Zug holt viele Container auf einmal ab.' },
     { title: 'Baggern', text: 'Vertiefe das Wasser vor dem Kai. So passen später große Schiffe an den Liegeplatz.' },
     { title: 'Lieferaufträge und Wartung', text: 'Firmen bestellen feste Mengen. Kräne lassen sich nachts warten, dann fallen sie seltener aus.' },
     { title: 'Überführungen', text: 'An Kreuzungen warten Trucks auf Querverkehr. Eine Überführung hebt das auf.' },
@@ -585,7 +588,7 @@ export const RAIL_GOODS_MAX = 24;
 /** Straßenarten: 0 Straße, 1 Doppelspur, 2 Autobahn */
 export const ROAD_NAMES = ['Straße', 'Doppelspur', 'Autobahn'];
 /** Truck-Tempo auf dem Feld */
-export const ROAD_SPEED = [1, 1, 1.7];
+export const ROAD_SPEED = [1, 1, 2];
 /** Fahrzeuge je Richtung und Feld (Einbahn gibt +1) */
 export const ROAD_LANES = [1, 2, 2];
 /** Betrieb pro Feld und Tag */
