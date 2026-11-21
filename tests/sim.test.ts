@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { COAST_ROW, GRID_H, GRID_W, MAX_LEVEL, setGridSize, T, TECH, TECH_IDS, TICKS_PER_SEC } from '../src/sim/data';
 import { completion } from '../src/sim/progression';
 import { buildDemo } from '../src/sim/demo';
-import { Sim } from '../src/sim/sim';
+import { Sim, type UsedOffer } from '../src/sim/sim';
 
 const k = COAST_ROW;
 
@@ -1127,16 +1127,62 @@ describe('Bauzeit, Gebrauchtkauf und Höchstzustand', () => {
     expect(g.staffed).toBe(true);
   });
 
-  it('gebraucht ist billiger, hat aber einen niedrigeren Höchstzustand', () => {
+  it('Gebrauchtmarkt: Einzelstück mit eigenem Zustand, nach dem Kauf weg, Rückgängig bringt es zurück', () => {
     const sim = new Sim();
     for (let x = 4; x < 8; x++) sim.build('kai', x, k);
+    sim.ensureUsed();
+    expect(sim.usedOffers.length).toBeGreaterThanOrEqual(2);
+    const o: UsedOffer = { id: 999, tool: 'crane', cap: 0.7, wear: 0.4, price: 40_000, newPrice: sim.costOf('crane'), until: sim.gm + 600, seller: 'Test', deal: 'fair' };
+    sim.usedOffers.push(o);
+    expect(sim.selectUsed(999).ok).toBe(true);
     const m = sim.money;
-    sim.used = true;
     sim.build('crane', 5, k);
     expect(m - sim.money).toBe(40_000);
     const c = sim.cranes[0];
-    expect(c.cap).toBeLessThan(0.8);
-    expect(c.wear).toBeGreaterThan(0.2);
+    expect(c.cap).toBe(0.7);
+    expect(c.wear).toBe(0.4);
+    // Weg vom Markt, der nächste Kran ist wieder neu
+    expect(sim.usedOffers.some((x) => x.id === 999)).toBe(false);
+    expect(sim.usedSel).toBe(-1);
+    expect(sim.canBuild('crane', 7, k).cost).toBe(sim.costOf('crane'));
+    sim.undoBuild({ tool: 'crane', x: 5, y: k });
+    expect(sim.usedOffers.some((x) => x.id === 999)).toBe(true);
+    // Abgelaufenes Angebot lässt sich nicht mehr kaufen
+    sim.usedOffers = sim.usedOffers.filter((x) => x.id !== 999);
+    expect(sim.selectUsed(999).ok).toBe(false);
+  });
+
+  it('Gebrauchtmarkt wechselt: verschiedene Stücke, Zustände und Preise, begrenzt und mit Ablaufzeit', () => {
+    const sim = basicPort(4, 1);
+    sim.level = 6;
+    const ids = new Set<number>();
+    const caps = new Set<number>();
+    const prices = new Set<number>();
+    const sellers = new Set<string>();
+    const tools = new Set<string>();
+    for (let d = 0; d < 12; d++) {
+      run(sim, 24);
+      if (sim.pending) sim.resolveDecision(0);
+      expect(sim.usedOffers.length).toBeLessThanOrEqual(8);
+      for (const o of sim.usedOffers) {
+        ids.add(o.id);
+        caps.add(o.cap);
+        prices.add(o.price);
+        sellers.add(o.seller);
+        tools.add(o.tool);
+        expect(o.until).toBeGreaterThan(sim.gm);
+        expect(o.wear).toBeGreaterThanOrEqual(1 - o.cap - 1e-9);
+        expect(o.price).toBeLessThan(o.newPrice);
+      }
+    }
+    expect(ids.size).toBeGreaterThan(10);
+    expect(caps.size).toBeGreaterThan(6);
+    expect(prices.size).toBeGreaterThan(6);
+    expect(sellers.size).toBeGreaterThanOrEqual(3);
+    expect(tools.size).toBeGreaterThanOrEqual(2);
+    // Speichern und Laden behält den Markt
+    const back = Sim.deserialize(JSON.parse(JSON.stringify(sim.serialize())));
+    expect(back.usedOffers.map((o) => o.id)).toEqual(sim.usedOffers.map((o) => o.id));
   });
 
   it('die Werkstatt repariert nur bis zum Höchstzustand, der mit der Nutzung sinkt', () => {
@@ -1220,7 +1266,7 @@ describe('Vertiefung: Richtung, Personal, Konjunktur', () => {
     for (let d = 0; d < 40; d++) {
       day(sim, 1);
       kinds.add(sim.cycle.kind);
-      money.add(sim.usedMarket.label);
+      for (const o of sim.usedOffers) money.add(o.seller);
       if (sim.pending) sim.resolveDecision(0);
     }
     expect(kinds.size).toBeGreaterThan(1);

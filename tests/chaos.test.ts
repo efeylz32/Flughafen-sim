@@ -96,8 +96,23 @@ function chaos(seed: number, map: MapId, size: number, steps: number) {
         else if (s.contracts.length && rnd() < 0.3) s.cancelContract(pick(s.contracts).id);
         else if (s.orderOffers.length) s.acceptOrder(pick(s.orderOffers).id);
       } else if (a < 0.6) {
-        what = 'land';
-        s.buyPlot(rx());
+        if (rnd() < 0.5) {
+          what = 'land';
+          s.buyPlot(rx());
+        } else {
+          // Gebrauchtmarkt: ein Einzelstück auswählen und irgendwo hinstellen wollen
+          s.ensureUsed();
+          const o = s.usedOffers.length ? pick(s.usedOffers) : undefined;
+          what = `gebraucht ${o?.tool ?? '-'}`;
+          if (o && s.selectUsed(o.id).ok) {
+            const x = rx();
+            const y = ry();
+            const res = s.build(o.tool, x, y);
+            if (res.ok) undo.push({ tool: o.tool, x, y, truckId: res.truckId });
+            if (res.ok && s.usedOffers.some((u) => u.id === o.id)) throw new Error('Gekauftes Angebot ist noch auf dem Markt');
+            s.selectUsed(-1);
+          }
+        }
       } else if (a < 0.62) {
         what = 'personal';
         const role = pick(['driver', 'crane', 'gate', 'mech'] as const);

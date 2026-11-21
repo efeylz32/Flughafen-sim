@@ -354,12 +354,26 @@ export class Game {
     this.setSpeed(this.speed === 0 ? this.lastSpeed : 0);
   }
   setTool(t: Tool) {
+    // Gewähltes Gebrauchtstück gilt nur für sein eigenes Werkzeug
+    const off = this.sim.usedOffers.find((o) => o.id === this.sim.usedSel);
+    if (off && off.tool !== t) this.sim.usedSel = -1;
     this.tool = t;
     this.ui.tipFor(t);
     this.ghost = null;
     this.demolishAsk = null;
     this.hover = null;
     this.ui.refreshTools();
+  }
+  /** Gebrauchtes Einzelstück kaufen: auswählen, dann auf der Karte hinstellen */
+  buyUsed(id: number) {
+    const r = this.sim.selectUsed(id);
+    if (!r.ok) return this.fail(r.reason ?? 'Nicht möglich');
+    const o = this.sim.usedOffers.find((x) => x.id === id)!;
+    this.setTool(o.tool);
+    this.sim.usedSel = id;
+    this.ui.refreshTools();
+    this.sound.play('click');
+    this.ui.toast(o.tool === 'truck' ? 'Tippe auf eine Straße, um den Truck hinzustellen' : 'Tippe auf ein Kai-Feld, um den Kran hinzustellen', 'info');
   }
   overhaulSelected() {
     const sel = this.selected;
@@ -673,11 +687,17 @@ export class Game {
     }
     const tool = this.tool as BuildTool;
     if (tool === 'hwy') return this.buildHighway(x, y);
+    const usedOff = this.sim.usedOffers.find((o) => o.id === this.sim.usedSel && o.tool === tool);
     const res = this.sim.build(tool, x, y);
     if (!res.ok) return res.reason ?? 'Nicht möglich';
     this.record({ kind: 'build', tool, x, y, truckId: res.truckId, prev: res.prev });
     this.sound.play(tool === 'crane' || tool === 'gate' ? 'buildBig' : tool === 'truck' ? 'truck' : 'build');
     this.renderer.addPop(x, y, 'build');
+    if (usedOff) {
+      // Gebrauchtes Einzelstück steht: zurück aufs Ansehen, sonst kauft der nächste Tipp unbemerkt neu
+      this.setTool('view');
+      this.ui.toast(`${Sim.usedName(usedOff)} gebraucht gekauft: ${Math.round(usedOff.price).toLocaleString('de-DE')} € statt ${Math.round(usedOff.newPrice).toLocaleString('de-DE')} €`, 'good');
+    }
     return null;
   }
 

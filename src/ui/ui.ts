@@ -58,7 +58,7 @@ import { latestSlot, metaOfSlot, removeSlot, Slot, SLOTS } from '../saves';
 import { COMPLETE_SUPER, MILESTONES, completion } from '../sim/progression';
 import { MISSIONS, MISSION_GO } from '../sim/missions';
 import { SCENARIOS } from '../sim/scenarios';
-import type { Contract, Job, Sim, Truck } from '../sim/sim';
+import { Sim, type Contract, type Job, type Truck, type UsedOffer } from '../sim/sim';
 
 const num = (n: number) => Math.round(n).toLocaleString('de-DE');
 const eur = (n: number) => `${num(n)} €`;
@@ -326,6 +326,8 @@ export class UI {
   private ghostBar!: HTMLElement;
   private ghostKey = '';
   private usedPick!: HTMLElement;
+  private usedModal!: HTMLElement;
+  private lastUsed = '';
   private techModal!: HTMLElement;
   /** Reiter im Ausbau-Fenster */
   private techTab: 'tech' | 'proj' | 'law' = 'tech';
@@ -614,13 +616,14 @@ export class UI {
       click();
     });
     this.rotPick.appendChild(rb);
-    // Neu oder gebraucht: für Kräne und Trucks
+    // Neu oder gebraucht: für Kräne und Trucks. Gebraucht heißt: ein Einzelstück vom Markt aussuchen.
     this.usedPick = el('div', 'rolepick usedpick hidden');
     for (const u of [false, true]) {
       const b = el('button', '', '');
       b.dataset.used = u ? '1' : '0';
       b.addEventListener('click', () => {
-        this.game.sim.used = u;
+        if (u) this.showUsed();
+        else this.game.sim.usedSel = -1;
         this.refreshTools();
         click();
       });
@@ -883,6 +886,11 @@ export class UI {
         this.fleetOpen = this.fleetOpen === id ? -1 : id;
         click();
       }
+      if (t.closest('[data-usedm]')) {
+        this.showUsed();
+        click();
+        return;
+      }
       const fl = t.closest<HTMLElement>('[data-fleet]');
       if (fl) this.game.setAllRoles(fl.dataset.fleet as TruckRole);
       const h = t.closest<HTMLElement>('[data-hire]');
@@ -938,7 +946,7 @@ export class UI {
     new ResizeObserver(barH).observe(bar);
     window.addEventListener('resize', barH);
     requestAnimationFrame(barH);
-    root.append(top, left, side, this.sheet, bar, this.ghostBar, this.toasts, this.menu, this.deals, this.ctlModal, this.techModal, this.staffModal, this.finCard, this.endModal, this.decision, this.levelUp, this.buildAchModal(), this.buildProgModal());
+    root.append(top, left, side, this.sheet, bar, this.ghostBar, this.toasts, this.menu, this.deals, this.ctlModal, this.techModal, this.staffModal, this.finCard, this.endModal, this.decision, this.levelUp, this.buildAchModal(), this.buildProgModal(), this.buildUsedModal());
     this.refreshSpeed();
     this.refreshTools();
     this.refreshOverlay();
@@ -1348,6 +1356,70 @@ export class UI {
     return this.progModal;
   }
 
+  private buildUsedModal(): HTMLElement {
+    this.usedModal = el('div', 'modal hidden');
+    this.usedModal.innerHTML = `<div class="dialog deals usedm"><div class="dhead"><h2>Gebrauchtmarkt</h2><button class="x" aria-label="Schließen">${ICONS.close}</button></div><div class="body"></div></div>`;
+    this.usedModal.addEventListener('click', (e) => {
+      const t = e.target as HTMLElement;
+      if (t === this.usedModal || t.closest('.x')) return this.usedModal.classList.add('hidden');
+      const b = t.closest<HTMLElement>('[data-ubuy]');
+      if (b) {
+        const sim = this.game.sim;
+        if (sim.money < Number(b.dataset.price)) return this.game.fail('Zu wenig Geld');
+        this.usedModal.classList.add('hidden');
+        this.staffModal.classList.add('hidden');
+        this.game.buyUsed(Number(b.dataset.ubuy));
+      }
+    });
+    return this.usedModal;
+  }
+
+  /** Gebrauchtmarkt öffnen */
+  showUsed() {
+    this.game.sim.ensureUsed();
+    this.usedModal.classList.remove('hidden');
+    this.renderUsed(true);
+  }
+
+  private renderUsed(force: boolean) {
+    if (!force && this.holding) return;
+    const sim = this.game.sim;
+    const left = (o: UsedOffer) => Math.max(0, Math.ceil((o.until - sim.gm) / 60));
+    const key = `${sim.usedOffers.map((o) => `${o.id}:${left(o)}`).join()}|${Math.floor(sim.money / 5000)}|${sim.level}|${this.game.tool}`;
+    if (!force && key === this.lastUsed) return;
+    this.lastUsed = key;
+    const tool = this.game.tool;
+    // Passendes zum gewählten Werkzeug zuerst, sonst Trucks vor Kränen, dann nach Preis
+    const order = (o: UsedOffer) => (o.tool === tool ? 0 : 1) * 10 + (o.tool === 'truck' ? 0 : o.tool === 'lcrane' ? 1 : 2);
+    const list = [...sim.usedOffers].sort((a, b) => order(a) - order(b) || a.price - b.price);
+    const tag = (o: UsedOffer) =>
+      o.deal === 'bargain' ? '<span class="utag good">Schnäppchen</span>' : o.deal === 'pricey' ? '<span class="utag bad">teuer</span>' : o.deal === 'junk' ? '<span class="utag junk">Bastlerware</span>' : '';
+    const cycle = sim.cycle.kind === 'crisis' ? 'Gerade ist Krise: mehr Angebote, niedrigere Preise.' : sim.cycle.kind === 'boom' ? 'Gerade ist Boom: weniger Angebote, höhere Preise.' : '';
+    const rows = list
+      .map((o) => {
+        const cond = Math.round((1 - o.wear) * 100);
+        const cap = Math.round(o.cap * 100);
+        const off = Math.round((1 - o.price / o.newPrice) * 100);
+        const locked = sim.level < UNLOCK[o.tool];
+        const h = left(o);
+        return `<div class="uoff ${o.deal}">
+          <div class="uh"><b>${Sim.usedName(o)}</b>${tag(o)}<span class="ut">${h <= 6 ? `<span class="neg">nur noch ${h} Std.</span>` : `noch ${h >= 24 ? (h < 36 ? '1 Tag' : `${(Math.round((h / 24) * 2) / 2).toLocaleString('de-DE')} Tage`) : `${h} Std.`}`}</span></div>
+          <div class="us">${o.seller}</div>
+          <div class="progress cap"><span class="${cond < 30 ? 'low' : ''}" style="width:${cond}%"></span><i style="left:${cap}%"></i></div>
+          <div class="ust"><span>Höchstwert <b class="${cap < 55 ? 'neg' : ''}">${cap} %</b></span><span>Zustand <b class="${cond < 30 ? 'neg' : ''}">${cond} %</b></span><span>Neu ${eur(o.newPrice)}</span></div>
+          ${
+            locked
+              ? `<div class="locknote">${ICONS.lock}<span>Ab Hafenstufe ${UNLOCK[o.tool]}</span></div>`
+              : `<button class="primary ubuy" data-ubuy="${o.id}" data-price="${o.price}" ${sim.money < o.price ? 'disabled' : ''}><span>Kaufen und hinstellen</span><small>${eur(o.price)} · ${off} % günstiger</small></button>`
+          }
+        </div>`;
+      })
+      .join('');
+    this.usedModal.querySelector('.body')!.innerHTML = `
+      <p class="sub">Einzelstücke von Händlern, jedes in seinem eigenen Zustand. Über den Tag kommen neue dazu, alte verschwinden. ${cycle} Der Höchstwert sinkt mit der Nutzung, eine Generalüberholung hebt ihn wieder.</p>
+      <div class="ulist">${rows || '<p class="sub">Gerade ist nichts im Angebot. Schau später wieder rein.</p>'}</div>`;
+  }
+
   private buildAchModal(): HTMLElement {
     this.achModal = el('div', 'modal hidden');
     this.achModal.innerHTML = `<div class="dialog deals"><div class="dhead"><h2>Erfolge</h2><button class="x" aria-label="Schließen">${ICONS.close}</button></div><div class="body"></div></div>`;
@@ -1485,12 +1557,19 @@ export class UI {
     const usable = this.game.tool === 'crane' || this.game.tool === 'lcrane' || this.game.tool === 'truck';
     this.usedPick.classList.toggle('hidden', !usable);
     if (usable) {
-      const price = this.game.sim.costOf(this.game.tool as BuildTool);
+      const sim = this.game.sim;
+      sim.ensureUsed();
+      const price = sim.costOf(this.game.tool as BuildTool);
+      const sel = sim.usedOffers.find((o) => o.id === sim.usedSel && o.tool === this.game.tool);
+      const n = sim.usedOffers.filter((o) => o.tool === this.game.tool).length;
       for (const b of this.usedPick.querySelectorAll<HTMLElement>('button')) {
         const u = b.dataset.used === '1';
-        b.classList.toggle('on', u === this.game.sim.used);
-        const um = this.game.sim.usedMarket;
-        b.textContent = u ? `Gebraucht (${um.label}) · ${eur(Math.round((price * um.factor) / 100) * 100)} · ${Math.round(um.lo * 100)}–${Math.round(um.hi * 100)} %` : `Neu · ${eur(price)}`;
+        b.classList.toggle('on', u === !!sel);
+        b.textContent = u
+          ? sel
+            ? `Gebraucht · ${Math.round(sel.cap * 100)} % Höchstwert · ${eur(sel.price)}`
+            : `Gebrauchtmarkt · ${n ? `${n} ${n === 1 ? 'Angebot' : 'Angebote'}` : 'gerade nichts passendes'}`
+          : `Neu · ${eur(price)}`;
       }
     }
     this.rotPick.firstElementChild!.innerHTML = `${ICONS.rotate} Drehen (R) · ${dimsOf(this.game.tool, this.game.sim.rot).join(' × ')} Felder`;
@@ -1600,10 +1679,10 @@ export class UI {
     }
     const chk = sim.canBuild(tool, gh.x, gh.y);
     const [w, h] = this.game.ghostSize();
-    const key = `${gh.x},${gh.y},${chk.ok},${chk.cost},${chk.reason},${sim.rot},${this.game.sim.used}`;
+    const key = `${gh.x},${gh.y},${chk.ok},${chk.cost},${chk.reason},${sim.rot},${sim.usedSel}`;
     if (key === this.ghostKey) return;
     this.ghostKey = key;
-    const label = tool === 'truck' || tool === 'crane' || tool === 'lcrane' ? `${this.game.sim.used ? 'Gebraucht' : 'Neu'} ` : '';
+    const label = tool === 'truck' || tool === 'crane' || tool === 'lcrane' ? `${sim.usedSel >= 0 ? 'Gebraucht' : 'Neu'} ` : '';
     this.ghostBar.querySelector('.ghosttext')!.innerHTML = chk.ok
       ? `<b>${w > 1 || h > 1 ? `${w}×${h} Felder` : 'Vorschau'}</b> · Ziehen zum Verschieben, nochmal tippen zum Bauen`
       : `<span class="neg">${chk.reason ?? 'Hier geht es nicht'}</span> · Ziehen zum Verschieben`;
@@ -1703,6 +1782,7 @@ export class UI {
     this.staffBadge.classList.toggle('hidden', !short);
     if (!this.staffModal.classList.contains('hidden')) this.renderStaff(false);
     if (!this.techModal.classList.contains('hidden')) this.renderTech(false);
+    if (!this.usedModal.classList.contains('hidden')) this.renderUsed(false);
     if (!this.ctlModal.classList.contains('hidden')) this.renderCtl(false);
     // Fortschritt live nachführen (Container zählen mit), etwa jede Sekunde
     if (this.progModal && !this.progModal.classList.contains('hidden') && sim.tickCount % 10 < 2 && !this.holding) this.showProgress();
@@ -1992,7 +2072,7 @@ export class UI {
         ${tile(fleet.noDriver, 'ohne Fahrer', fleet.noDriver ? 'bad' : '', 'problem')}
       </div>
       <div class="roleList">${byRole.map(([r, n]) => `<div>${dot(r)}<span>${ROLE_NAMES[r].name}</span><b>${n}</b></div>`).join('')}</div>
-      <div class="pm"><button class="secondary" data-fleet="auto">Alle auf Automatik</button></div>
+      <div class="pm"><button class="secondary" data-fleet="auto">Alle auf Automatik</button><button class="secondary" data-usedm="1">Gebrauchtmarkt · ${sim.usedOffers.length}</button></div>
       <div class="ffilter">
         <button data-ffilter="all" class="${this.fleetFilter === 'all' ? 'on' : ''}">Alle ${sim.trucks.length}</button>
         <button data-ffilter="idle" class="${this.fleetFilter === 'idle' ? 'on' : ''}">Frei ${sim.trucks.filter(idle).length}</button>

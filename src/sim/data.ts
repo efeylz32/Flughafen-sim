@@ -179,11 +179,22 @@ export const BUILD_GM: Partial<Record<BuildTool, number>> = {
 /** Umbau eines Krans auf das nächste Modell dauert so lange */
 export const UPGRADE_GM = 150;
 
-// Gebraucht kaufen und Höchstzustand (wie bei einem Akku)
-/** Gebrauchte Geräte kosten diesen Anteil vom Neupreis */
-export const USED_PRICE = 0.5;
-/** Höchstzustand gebrauchter Geräte: zwischen min und max */
-export const USED_CAP: [number, number] = [0.5, 0.75];
+// Gebrauchtmarkt und Höchstzustand (wie bei einem Akku)
+/**
+ * Wer auf dem Gebrauchtmarkt verkauft: Spanne für Höchstzustand (cap), zusätzlichen Verschleiß
+ * darüber hinaus (extra) und Preis als Anteil vom Neupreis. w = wie oft so ein Händler auftaucht.
+ */
+export const USED_SELLERS: { name: string; cap: [number, number]; extra: [number, number]; price: [number, number]; w: number; level?: number }[] = [
+  { name: 'Leasingrückläufer', cap: [0.74, 0.88], extra: [0.02, 0.12], price: [0.58, 0.72], w: 3 },
+  { name: 'Vom Nachbarhafen', cap: [0.6, 0.8], extra: [0.05, 0.25], price: [0.4, 0.56], w: 4 },
+  { name: 'Aus einer Konkursmasse', cap: [0.55, 0.85], extra: [0.15, 0.4], price: [0.26, 0.42], w: 2 },
+  { name: 'Bastlerware', cap: [0.32, 0.5], extra: [0.2, 0.45], price: [0.12, 0.24], w: 2 },
+  { name: 'Werksüberholt', cap: [0.86, 0.95], extra: [0, 0.04], price: [0.72, 0.84], w: 1, level: 3 },
+];
+/** So lange steht ein Angebot, in Spielstunden */
+export const USED_HOURS: [number, number] = [10, 60];
+/** Wahrscheinlichkeit pro Spielstunde, dass ein neues Angebot dazukommt (wenn Platz ist) */
+export const USED_NEW_PER_HOUR = 0.14;
 /** So viel Höchstzustand geht je Verschleiß verloren: 1,0 Verschleiß kostet 4 % */
 export const CAP_LOSS = 0.04;
 export const CAP_MIN = 0.3;

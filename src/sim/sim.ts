@@ -42,6 +42,9 @@ import {
   TUNNEL_MUL,
   BRIDGE_MUL,
   PARK_SLOTS,
+  USED_SELLERS,
+  USED_HOURS,
+  USED_NEW_PER_HOUR,
   EMPTY_IN_COST,
   RAIL_EMPTIES,
   TRAITS,
@@ -242,6 +245,8 @@ export interface Crane {
   cap: number;
   /** Was der Kran gekostet hat (für Erstattung) */
   paid: number;
+  /** Vom Gebrauchtmarkt: das Angebot, damit Rückgängig es zurückbringt */
+  fromOffer?: UsedOffer;
   x: number;
   y: number;
   /** Kaiposition (siehe quay.ts) */
@@ -345,6 +350,25 @@ export interface Job {
   n: number;
 }
 
+/** Ein Gerät auf dem Gebrauchtmarkt: jedes Angebot ist ein Einzelstück */
+export interface UsedOffer {
+  id: number;
+  tool: 'truck' | 'lcrane' | 'crane';
+  /** Fahrerloser Truck */
+  agv?: boolean;
+  /** Höchstzustand und Verschleiß beim Kauf */
+  cap: number;
+  wear: number;
+  price: number;
+  /** Neupreis zum Vergleich (beim Erscheinen) */
+  newPrice: number;
+  /** Spielminute, bis zu der das Angebot steht */
+  until: number;
+  seller: string;
+  /** Einordnung für die Anzeige */
+  deal: 'bargain' | 'fair' | 'pricey' | 'junk';
+}
+
 export interface Truck {
   id: number;
   /** Erst ab diesem Tick wieder nach Arbeit suchen */
@@ -359,6 +383,8 @@ export interface Truck {
   buildMax?: number;
   cap: number;
   paid: number;
+  /** Vom Gebrauchtmarkt: das Angebot, damit Rückgängig es zurückbringt */
+  fromOffer?: UsedOffer;
   tile: number;
   next: number;
   prog: number;
@@ -484,7 +510,8 @@ export type EventTag =
   | 'debt'
   | 'decision'
   | 'broken'
-  | 'built';
+  | 'built'
+  | 'used';
 
 export interface GameEvent {
   /** Text für eine Meldung. Fehlt er, ist das Ereignis nur für Ton und Effekte da. */
@@ -672,7 +699,9 @@ export interface SaveData {
   mood?: number;
   xp?: Record<Role, number>;
   cycle?: { kind: CycleKind; left: number };
-  usedMarket?: { factor: number; lo: number; hi: number; label: string };
+  usedOffers?: UsedOffer[];
+  nextUsedId?: number;
+  usedRng?: number;
   nextInspect?: number;
   sandbox?: boolean;
   traits?: TraitId[];
@@ -839,8 +868,13 @@ export class Sim {
   events: GameEvent[] = [];
   /** Wird bei jeder Bauänderung erhöht, damit der Renderer neu zeichnet. */
   version = 0;
-  /** Nächster Kran oder Truck wird gebraucht gekauft. Nur Bedienung, wird nicht gespeichert. */
-  used = false;
+  /** Gebrauchtangebot, das gerade platziert wird (−1: neu kaufen). Nur Bedienung, wird nicht gespeichert. */
+  usedSel = -1;
+  /** Gebrauchtmarkt: wechselnde Einzelstücke */
+  usedOffers: UsedOffer[] = [];
+  nextUsedId = 1;
+  /** Eigener Zufall für den Markt, damit er den übrigen Spielablauf nicht verschiebt */
+  usedRng = 1;
   private firstOffers = false;
   /** Gekaufte Verbesserungen: Stufe je Verbesserung */
   tech: Record<TechId, number> = { spreader: 0, scanner: 0, stack: 0, sales: 0, radio: 0, engine: 0, cool: 0, maint: 0, akkord: 0, diesel: 0 };
@@ -854,8 +888,6 @@ export class Sim {
   /** Erfahrung je Rolle 0..1: wächst mit der Zeit, neue Leute verdünnen sie */
   xp: Record<Role, number> = { driver: 0.4, crane: 0.4, gate: 0.4, mech: 0.4 };
   cycle: { kind: CycleKind; left: number } = { kind: 'normal', left: 6 };
-  /** Heutiges Gebrauchtangebot: Preisfaktor und Spanne des Höchstzustands */
-  usedMarket = { factor: 0.5, lo: 0.5, hi: 0.75, label: 'Durchschnittliche Ware' };
   nextInspect = 12;
   /** Sandbox: frei bauen, keine Frist, keine Pleite */
   sandbox = false;
@@ -922,6 +954,7 @@ export class Sim {
     readonly map: MapId = 'coast',
   ) {
     this.seed = seed >>> 0;
+    this.usedRng = (Math.imul(seed, 2654435761) ^ 0x5bd1e995) >>> 0;
     this.money = DIFFS[diff].money + MAPS[map].bonus;
     this.rivalRate = RIVAL_START[diff];
     this.lastDay = Math.floor(this.gm / MIN_PER_DAY);
@@ -1642,7 +1675,9 @@ export class Sim {
   // ───────────────────────── Bauen ─────────────────────────
 
   canBuild(tool: BuildTool, x: number, y: number): BuildCheck {
-    let cost = Math.round((this.costOf(tool) * (this.used && Sim.usable(tool) ? this.usedMarket.factor : 1)) / 100) * 100;
+    const sel = this.usedSel >= 0 && Sim.usable(tool) ? this.usedOffers.find((o) => o.id === this.usedSel) : undefined;
+    let cost = sel && sel.tool === tool ? sel.price : this.costOf(tool);
+    if (this.usedSel >= 0 && Sim.usable(tool) && !sel) return { ok: false, reason: 'Das Gebrauchtangebot ist nicht mehr da', cost };
     if (!this.inBounds(x, y)) return { ok: false, reason: 'Außerhalb der Karte', cost };
     if (this.level < UNLOCK[tool]) return { ok: false, reason: `Erst ab Stufe ${UNLOCK[tool]} (${LEVELS[UNLOCK[tool] - 1].name})`, cost };
     const i = this.idx(x, y);
@@ -1871,9 +1906,15 @@ export class Sim {
     const dev = tool === 'truck' ? this.trucks.find((t) => t.id === truckId) : tool === 'crane' || tool === 'lcrane' ? this.craneAt(x, y) : undefined;
     if (dev) {
       dev.paid = chk.cost;
-      if (this.used && Sim.usable(tool)) {
-        dev.cap = this.usedMarket.lo + this.rnd() * (this.usedMarket.hi - this.usedMarket.lo);
-        dev.wear = 1 - dev.cap + 0.05;
+      const off = this.usedSel >= 0 ? this.usedOffers.find((o) => o.id === this.usedSel && o.tool === tool) : undefined;
+      if (off) {
+        // Gebrauchtes Einzelstück: Zustand vom Angebot, danach ist es vom Markt weg
+        dev.cap = off.cap;
+        dev.wear = off.wear;
+        dev.fromOffer = { ...off };
+        if (off.agv && tool === 'truck') (dev as Truck).agv = true;
+        this.usedOffers = this.usedOffers.filter((o) => o !== off);
+        this.usedSel = -1;
       }
     }
     // Bauzeit: Gebäude und Geräte arbeiten erst, wenn sie fertig sind
@@ -2077,10 +2118,12 @@ export class Sim {
       const t = this.trucks.find((t) => t.id === a.truckId);
       if (!t) return fail('Der Truck existiert nicht mehr');
       this.takeTruck(t, 1, removed);
+      this.returnOffer(t.fromOffer);
     } else if (a.tool === 'crane' || a.tool === 'lcrane') {
       const c = this.craneAt(a.x, a.y);
       if (!c) return fail('Der Kran existiert nicht mehr');
       this.takeCrane(c, 1, removed);
+      this.returnOffer(c.fromOffer);
     } else if ((a.tool === 'road2' || a.tool === 'hwy') && a.prev) {
       const i = this.idx(a.x, a.y);
       if (this.kind[i] !== T.Road) return fail('Das Feld wurde inzwischen geändert');
@@ -2246,6 +2289,88 @@ export class Sim {
     const mul = (t.includes('rocky') ? 1.15 : 1) * (tool === 'dredge' && t.includes('deepwater') ? 0.4 : 1);
     return Math.round((COST[tool] * this.inflation * mul) / 100) * 100;
   }
+  // ───────────────────────── Gebrauchtmarkt ─────────────────────────
+
+  private mrnd(): number {
+    // mulberry32 mit eigenem Zustand
+    this.usedRng = (this.usedRng + 0x6d2b79f5) >>> 0;
+    let t = this.usedRng;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  /** Wie viele Angebote der Markt gerade höchstens hat: mehr mit der Hafenstufe, in der Krise mehr */
+  get usedMax(): number {
+    return Math.min(7, 3 + Math.floor(this.level / 3)) + (this.cycle.kind === 'crisis' ? 1 : this.cycle.kind === 'boom' ? -1 : 0);
+  }
+  /** Ein neues Einzelstück auf den Markt bringen */
+  private makeUsedOffer(): UsedOffer | null {
+    const r = () => this.mrnd();
+    const lerp = (a: [number, number]) => a[0] + r() * (a[1] - a[0]);
+    const tools = (['truck', 'truck', 'truck', 'lcrane', 'crane', 'crane'] as const).filter((t) => this.level >= UNLOCK[t]);
+    if (!tools.length) return null;
+    const tool = tools[Math.floor(r() * tools.length)];
+    const agv = tool === 'truck' && this.level >= UPGRADE.truck.level && r() < 0.3;
+    const sellers = USED_SELLERS.filter((x) => this.level >= (x.level ?? 1));
+    let w = r() * sellers.reduce((n, x) => n + x.w, 0);
+    const sel = sellers.find((x) => (w -= x.w) < 0) ?? sellers[0];
+    const cap = Math.round(lerp(sel.cap) * 100) / 100;
+    const wear = Math.min(0.97, Math.round((1 - cap + lerp(sel.extra)) * 100) / 100);
+    const newPrice = this.costOf(tool) + (agv ? Math.round(UPGRADE.truck.cost * this.inflation) : 0);
+    // Nie teurer als neu: Auch im Boom bleibt Gebraucht billiger
+    const f = Math.min(0.9, lerp(sel.price) * CYCLES[this.cycle.kind].used * (0.92 + r() * 0.16));
+    const price = Math.max(500, Math.round((newPrice * f) / 500) * 500);
+    // Fairer Preis: wie viel Leben im Gerät steckt (Höchstzustand und aktueller Zustand)
+    const fair = 0.08 + 0.72 * Math.pow(cap, 1.6) * (1 - 0.5 * (wear - (1 - cap)));
+    const deal: UsedOffer['deal'] = cap < 0.52 ? 'junk' : f < fair * 0.8 ? 'bargain' : f > fair * 1.18 ? 'pricey' : 'fair';
+    const until = this.gm + Math.round(lerp(USED_HOURS)) * 60;
+    return { id: this.nextUsedId++, tool, agv: agv || undefined, cap, wear, price, newPrice, until, seller: sel.name, deal };
+  }
+  /** Abgelaufenes entfernen und bei Bedarf auffüllen. hourly: einzelne neue Stücke über den Tag verteilt. */
+  private refreshUsed(fill: boolean) {
+    this.usedOffers = this.usedOffers.filter((o) => o.until > this.gm);
+    if (this.usedSel >= 0 && !this.usedOffers.some((o) => o.id === this.usedSel)) this.usedSel = -1;
+    const max = this.usedMax;
+    const min = Math.max(2, max - 2);
+    while (fill && this.usedOffers.length < min) {
+      const o = this.makeUsedOffer();
+      if (!o) break;
+      this.usedOffers.push(o);
+    }
+    if (!fill && this.usedOffers.length < max && this.mrnd() < USED_NEW_PER_HOUR) {
+      const o = this.makeUsedOffer();
+      if (o) {
+        this.usedOffers.push(o);
+        if (o.deal === 'bargain' && this.level >= 2)
+          this.emit(`Gebrauchtmarkt: Schnäppchen, ${Sim.usedName(o)} mit ${Math.round(o.cap * 100)} % Höchstwert für ${eur(o.price)}`, 'good', { tag: 'used' });
+      }
+    }
+  }
+  /** Beim ersten Öffnen gleich ein paar Stücke zeigen, nicht erst nach einer Spielstunde */
+  ensureUsed() {
+    if (this.nextUsedId === 1) this.refreshUsed(true);
+  }
+  /** Ein rückgängig gemachter Kauf landet wieder auf dem Markt (wenn er noch nicht abgelaufen wäre) */
+  private returnOffer(o?: UsedOffer) {
+    if (o && o.until > this.gm && !this.usedOffers.some((x) => x.id === o.id)) this.usedOffers.push({ ...o });
+  }
+  static usedName(o: Pick<UsedOffer, 'tool' | 'agv'>): string {
+    return o.tool === 'truck' ? (o.agv ? 'Fahrerloser Truck' : 'Truck') : o.tool === 'lcrane' ? 'Leichtkran' : 'Mobilkran';
+  }
+  /** Gebrauchtes Einzelstück zum Platzieren auswählen (−1: wieder neu kaufen) */
+  selectUsed(id: number): BuildCheck {
+    if (id < 0) {
+      this.usedSel = -1;
+      return { ok: true, cost: 0 };
+    }
+    const o = this.usedOffers.find((x) => x.id === id);
+    if (!o) return { ok: false, reason: 'Das Angebot ist nicht mehr da', cost: 0 };
+    if (this.level < UNLOCK[o.tool]) return { ok: false, reason: `Erst ab Stufe ${UNLOCK[o.tool]}`, cost: o.price };
+    if (this.money < o.price) return { ok: false, reason: 'Zu wenig Geld', cost: o.price };
+    this.usedSel = id;
+    return { ok: true, cost: o.price };
+  }
+
   /** Gibt es dieses Werkzeug auch gebraucht? */
   static usable(tool: string): boolean {
     return tool === 'crane' || tool === 'lcrane' || tool === 'truck';
@@ -3501,7 +3626,7 @@ export class Sim {
       'money', 'loan', 'rep', 'gm', 'lastDay', 'level', 'handled', 'mission', 'exportsLoaded', 'reefersHandled', 'trainsDone', 'bigShipsDone',
       'megaDone', 'premiumDone', 'foodDone', 'customsDone', 'ordersDone', 'insuredTotal', 'shipsDone', 'shipsOnTime', 'containersDone', 'contractsDone',
       'lostToRival', 'rivalRate', 'spec', 'nightShift', 'wagePolicy', 'mood', 'insurance', 'status', 'traits', 'tech', 'xp', 'trainLeft',
-      'market', 'marketPrev', 'cycle', 'world', 'usedMarket', 'rules', 'projects', 'projBuild', 'wageBoost', 'strikeLeft', 'today', 'history', 'debtDays',
+      'market', 'marketPrev', 'cycle', 'world', 'usedOffers', 'nextUsedId', 'usedRng', 'rules', 'projects', 'projBuild', 'wageBoost', 'strikeLeft', 'today', 'history', 'debtDays',
       'nextInspect', 'sandbox', 'nextId',
     ] as const;
     const src = this as unknown as Record<string, unknown>;
@@ -3753,6 +3878,8 @@ export class Sim {
 
   /** Stündlich: Strom abrechnen, Messwerte sammeln, Regeln ausführen */
   private hourTick() {
+    // Gebrauchtmarkt: Händler bringen über den Tag neue Stücke, alte laufen ab
+    this.refreshUsed(this.nextUsedId === 1);
     // Großprojekt im Bau
     if (this.projBuild) {
       this.projBuild.left -= 60;
@@ -5206,12 +5333,8 @@ export class Sim {
       const extra = id === 'embargo' ? ` (${PRODUCTS[this.world.product!].name})` : '';
       this.emit(`Weltlage: ${WORLD[id].name}${extra}. ${WORLD[id].text}. Dauer ${this.world.left} Tage.`, id === 'portstrike' || id === 'newroute' ? 'good' : 'bad');
     }
-    // Gebrauchtmarkt: täglich wechselnde Ware
-    const q = this.rnd();
-    const cm = CYCLES[this.cycle.kind].used;
-    if (q < 0.2) this.usedMarket = { factor: Math.round(0.4 * cm * 100) / 100, lo: 0.6, hi: 0.8, label: 'Schnäppchen' };
-    else if (q < 0.45) this.usedMarket = { factor: Math.round(0.35 * cm * 100) / 100, lo: 0.3, hi: 0.5, label: 'Schrott' };
-    else this.usedMarket = { factor: Math.round(0.5 * cm * 100) / 100, lo: 0.5, hi: 0.75, label: 'Durchschnitt' };
+    // Gebrauchtmarkt: Abgelaufenes raus, mindestens ein paar Stücke da
+    this.refreshUsed(true);
     // Lagergebühr: Spediteure zahlen für Container, die im Lager stehen
     const stored = this.yardStock + this.reeferStock;
     if (stored > 0) {
@@ -5358,7 +5481,9 @@ export class Sim {
       mood: this.mood,
       xp: this.xp,
       cycle: this.cycle,
-      usedMarket: this.usedMarket,
+      usedOffers: this.usedOffers,
+      nextUsedId: this.nextUsedId,
+      usedRng: this.usedRng,
       nextInspect: this.nextInspect,
       sandbox: this.sandbox,
       traits: this.traits,
@@ -5500,7 +5625,9 @@ export class Sim {
     s.mood = d.mood ?? 0.6;
     if (d.xp) s.xp = { ...s.xp, ...d.xp };
     if (d.cycle) s.cycle = d.cycle;
-    if (d.usedMarket) s.usedMarket = d.usedMarket;
+    if (d.usedOffers) s.usedOffers = d.usedOffers.map((o) => ({ ...o }));
+    if (d.nextUsedId) s.nextUsedId = d.nextUsedId;
+    if (d.usedRng) s.usedRng = d.usedRng;
     s.nextInspect = d.nextInspect ?? 12;
     s.sandbox = d.sandbox ?? false;
     s.traits = d.traits ?? [];
