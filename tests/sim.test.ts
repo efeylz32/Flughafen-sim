@@ -535,6 +535,41 @@ describe('Verarbeitung und Aufgaben', () => {
   });
 });
 
+describe('Tourenplanung', () => {
+  it('Rückladung: feste Aufgaben fahren mit der Leitstelle weniger leer und schlagen mehr um', () => {
+    const port = (radio: number) => {
+      const sim = new Sim(11);
+      sim.level = 6;
+      sim.money = 5_000_000;
+      for (let x = 6; x < 12; x++) sim.build('kai', x, k);
+      sim.build('crane', 7, k);
+      sim.build('crane', 9, k);
+      for (let x = 4; x <= GRID_W - 1; x++) sim.build('road', x, k + 1);
+      for (let y = k + 2; y <= k + 4; y++) for (let x = 28; x <= 33; x++) sim.build('yard', x, y);
+      sim.build('gate', 14, k + 2);
+      sim.build('gate', 16, k + 2);
+      for (let i = 0; i < 4; i++) sim.build('truck', 6 + i, k + 1);
+      sim.updateMissions(true);
+      sim.mission = Math.max(sim.mission, 6);
+      sim.finishAll();
+      sim.nextShipIn = 0;
+      sim.tech.radio = radio;
+      sim.trucks.forEach((t, i) => sim.setRole(t.id, (['crane', 'out', 'export', 'crane'] as TruckRole[])[i]));
+      for (let i = 0; i < 48 * 150; i++) {
+        sim.tick();
+        if (sim.pending) sim.resolveDecision(0);
+      }
+      return sim;
+    };
+    const without = port(0);
+    const withPlan = port(2);
+    expect(withPlan.emptyShare!).toBeLessThan(without.emptyShare! - 0.08);
+    expect(withPlan.containersDone).toBeGreaterThan(without.containersDone);
+    // Rollen bleiben, nur einzelne Fahrten laufen als Aushilfe
+    expect(withPlan.trucks.map((t) => t.role)).toEqual(['crane', 'out', 'export', 'crane']);
+  });
+});
+
 describe('Ziel, Pleite, Kredit', () => {
   it('Kredit bis zur Grenze der Stufe, Zinsen am Tagesabschluss, Tilgen', () => {
     const sim = new Sim(1);

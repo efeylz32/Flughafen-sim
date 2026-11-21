@@ -2046,7 +2046,7 @@ export class UI {
   }
   private fleetKey(): string {
     const sim = this.game.sim;
-    return `${this.fleetFilter}|${this.fleetOpen}|${sim.level}|${Math.floor(sim.money / 10000)}|${sim.trucks
+    return `${this.fleetFilter}|${this.fleetOpen}|${sim.level}|${Math.floor(sim.money / 10000)}|${Math.round((sim.emptyShare ?? -1) * 100)}|${sim.tech.radio}|${sim.trucks
       .map((t) => `${t.id}${t.role}${t.agv ? 1 : 0}${Math.round(t.wear * 20)}${Math.round(t.cap * 20)}${this.truckState(t)[0]}${t.job ? `${t.job.stage}${t.job.cargo}` : ''}${t.load}`)
       .join(',')}`;
   }
@@ -2073,7 +2073,7 @@ export class UI {
           const up = sim.upgradeInfo('truck', t.id);
           const over = sim.canOverhaul('truck', t.id);
           more = `<div class="fmore">
-            <div class="fstats"><span>Zustand <b class="${t.wear > 0.75 ? 'neg' : ''}">${cond} %</b></span><span>Höchstwert <b class="${cap < 60 ? 'neg' : ''}">${cap} %</b></span><span>Geladen <b>${t.load}</b></span>${t.zone ? `<span>Zone <b>${t.zone}</b></span>` : ''}</div>
+            <div class="fstats"><span>Zustand <b class="${t.wear > 0.75 ? 'neg' : ''}">${cond} %</b></span><span>Höchstwert <b class="${cap < 60 ? 'neg' : ''}">${cap} %</b></span><span>Geladen <b>${t.load}</b></span>${(t.kmLoaded ?? 0) + (t.kmEmpty ?? 0) > 5 ? `<span>Leerfahrten <b>${Math.round(((t.kmEmpty ?? 0) / ((t.kmLoaded ?? 0) + (t.kmEmpty ?? 0))) * 100)} %</b></span>` : ''}${t.zone ? `<span>Zone <b>${t.zone}</b></span>` : ''}</div>
             <div class="progress cap"><span class="${t.wear > 0.75 ? 'low' : ''}" style="width:${cond}%"></span><i style="left:${cap}%"></i></div>
             ${cap < 60 ? '<div class="meta neg">Alt: fällt öfter aus. Überholen oder tauschen.</div>' : ''}
             <div class="rolelabel">Aufgabe</div>
@@ -2105,6 +2105,13 @@ export class UI {
         ${tile(fleet.noDriver, 'ohne Fahrer', fleet.noDriver ? 'bad' : '', 'problem')}
       </div>
       <div class="roleList">${byRole.map(([r, n]) => `<div>${dot(r)}<span>${ROLE_NAMES[r].name}</span><b>${n}</b></div>`).join('')}</div>
+      ${(() => {
+        const es = sim.emptyShare;
+        const lv = sim.tech.radio;
+        return es === null
+          ? ''
+          : `<div class="emptyline ${es > 0.4 ? 'bad' : es < 0.25 ? 'good' : ''}"><div><span>Leerfahrten</span><b>${Math.round(es * 100)} %</b></div><small>So viel der Strecke fahren deine Trucks ohne Ladung (letzte Stunden). ${lv < 3 ? `Weniger mit „Leitstelle und Tourenplanung“ im Ausbau (Stufe ${lv} von 3).` : 'Die Tourenplanung ist voll ausgebaut. Kurze Wege im Hafen helfen weiter.'}</small></div>`;
+      })()}
       <div class="pm"><button class="secondary" data-fleet="auto">Alle auf Automatik</button><button class="secondary" data-usedm="1">Gebrauchtmarkt · ${sim.usedOffers.length}</button></div>
       <div class="ffilter">
         <button data-ffilter="all" class="${this.fleetFilter === 'all' ? 'on' : ''}">Alle ${sim.trucks.length}</button>
@@ -2264,7 +2271,9 @@ export class UI {
             : sim.level < t.level[n]
               ? lock(t.level[n])
               : `<button class="primary tbuy" data-tech="${id}" ${chk.ok ? '' : 'disabled'}><span>${max > 1 ? `Stufe ${n + 1}` : 'Kaufen'}</span><small>${short(sim.techCost(id))}</small></button>`;
-        return `<div class="trow ${n >= max ? 'max' : ''}"><div class="ti"><div class="tn"><b>${t.name}</b>${dots}</div><small class="tper">${max > 1 ? `Pro Stufe ${t.per}` : t.per}</small><small>${t.text}</small></div><div class="ta">${act}</div></div>`;
+        // Verbesserungen mit eigener Wirkung je Stufe: die nächste Stufe beschreiben
+        const per = t.steps ? (n < max ? `Stufe ${n + 1}: ${t.steps[n]}` : 'Alle Stufen aktiv.') : max > 1 ? `Pro Stufe ${t.per}` : t.per;
+        return `<div class="trow ${n >= max ? 'max' : ''}"><div class="ti"><div class="tn"><b>${t.name}</b>${dots}</div><small class="tper">${per}</small><small>${t.text}</small></div><div class="ta">${act}</div></div>`;
       };
       const main = TECH_IDS.filter((id) => id !== 'akkord' && id !== 'diesel');
       const bought = main.reduce((n, id) => n + Math.min(sim.tech[id], TECH[id].cost.length), 0);

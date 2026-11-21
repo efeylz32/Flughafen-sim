@@ -142,12 +142,23 @@ export const movesPerHour = (m: CraneModel) => Math.round(60 / CRANE_MODELS[m].m
 
 /** Kleine Verbesserungen in Stufen. Jede Stufe kostet mehr und braucht eine Mindest-Hafenstufe. */
 export type TechId = 'spreader' | 'scanner' | 'stack' | 'sales' | 'radio' | 'engine' | 'cool' | 'maint' | 'akkord' | 'diesel';
-export const TECH: Record<TechId, { name: string; text: string; per: string; cost: number[]; level: number[] }> = {
+export const TECH: Record<TechId, { name: string; text: string; per: string; steps?: string[]; cost: number[]; level: number[] }> = {
   spreader: { name: 'Twin-Spreader', text: 'Kräne laden und löschen schneller.', per: '+10 % Kranmoves', cost: [30_000, 60_000, 120_000, 400_000, 2_500_000], level: [1, 2, 4, 6, 9] },
   scanner: { name: 'Gate-Scanner', text: 'Gates fertigen Container schneller ab.', per: '+20 % Gate-Tempo', cost: [25_000, 50_000, 100_000, 900_000, 2_200_000], level: [1, 2, 4, 7, 10] },
   stack: { name: 'Stapeltechnik', text: 'Höher stapeln: mehr Container pro Lagerfeld.', per: '+1 Container pro Feld', cost: [40_000, 90_000, 900_000, 2_400_000], level: [2, 4, 7, 10] },
   sales: { name: 'Vertrieb', text: 'Bessere Konditionen bei Spediteuren.', per: '+5 % auf Containergebühren', cost: [50_000, 100_000, 200_000, 1_400_000, 3_500_000], level: [2, 3, 5, 8, 11] },
-  radio: { name: 'Leitstelle', text: 'Digitaler Funk: Automatik-Trucks bekommen schneller ihren nächsten Auftrag.', per: '−30 % Funkzeit', cost: [20_000, 50_000, 500_000], level: [1, 3, 6] },
+  radio: {
+    name: 'Leitstelle und Tourenplanung',
+    text: 'Trucks werden schlauer: weniger Leerfahrten, weniger Warten auf den nächsten Auftrag.',
+    per: '−30 % Funkzeit',
+    steps: [
+      'Fahrten werden verkettet: die nächste Fahrt startet möglichst nah. −30 % Funkzeit.',
+      'Rückladung: Feste Aufgaben nehmen eine passende fremde Fahrt mit, statt leer zurückzufahren.',
+      'Vorausplanung: Der nächste Auftrag steht schon während der Fahrt fest, keine Funkzeit mehr.',
+    ],
+    cost: [20_000, 50_000, 500_000],
+    level: [1, 3, 6],
+  },
   engine: { name: 'Motoren', text: 'Stärkere Zugmaschinen.', per: '+8 % Truck-Tempo', cost: [30_000, 70_000, 140_000, 900_000, 2_400_000], level: [1, 2, 4, 7, 10] },
   cool: { name: 'Kühltechnik', text: 'Bessere Aggregate an den Kühlplätzen.', per: '+30 % Haltbarkeit', cost: [30_000, 60_000, 1_200_000], level: [4, 5, 8] },
   akkord: { name: 'Akkord-Schichten', text: 'Kräne arbeiten schneller, aber die Belegschaft wird öfter krank, die Stimmung sinkt und überlastete Kräne haben eher Unfälle.', per: '+20 % Kranmoves, doppelter Krankenstand', cost: [60_000], level: [3] },
@@ -595,6 +606,8 @@ export const ROAD_LANES = [1, 2, 2];
 export const ROAD_RUN = [0, 6, 20];
 /** Entfernungen werden in Zehnteln eines Feldes gerechnet, damit schnelle Straßen Bruchteile kosten */
 export const DIST_UNIT = 10;
+/** Tourenplanung: so viel stärker zählt der Anfahrtsweg zur nächsten Fahrt (verkettet Fahrten) */
+export const TOUR_CHAIN = 0.25;
 /** Kran-Zugänge: Jeder Truck, der schon zu einem Zugang will, macht ihn um so viel „weiter“ (Zehntel Feld) */
 export const CRANE_ACC_BUSY = 25;
 /** Stau in der Wegsuche: ab dieser Wartezeit auf einem Feld (Spielminuten, abklingend) gilt es als länger */
@@ -690,7 +703,7 @@ export type ProjectId = 'bahnhof' | 'cruise' | 'control' | 'canal' | 'logistics'
 export const PROJECTS: Record<ProjectId, { name: string; text: string; cost: number; level: number; days: number }> = {
   bahnhof: { name: 'Hafenbahnhof', text: 'Züge nehmen 50 % mehr Container mit und kommen öfter.', cost: 3_000_000, level: 5, days: 3 },
   cruise: { name: 'Kreuzfahrt-Terminal', text: 'Touristen bringen jeden Tag 40.000 € und etwas Ruf.', cost: 5_000_000, level: 6, days: 4 },
-  control: { name: 'Automatische Leitzentrale', text: 'Trucks bekommen ihren nächsten Auftrag sofort und fahren 10 % schneller.', cost: 8_000_000, level: 7, days: 5 },
+  control: { name: 'Automatische Leitzentrale', text: 'Trucks bekommen ihren nächsten Auftrag sofort, fahren 10 % schneller und finden Rückladungen auch weiter weg.', cost: 8_000_000, level: 7, days: 5 },
   canal: { name: 'Tiefwasserkanal', text: 'Alle Liegeplätze gelten als ausgebaggert. Große Schiffe brauchen nur noch genug Kai.', cost: 12_000_000, level: 8, days: 6 },
   logistics: { name: 'Logistikpark', text: 'Export bringt 25 % mehr, Lieferaufträge zahlen 30 % mehr.', cost: 15_000_000, level: 9, days: 6 },
   tower: { name: 'Hafen-Wahrzeichen', text: 'Ein Turm, den jeder kennt: Ruf steigt täglich, Gebühren +5 %.', cost: 25_000_000, level: 10, days: 8 },

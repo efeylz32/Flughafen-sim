@@ -42,6 +42,7 @@ import {
   TUNNEL_MUL,
   BRIDGE_MUL,
   PARK_SLOTS,
+  TOUR_CHAIN,
   CRANE_ACC_BUSY,
   JAM_PEN_FROM,
   JAM_PEN_K,
@@ -424,6 +425,9 @@ export interface UsedOffer {
 }
 
 export interface Truck {
+  /** Gefahrene Felder mit und ohne Ladung (klingt stündlich ab, zeigt die letzten Stunden) */
+  kmLoaded?: number;
+  kmEmpty?: number;
   /** Angefangene Strecke, die beim nächsten Feld weitergefahren wird (solange er nicht anhält) */
   carry?: number;
   id: number;
@@ -1867,6 +1871,16 @@ export class Sim {
   }
 
   /** Gibt es einen Lotsenturm? */
+  /** Anteil der Strecke ohne Ladung (0..1) über die ganze Flotte, null ohne Daten */
+  get emptyShare(): number | null {
+    let l = 0;
+    let e = 0;
+    for (const t of this.trucks) {
+      l += t.kmLoaded ?? 0;
+      e += t.kmEmpty ?? 0;
+    }
+    return l + e > 20 ? e / (l + e) : null;
+  }
   get hasTower(): boolean {
     if (this.towerCache.v === this.version) return this.towerCache.has;
     let has = false;
@@ -3055,18 +3069,28 @@ export class Sim {
     const fill = cap ? this.yardStock / cap : 0;
     // Voller Stapelplatz: Wer für seine feste Aufgabe nichts findet, hilft beim Räumen (Lager zu Gate oder Bahn)
     const help = t.role !== 'auto' && fill > YARD_HELP;
+    // Tourenplanung (Leitstelle): ab Stufe 1 zählt der Anfahrtsweg stärker (Fahrten werden verkettet),
+    // ab Stufe 2 nehmen feste Aufgaben eine fremde Fahrt mit, statt leer zu fahren
+    const plan = this.tech.radio;
+    const D0 = plan >= 1 ? this.distFrom(t.tile) : null;
+    const reach = (this.hasProject('control') ? 9 : 5) * DIST_UNIT;
+    const backs: { job: Job; score: number }[] = [];
     // Jede Fahrt gehört zu einer Aufgabe. Trucks mit fester Aufgabe nehmen nur die passenden.
     const offer = (tag: string, weight: number, dist: number, job: Job) => {
       if (job.n <= 0) return;
-      const score = weight / (1 + dist / (15 * DIST_UNIT));
+      const approach = D0 ? Math.max(0, D0[job.tgt[0]]) : 0;
+      const score = weight / (1 + (dist + approach * TOUR_CHAIN * Math.min(1, plan)) / (15 * DIST_UNIT));
       if (t.role === 'auto' || tag.includes(t.role)) {
         if (score > bestScore) {
           bestScore = score;
           best = job;
         }
-      } else if (help && job.srcKind === 'store' && (job.dstKind === 'gate' || job.dstKind === 'rail') && job.cargo !== 'empty' && score > helpScore) {
-        helpScore = score;
-        helpBest = job;
+      } else {
+        if (help && job.srcKind === 'store' && (job.dstKind === 'gate' || job.dstKind === 'rail') && job.cargo !== 'empty' && score > helpScore) {
+          helpScore = score;
+          helpBest = job;
+        }
+        if (plan >= 2 && D0 && D0[job.tgt[0]] >= 0 && D0[job.tgt[0]] <= reach) backs.push({ job, score });
       }
     };
     const press = fill > 0.8 ? 1.4 : 1;
@@ -3342,6 +3366,24 @@ export class Sim {
     }
 
     let job = best as Job | null;
+    // Rückladung: Eine fremde Fahrt, die hier startet und nahe am Start der eigenen nächsten Fahrt endet,
+    // ersetzt die Leerfahrt dorthin. Ohne eigene Fahrt: lieber eine nahe fremde Fahrt als herumstehen.
+    if (backs.length) {
+      backs.sort((a, b) => b.score - a.score);
+      const own = job;
+      const pickB = own
+        ? backs.find((b) => {
+            const d = this.distFrom(b.job.tgt[1])[own.tgt[0]];
+            return d >= 0 && d <= reach;
+          })
+        : !helpBest
+          ? backs[0]
+          : undefined;
+      if (pickB) {
+        job = pickB.job;
+        job.help = true;
+      }
+    }
     if (!job && helpBest) {
       job = helpBest as Job;
       job.help = true;
@@ -3585,6 +3627,10 @@ export class Sim {
       t.dir = ny > cy ? 1 : ny < cy ? 3 : nx > cx ? 0 : 2;
       t.tile = t.next;
       t.next = -1;
+      if (t.job) {
+        if (t.load > 0) t.kmLoaded = (t.kmLoaded ?? 0) + 1;
+        else t.kmEmpty = (t.kmEmpty ?? 0) + 1;
+      }
       t.carry = Math.min(0.99, t.prog - 1);
       t.prog = 0;
       t.fx = nx;
@@ -4298,6 +4344,10 @@ export class Sim {
 
   /** Stündlich: Strom abrechnen, Messwerte sammeln, Regeln ausführen */
   private hourTick() {
+    for (const t of this.trucks) {
+      if (t.kmLoaded) t.kmLoaded *= 0.94;
+      if (t.kmEmpty) t.kmEmpty *= 0.94;
+    }
     // Gebrauchtmarkt: Händler bringen über den Tag neue Stücke, alte laufen ab
     this.refreshUsed(this.nextUsedId === 1);
     // Großprojekt im Bau
@@ -5036,7 +5086,8 @@ export class Sim {
         t.idleFor = 0;
         // Die Leitstelle braucht Funkzeit. Trucks mit fester Aufgabe fahren sofort los.
         if (t.role === 'auto') {
-          t.wait = this.hasProject('control') ? 0 : DISPATCH_GM * (1 - 0.3 * this.tech.radio);
+          // Ab Stufe 3 der Leitstelle steht der nächste Auftrag schon während der Fahrt fest
+          t.wait = this.hasProject('control') || this.tech.radio >= 3 ? 0 : DISPATCH_GM * (1 - 0.3 * this.tech.radio);
           continue;
         }
       }
