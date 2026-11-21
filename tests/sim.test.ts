@@ -1692,6 +1692,27 @@ describe('Gleise ins Land und Außenanbindung', () => {
     expect(sim.hinterlandMul(g)).toBeGreaterThan(1);
   });
 
+  it('Ausfahrten ins Hinterland: nur wo eine Straße auf den Rand zuläuft, nicht an jedem Feld entlang des Rands', () => {
+    const sim = new Sim();
+    const yb = GRID_H - 1;
+    // Straße am unteren Rand entlang, mit einem Zubringer von oben
+    for (let x = 2; x < 14; x++) sim.build('road', x, yb);
+    for (let y = yb - 4; y < yb; y++) sim.build('road', 8, y);
+    expect(sim.hinterlandExits()).toEqual([sim.idx(8, yb)]);
+    // Eine zweite Straße senkrecht an den Rand: eine Ausfahrt mehr
+    for (let y = yb - 4; y <= yb; y++) sim.build('road', 20, y);
+    expect(sim.hinterlandExits().length).toBe(2);
+    // Linker Rand: entlang plus ein Zubringer von rechts
+    for (let y = k + 4; y < k + 12; y++) sim.build('road', 0, y);
+    for (let x = 1; x < 5; x++) sim.build('road', x, k + 7);
+    expect(sim.hinterlandExits().filter((i) => i % GRID_W === 0 && ((i / GRID_W) | 0) < yb)).toEqual([sim.idx(0, k + 7)]);
+    // Ein Gate, das über den Zubringer am Rand hängt, bekommt den Bonus weiter
+    for (let x = 8; x <= 12; x++) sim.build('road', x, k + 1);
+    for (let y = k + 2; y < yb - 4; y++) sim.build('road', 8, y);
+    expect(sim.build('gate', 10, k + 2).ok).toBe(true);
+    expect(sim.hinterlandMul(sim.gates[0])).toBeGreaterThan(1);
+  });
+
   it('die Befüllhalle bekommt Leercontainer von außen über das Gate', () => {
     const sim = basicPort(4, 1);
     sim.level = 4;

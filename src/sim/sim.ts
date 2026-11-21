@@ -1381,18 +1381,28 @@ export class Sim {
     return Math.max(0, Math.floor(this.emptyCapacity * 0.5) - this.emptyStock - incoming);
   }
   /** Straßenfelder am unteren oder linken Kartenrand: Anschluss ans Hinterland */
+  /**
+   * Ausfahrten ins Hinterland: Straßen am unteren oder linken Rand, die auf den Rand zulaufen.
+   * Eine Straße, die am Rand entlangführt, ist nicht an jedem Feld eine Ausfahrt, sondern nur dort,
+   * wo eine Straße von innen dazukommt (oder wo sie allein am Rand endet).
+   */
   hinterlandExits(): number[] {
+    if (this.exitCache.v === this.version) return this.exitCache.list;
+    const road = (x: number, y: number) => this.inBounds(x, y) && this.kind[this.idx(x, y)] === T.Road;
     const out: number[] = [];
+    const yb = GRID_H - 1;
     for (let x = 0; x < GRID_W; x++) {
-      const i = this.idx(x, GRID_H - 1);
-      if (this.kind[i] === T.Road) out.push(i);
+      if (!road(x, yb)) continue;
+      if (road(x, yb - 1) || (!road(x - 1, yb) && !road(x + 1, yb))) out.push(this.idx(x, yb));
     }
-    for (let y = COAST_ROW; y < GRID_H - 1; y++) {
-      const i = this.idx(0, y);
-      if (this.kind[i] === T.Road) out.push(i);
+    for (let y = COAST_ROW; y < yb; y++) {
+      if (!road(0, y)) continue;
+      if (road(1, y) || (!road(0, y - 1) && !road(0, y + 1))) out.push(this.idx(0, y));
     }
+    this.exitCache = { v: this.version, list: out };
     return out;
   }
+  private exitCache: { v: number; list: number[] } = { v: -1, list: [] };
   private hlCache: { v: number; m: Map<number, number> } = { v: -1, m: new Map() };
   /** Tempo eines Gates: mit Straße ins Hinterland +30 %, mit Autobahn-Anschluss +50 % */
   hinterlandMul(g: Gate): number {

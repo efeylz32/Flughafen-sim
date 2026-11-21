@@ -611,6 +611,7 @@ export class Renderer {
       }
     }
 
+    const exits = new Set(sim.hinterlandExits());
     for (let y = COAST_ROW; y < GRID_H; y++) {
       for (let x = 0; x < GRID_W; x++) {
         const k = sim.kind[y * GRID_W + x];
@@ -680,9 +681,11 @@ export class Renderer {
               const hh = hash(x * 7 + i, y * 13);
               g.rect(px + 2 + (hh % 27), py + 2 + ((hh >>> 6) % 27), 2, 1.2).fill(C.roadSpeck);
             }
+            // Ausfahrt ins Hinterland: die Straße geht über den Rand weiter, ohne Randlinie quer über die Fahrbahn
+            const exit = exits.has(y * GRID_W + x);
             const n = same(0, -1);
-            const s = same(0, 1);
-            const w = same(-1, 0);
+            const s = same(0, 1) || (exit && y === GRID_H - 1);
+            const w = same(-1, 0) || (exit && x === 0 && y < GRID_H - 1);
             const e = same(1, 0);
             const cnt = +n + +s + +w + +e;
             const ow = sim.oneway[y * GRID_W + x];
@@ -1054,16 +1057,46 @@ export class Renderer {
       }
     }
     // Hinterland: Straßen am unteren oder linken Rand führen aus der Karte hinaus
-    for (const e of sim.hinterlandExits()) {
+    const exitSet = new Set(sim.hinterlandExits());
+    for (const e of exitSet) {
       const ex = (e % GRID_W) * TILE;
       const ey = ((e / GRID_W) | 0) * TILE;
       const bottom = ((e / GRID_W) | 0) === GRID_H - 1;
+      const tier = sim.roadTier[e];
+      const edge = { color: C.roadEdge, alpha: 0.85 };
+      // Nachbar-Ausfahrten: dann keine Randlinie dazwischen, es ist eine breitere Straße
+      const before = bottom ? exitSet.has(e - 1) && e % GRID_W > 0 : exitSet.has(e - GRID_W);
+      const after = bottom ? exitSet.has(e + 1) && (e + 1) % GRID_W > 0 : exitSet.has(e + GRID_W);
       if (bottom) {
-        g.rect(ex, ey + TILE, TILE, DECOR).fill(C.road);
-        for (let yy = ey + TILE + 6; yy < ey + TILE + DECOR; yy += 16) g.rect(ex + TILE / 2 - 1, yy, 2, 8).fill(C.roadDash);
+        const y0 = ey + TILE;
+        g.rect(ex, y0, TILE, DECOR).fill(C.road);
+        if (tier === 2) for (let yy = y0 + 4; yy < y0 + DECOR; yy += 16) g.rect(ex + TILE / 2 - 1, yy, 2, 9).fill(C.roadDash);
+        if (tier === 2) g.rect(ex, y0, TILE, DECOR).fill({ color: 0x0f2540, alpha: 0.38 });
+        if (tier === 1) g.rect(ex, y0, TILE, DECOR).fill({ color: 0x7d8895, alpha: 0.2 });
+        if (!before) g.rect(ex + 1.5, y0, 1.3, DECOR).fill(edge);
+        if (!after) g.rect(ex + TILE - 2.8, y0, 1.3, DECOR).fill(edge);
+        if (tier === 1) {
+          g.rect(ex + TILE / 2 - 3, y0, 1.4, DECOR).fill(0xf2c230);
+          g.rect(ex + TILE / 2 + 1.6, y0, 1.4, DECOR).fill(0xf2c230);
+        } else if (tier === 2) {
+          g.rect(ex + 2.5, y0, 1.6, DECOR).fill({ color: 0xffffff, alpha: 0.85 });
+          g.rect(ex + TILE - 4.1, y0, 1.6, DECOR).fill({ color: 0xffffff, alpha: 0.85 });
+        } else for (let yy = y0 + 4; yy < y0 + DECOR; yy += 16) g.rect(ex + TILE / 2 - 1, yy, 2, 9).fill(C.roadDash);
       } else {
-        g.rect(ex - DECOR, ey, DECOR, TILE).fill(C.road);
-        for (let xx = ex - DECOR + 4; xx < ex; xx += 16) g.rect(xx, ey + TILE / 2 - 1, 8, 2).fill(C.roadDash);
+        const x0 = ex - DECOR;
+        g.rect(x0, ey, DECOR, TILE).fill(C.road);
+        if (tier === 2) for (let xx = ex - 4 - 9; xx > x0; xx -= 16) g.rect(xx, ey + TILE / 2 - 1, 9, 2).fill(C.roadDash);
+        if (tier === 2) g.rect(x0, ey, DECOR, TILE).fill({ color: 0x0f2540, alpha: 0.38 });
+        if (tier === 1) g.rect(x0, ey, DECOR, TILE).fill({ color: 0x7d8895, alpha: 0.2 });
+        if (!before) g.rect(x0, ey + 1.5, DECOR, 1.3).fill(edge);
+        if (!after) g.rect(x0, ey + TILE - 2.8, DECOR, 1.3).fill(edge);
+        if (tier === 1) {
+          g.rect(x0, ey + TILE / 2 - 3, DECOR, 1.4).fill(0xf2c230);
+          g.rect(x0, ey + TILE / 2 + 1.6, DECOR, 1.4).fill(0xf2c230);
+        } else if (tier === 2) {
+          g.rect(x0, ey + 2.5, DECOR, 1.6).fill({ color: 0xffffff, alpha: 0.85 });
+          g.rect(x0, ey + TILE - 4.1, DECOR, 1.6).fill({ color: 0xffffff, alpha: 0.85 });
+        } else for (let xx = ex - 4 - 9; xx > x0; xx -= 16) g.rect(xx, ey + TILE / 2 - 1, 9, 2).fill(C.roadDash);
       }
     }
     // Rand des Baugebiets
