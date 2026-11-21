@@ -1556,7 +1556,8 @@ describe('Weiterbildung und Vorziehen', () => {
     add('coaster', null, false);
     const second = sim.ships[1];
     expect(sim.prioritize(second.id).ok).toBe(true);
-    sim.tick();
+    // Die Einfahrt sucht alle 5 Ticks einen Liegeplatz
+    for (let i = 0; i < 5; i++) sim.tick();
     expect(second.state).toBe('sailing');
     expect(sim.ships[0].state).toBe('queued');
   });
@@ -1690,6 +1691,34 @@ describe('Gleise ins Land und Außenanbindung', () => {
     expect(sim.hinterlandMul(g)).toBe(1);
     for (let y = k + 1; y < GRID_H; y++) sim.build('road', 4, y);
     expect(sim.hinterlandMul(g)).toBeGreaterThan(1);
+  });
+
+  it('Stau-Umfahrung: bei zwei gleich langen Wegen nehmen Trucks den, der nicht gestaut ist', () => {
+    const sim = new Sim();
+    for (let x = 4; x <= 12; x++) {
+      sim.build('road', x, k + 1);
+      sim.build('road', x, k + 5);
+    }
+    for (let y = k + 1; y <= k + 5; y++) {
+      sim.build('road', 4, y);
+      sim.build('road', 12, y);
+    }
+    const A = sim.idx(4, k + 3);
+    const B = sim.idx(12, k + 3);
+    const up = sim.idx(4, k + 2);
+    const down = sim.idx(4, k + 4);
+    const before = sim.distMap(B);
+    // Ohne Stau sind beide Wege gleich gut
+    expect(before[up] + sim.stepCost(up)).toBe(before[A]);
+    expect(before[down] + sim.stepCost(down)).toBe(before[A]);
+    // Oben staut es sich
+    for (let x = 4; x <= 12; x++) sim.roadJam[sim.idx(x, k + 1)] = 20;
+    (sim as unknown as { refreshJamCosts(): void }).refreshJamCosts();
+    const d = sim.distMap(B);
+    expect(d[down] + sim.stepCost(down)).toBe(d[A]);
+    expect(d[up] + sim.stepCost(up)).toBeGreaterThan(d[A]);
+    // Erreichbar bleibt alles, nur länger
+    expect(d[sim.idx(8, k + 1)]).toBeGreaterThan(0);
   });
 
   it('Speditions-Lkw fahren von außen über die Straßen zum Gate und wieder hinaus', () => {

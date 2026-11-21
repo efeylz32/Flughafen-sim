@@ -42,6 +42,11 @@ import {
   TUNNEL_MUL,
   BRIDGE_MUL,
   PARK_SLOTS,
+  CRANE_ACC_BUSY,
+  JAM_PEN_FROM,
+  JAM_PEN_K,
+  JAM_PEN_MAX,
+  JAM_REFRESH_TICKS,
   HAUL_MAX_PER_GATE,
   HAUL_WAIT_GM,
   HAUL_HANDLE_GM,
@@ -985,7 +990,11 @@ export class Sim {
 
   private nextId = 1;
   private seed: number;
-  private distCache = new Map<number, Int16Array>();
+  private distCache = new Map<number, Int32Array>();
+  /** Entfernungen vom Startfeld zu allen Feldern (vorwärts), für die Job-Suche */
+  private fromCache = new Map<number, Int32Array>();
+  /** Stau-Aufschlag je Straßenfeld (in Zehnteln eines Feldes): Trucks planen um rote Straßen herum */
+  private jamPen = new Uint8Array(GRID_W * GRID_H);
   private yardTiles: number[] = [];
   private reeferTiles: number[] = [];
   private hazTiles: number[] = [];
@@ -1488,20 +1497,109 @@ export class Sim {
 
   /** Kosten, ein Feld zu befahren, in Zehnteln einer Normalstraße: Autobahnen sind schneller. */
   stepCost(tile: number): number {
-    return Math.round(DIST_UNIT / ROAD_SPEED[this.roadTier[tile]]);
+    return Math.round(DIST_UNIT / ROAD_SPEED[this.roadTier[tile]]) + this.jamPen[tile];
+  }
+
+  /**
+   * Stau in die Wegsuche einrechnen: Wo zuletzt viel gewartet wurde, gilt die Straße als länger.
+   * Alle paar Spielminuten neu, dann werden die Wege neu berechnet. Ändert sich nichts, bleibt alles, wie es ist.
+   */
+  private refreshJamCosts() {
+    let changed = false;
+    for (let i = COAST_ROW * GRID_W; i < this.jamPen.length; i++) {
+      const j = this.kind[i] === T.Road ? this.roadJam[i] : 0;
+      // In Stufen von einem halben Feld: kleine Schwankungen lösen keine neue Wegberechnung aus
+      const p = j > JAM_PEN_FROM ? Math.min(JAM_PEN_MAX, Math.round(((j - JAM_PEN_FROM) * JAM_PEN_K) / 5) * 5) : 0;
+      if (p !== this.jamPen[i]) {
+        this.jamPen[i] = p;
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.distCache.clear();
+      this.fromCache.clear();
+    }
+  }
+
+  /** Fahrzeit vom Feld `from` zu allen Feldern (vorwärts). Gleiche Werte wie distMap(ziel)[from]. */
+  distFrom(from: number): Int32Array {
+    let d = this.fromCache.get(from);
+    if (d) return d;
+    if (this.fromCache.size > 600) this.fromCache.clear();
+    d = new Int32Array(GRID_W * GRID_H).fill(-1);
+    if (this.kind[from] === T.Road) {
+      const heap: number[] = [];
+      const N = GRID_W * GRID_H;
+      const push = (cost: number, node: number) => {
+        let k = heap.length;
+        heap.push(cost * N + node);
+        while (k > 0) {
+          const p = (k - 1) >> 1;
+          if (heap[p] <= heap[k]) break;
+          [heap[p], heap[k]] = [heap[k], heap[p]];
+          k = p;
+        }
+      };
+      const pop = (): number => {
+        const top = heap[0];
+        const last = heap.pop()!;
+        if (heap.length) {
+          heap[0] = last;
+          let k = 0;
+          for (;;) {
+            const l = 2 * k + 1;
+            const r = l + 1;
+            let m = k;
+            if (l < heap.length && heap[l] < heap[m]) m = l;
+            if (r < heap.length && heap[r] < heap[m]) m = r;
+            if (m === k) break;
+            [heap[m], heap[k]] = [heap[k], heap[m]];
+            k = m;
+          }
+        }
+        return top;
+      };
+      d[from] = 0;
+      push(0, from);
+      const done = new Uint8Array(N);
+      while (heap.length) {
+        const top = pop();
+        const u = top % N;
+        const cost = (top - u) / N;
+        if (done[u]) continue;
+        done[u] = 1;
+        const ux = u % GRID_W;
+        const uy = (u / GRID_W) | 0;
+        // Nachbarn in Fahrtrichtung: Ost, Süd, West, Nord
+        const cand = [ux < GRID_W - 1 ? u + 1 : -1, uy < GRID_H - 1 ? u + GRID_W : -1, ux > 0 ? u - 1 : -1, uy > 0 ? u - GRID_W : -1];
+        for (let dir = 0; dir < 4; dir++) {
+          const v = cand[dir];
+          if (v < 0 || done[v] || !this.canStep(u, v, dir)) continue;
+          const nc = cost + this.stepCost(v);
+          if (d[v] < 0 || nc < d[v]) {
+            d[v] = nc;
+            push(nc, v);
+          }
+        }
+      }
+    }
+    this.fromCache.set(from, d);
+    return d;
   }
 
   /** Fahrzeit-Karte über das Straßennetz zum Zielfeld (Dijkstra, in Zehnteln eines Feldes). -1 = nicht erreichbar. */
-  distMap(target: number): Int16Array {
+  distMap(target: number): Int32Array {
     let d = this.distCache.get(target);
     if (d) return d;
-    d = new Int16Array(GRID_W * GRID_H).fill(-1);
+    if (this.distCache.size > 600) this.distCache.clear();
+    d = new Int32Array(GRID_W * GRID_H).fill(-1);
     if (this.kind[target] === T.Road) {
       // Kleiner Binärhaufen aus [Kosten, Feld]
       const heap: number[] = [];
+      const NN = GRID_W * GRID_H;
       const push = (cost: number, node: number) => {
         let k = heap.length;
-        heap.push(cost * 4096 + node);
+        heap.push(cost * NN + node);
         while (k > 0) {
           const p = (k - 1) >> 1;
           if (heap[p] <= heap[k]) break;
@@ -1533,8 +1631,8 @@ export class Sim {
       const done = new Uint8Array(d.length);
       while (heap.length) {
         const top = pop();
-        const c = top % 4096;
-        const cost = (top - c) / 4096;
+        const c = top % NN;
+        const cost = (top - c) / NN;
         if (done[c]) continue;
         done[c] = 1;
         const cx = c % GRID_W;
@@ -1566,6 +1664,7 @@ export class Sim {
   private touch() {
     this.version++;
     this.distCache.clear();
+    this.fromCache.clear();
     this.storeAccCache = null;
     this.yardTiles = [];
     this.reeferTiles = [];
@@ -2676,17 +2775,30 @@ export class Sim {
     }
     return this.findSlotUse(from, zone, -1, kind);
   }
+  /** Nächste Zufahrt aus einer Liste, vom Feld `from` aus. Felder im selben Block teilen sich die Liste: einmal rechnen reicht. */
+  private bestAccess(list: number[], D: Int32Array, memo: Map<number[], { a: number; d: number } | null>): { a: number; d: number } | null {
+    if (memo.has(list)) return memo.get(list)!;
+    let best: { a: number; d: number } | null = null;
+    for (const a of list) {
+      const d = D[a];
+      if (d >= 0 && (!best || d < best.d)) best = { a, d };
+    }
+    memo.set(list, best);
+    return best;
+  }
+  private accMemo = new Map<number[], { a: number; d: number } | null>();
   private findSlotUse(from: number, zone: number, use: number, kind: T = T.Yard): { tile: number; access: number; d: number; free: number } | null {
     let best: { tile: number; access: number; d: number; free: number } | null = null;
+    const D = this.distFrom(from);
+    const memo = this.accMemo;
+    memo.clear();
     for (const y of this.tilesOf(kind)) {
       if (this.zone[y] !== zone) continue;
       if (use >= 0 && this.yardUse[y] !== use) continue;
       const free = this.freeAt(y);
       if (free <= 0) continue;
-      for (const a of this.storeAccess(y)) {
-        const d = this.distMap(a)[from];
-        if (d >= 0 && (!best || d < best.d)) best = { tile: y, access: a, d, free };
-      }
+      const b = this.bestAccess(this.storeAccess(y), D, memo);
+      if (b && (!best || b.d < best.d)) best = { tile: y, access: b.a, d: b.d, free };
     }
     return best;
   }
@@ -2694,6 +2806,9 @@ export class Sim {
   /** Nächstgelegenes Lagerfeld, das Container der gewünschten Art abgeben kann. */
   private findSource(kind: T, cargo: Cargo, from: number, zone: number): { tile: number; access: number; d: number; avail: number } | null {
     let best: { tile: number; access: number; d: number; avail: number } | null = null;
+    const D = this.distFrom(from);
+    const memo = this.accMemo;
+    memo.clear();
     for (const y of this.tilesOf(kind)) {
       if (this.zone[y] !== zone) continue;
       const avail =
@@ -2705,9 +2820,63 @@ export class Sim {
               ? this.stock[y] - this.stockRail[y] - this.resOut[y]
               : this.stock[y] - this.resOut[y];
       if (avail <= 0) continue;
-      for (const a of this.storeAccess(y)) {
-        const d = this.distMap(a)[from];
-        if (d >= 0 && (!best || d < best.d)) best = { tile: y, access: a, d, avail };
+      const b = this.bestAccess(this.storeAccess(y), D, memo);
+      if (b && (!best || b.d < best.d)) best = { tile: y, access: b.a, d: b.d, avail };
+    }
+    return best;
+  }
+
+  /**
+   * Zugänge eines Krans: die Straßen hinter seinem Kai-Feld und den Nachbarfeldern am Kai (bei Brücken entsprechend mehr).
+   * So können mehrere Trucks gleichzeitig an einem Kran laden, statt sich an einem Feld zu stauen.
+   */
+  craneAccess(c: Crane): number[] {
+    if (this.craneAccCache.v !== this.version) this.craneAccCache = { v: this.version, m: new Map() };
+    const hit = this.craneAccCache.m.get(c.id);
+    if (hit) return hit;
+    const q = this.cq(c);
+    const out = new Set<number>();
+    for (let k = -1; k <= (c.big ? 2 : 1); k++) {
+      const t = qTile(q + k);
+      if (!t) continue;
+      const i = this.idx(t[0], t[1]);
+      if (this.kind[i] !== T.Kai) continue;
+      for (const a of this.adjRoad(i)) out.add(a);
+    }
+    // Ohne Kai-Nachbarn (Sonderfälle): wie früher direkt neben dem Kran
+    const list = out.size ? [...out] : this.adjRoad(this.idx(c.x, c.y));
+    this.craneAccCache.m.set(c.id, list);
+    return list;
+  }
+  private craneAccCache: { v: number; m: Map<number, number[]> } = { v: -1, m: new Map() };
+  /** Wie viele Trucks gerade zu jedem Straßenfeld wollen (einmal pro Tick gezählt) */
+  private accBusy(): Map<number, number> {
+    if (this.busyTick !== this.tickCount) {
+      this.busyTick = this.tickCount;
+      this.busyMap.clear();
+      for (const t of this.trucks) {
+        if (!t.job) continue;
+        const a = t.job.tgt[t.job.stage];
+        this.busyMap.set(a, (this.busyMap.get(a) ?? 0) + 1);
+      }
+    }
+    return this.busyMap;
+  }
+  private busyTick = -1;
+  private busyMap = new Map<number, number>();
+  /** Bester Zugang zu einem Kran: nah, aber dort, wo gerade wenig Trucks hinwollen */
+  private craneAccessFrom(c: Crane, from: number): { access: number; d: number } | null {
+    const D = this.distFrom(from);
+    const busy = this.accBusy();
+    let best: { access: number; d: number } | null = null;
+    let bestScore = Infinity;
+    for (const a of this.craneAccess(c)) {
+      const d = D[a];
+      if (d < 0) continue;
+      const score = d + (busy.get(a) ?? 0) * CRANE_ACC_BUSY;
+      if (score < bestScore) {
+        bestScore = score;
+        best = { access: a, d };
       }
     }
     return best;
@@ -2716,8 +2885,9 @@ export class Sim {
   /** Nächstes Straßenfeld neben Feld `i`, vom Straßenfeld `from` aus gesehen. */
   private nearestAccess(i: number | Box, from: number): { access: number; d: number } | null {
     let best: { access: number; d: number } | null = null;
+    const D = this.distFrom(from);
     for (const a of typeof i === 'number' ? this.adjRoad(i) : this.accessOf(i)) {
-      const d = this.distMap(a)[from];
+      const d = D[a];
       if (d >= 0 && (!best || d < best.d)) best = { access: a, d };
     }
     return best;
@@ -2836,7 +3006,6 @@ export class Sim {
 
     for (const c of this.cranes) {
       if (!zOk(c.zone) || c.build) continue;
-      const ci = this.idx(c.x, c.y);
       const ship = this.shipAtBerth(this.cq(c));
       // 1. Entladene Container vom Kran wegfahren
       const more = ship !== undefined && ship.containers + ship.reefers + ship.haz > 0;
@@ -2846,7 +3015,7 @@ export class Sim {
         if (avail <= 0) continue;
         // Volle Fahrt abwarten, außer der Kran liefert nichts mehr nach
         if (avail < TRUCK_CAP && more && !full) continue;
-        const acc = this.nearestAccess(ci, t.tile);
+        const acc = this.craneAccessFrom(c, t.tile);
         if (!acc) continue;
         const slot = this.findSlot(Sim.storeOf(cargo), acc.access, c.zone, cargo);
         if (!slot) continue;
@@ -2869,7 +3038,7 @@ export class Sim {
         const room = this.bufCap(c, true) - c.expBuf - c.resExpIn;
         if (need > 0 && room > 0) {
           const src = this.findSource(T.Yard, 'exp', t.tile, c.zone);
-          const acc = src ? this.nearestAccess(ci, src.access) : null;
+          const acc = src ? this.craneAccessFrom(c, src.access) : null;
           if (src && acc) {
             offer('export', 2.6, src.d + acc.d, {
               cargo: 'exp',
@@ -3383,10 +3552,13 @@ export class Sim {
     if (this.driveTo(t, t.parkTgt!, dt) === 'lost') t.parkAt = -1;
   }
   get parkTiles(): number[] {
+    if (this.parkCache.v === this.version) return this.parkCache.list;
     const out: number[] = [];
     for (let i = 0; i < this.kind.length; i++) if (this.kind[i] === T.Parking) out.push(i);
+    this.parkCache = { v: this.version, list: out };
     return out;
   }
+  private parkCache: { v: number; list: number[] } = { v: -1, list: [] };
 
   // ───────────────────────── Große Lagerblöcke ─────────────────────────
 
@@ -3522,6 +3694,7 @@ export class Sim {
     this.spawnShips(dt);
     this.updateShips(dt);
     this.updateCranes(dt);
+    if (this.tickCount % JAM_REFRESH_TICKS === 0) this.refreshJamCosts();
     this.updateTrucks(dt);
     this.updateHaulers(dt);
     this.updateGates(dt);
@@ -3841,7 +4014,7 @@ export class Sim {
   /** Truck ohne Zielen kaufen: auf eine Straße, die mit den Kränen verbunden ist, möglichst frei */
   buyTruckAuto(): BuildResult & { x: number; y: number } {
     const acc: number[] = [];
-    for (const c of this.cranes) acc.push(...this.adjRoad(this.idx(c.x, c.y)));
+    for (const c of this.cranes) acc.push(...this.craneAccess(c));
     const busy = new Set(this.trucks.map((t) => t.tile));
     let best = -1;
     let bestD = Infinity;
@@ -4441,7 +4614,8 @@ export class Sim {
 
   private updateShips(dt: number) {
     const fog = this.weather === 'fog';
-    if (!fog) {
+    // Liegeplatz suchen nur alle 5 Ticks (2 Spielminuten): spart viel Rechnen, das Schiff merkt es kaum
+    if (!fog && this.tickCount % 5 === 0) {
       // Vorgezogene Schiffe zuerst, sonst in der Reihenfolge der Ankunft
       const order = [...this.ships].sort((a, b) => Number(!!b.vip) - Number(!!a.vip));
       for (const s of order) {

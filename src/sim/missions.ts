@@ -18,7 +18,7 @@ export interface Mission {
 
 function craneAccess(sim: Sim): number[] {
   const out: number[] = [];
-  for (const c of sim.cranes) out.push(...sim.adjRoad(sim.idx(c.x, c.y)));
+  for (const c of sim.cranes) out.push(...sim.craneAccess(c));
   return out;
 }
 

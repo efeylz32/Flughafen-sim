@@ -592,6 +592,15 @@ export const ROAD_LANES = [1, 2, 2];
 export const ROAD_RUN = [0, 6, 20];
 /** Entfernungen werden in Zehnteln eines Feldes gerechnet, damit schnelle Straßen Bruchteile kosten */
 export const DIST_UNIT = 10;
+/** Kran-Zugänge: Jeder Truck, der schon zu einem Zugang will, macht ihn um so viel „weiter“ (Zehntel Feld) */
+export const CRANE_ACC_BUSY = 25;
+/** Stau in der Wegsuche: ab dieser Wartezeit auf einem Feld (Spielminuten, abklingend) gilt es als länger */
+export const JAM_PEN_FROM = 1.5;
+/** Aufschlag pro Minute Stau in Zehnteln eines Feldes, höchstens so viel (30 = drei Felder Umweg) */
+export const JAM_PEN_K = 2.5;
+export const JAM_PEN_MAX = 30;
+/** So oft wird der Stau in die Wege eingerechnet (Ticks, 25 = 10 Spielminuten) */
+export const JAM_REFRESH_TICKS = 25;
 
 // ───────── Hafen-Eigenschaften: zwei zufällige Besonderheiten pro neuem Spiel ─────────
 export type TraitId = 'rocky' | 'stormy' | 'union' | 'freezone' | 'deepwater' | 'railhub' | 'coldregion' | 'cheapland';
