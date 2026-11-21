@@ -1473,6 +1473,15 @@ export class Renderer {
     return { root, load, brake, badge, lat: 7, key: '', agv: t.agv, rot: t.angle };
   }
 
+  /** Wo ein Truck gerade gezeichnet wird (Weltpixel). Geparkte stehen in ihrer Bucht, nicht auf der Straße. */
+  truckAt(id: number): { x: number; y: number } | null {
+    const v = this.trucks.get(id);
+    return v ? { x: v.root.position.x, y: v.root.position.y } : null;
+  }
+  /** Weltpixel pro Bildschirmpixel umgerechnet: wie groß ein Finger auf der Karte ist */
+  get zoom(): number {
+    return this.scale;
+  }
   private parkBays = new Map<number, { lot: number; slot: number }>();
   private syncTrucks(sim: Sim, a: number, view: View) {
     // Buchten auf den Stellplätzen verteilen
@@ -2454,8 +2463,20 @@ export class Renderer {
     } else {
       const t = sim.trucks.find((t) => t.id === sel.id);
       if (!t) return;
-      x = (t.px + (t.fx - t.px) * a) * TILE;
-      y = (t.py + (t.fy - t.py) * a) * TILE;
+      const v = this.trucks.get(t.id);
+      if (v && t.parked) {
+        // In der Bucht: schmaler Rahmen um den quer geparkten Truck
+        w = 13;
+        h = 28;
+        x = v.root.position.x - w / 2;
+        y = v.root.position.y - h / 2;
+      } else if (v) {
+        x = v.root.position.x - TILE / 2;
+        y = v.root.position.y - TILE / 2;
+      } else {
+        x = (t.px + (t.fx - t.px) * a) * TILE;
+        y = (t.py + (t.fy - t.py) * a) * TILE;
+      }
     }
     const pulse = 3 + Math.sin(time * 5) * 1.2;
     g.roundRect(x - pulse, y - pulse, w + pulse * 2, h + pulse * 2, 6).stroke({ width: 3.5, color: C.accent, alpha: 0.95 });

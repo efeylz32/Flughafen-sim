@@ -21,6 +21,8 @@ export type Sfx =
   | 'upgrade';
 
 const KEY = 'hafen-imperium-sound';
+/** Gesamtlautstärke */
+const VOL = 0.9;
 
 /** Mindestabstand in Sekunden, damit sich schnelle Wiederholungen nicht stapeln. */
 const GAP: Partial<Record<Sfx, number>> = {
@@ -55,6 +57,9 @@ export class Sound {
   private ambGain: GainNode | null = null;
   private ambFilter: BiquadFilterNode | null = null;
   private storm = false;
+  /** App im Hintergrund: kein Ton, Ausgang ist leise gedreht */
+  private hidden = false;
+  private suspendTimer = 0;
 
   constructor() {
     try {
@@ -76,11 +81,13 @@ export class Sound {
         if (!AC) return;
         this.ctx = new AC();
         this.master = this.ctx.createGain();
-        this.master.gain.value = 0.9;
+        this.master.gain.value = this.hidden ? 0 : VOL;
         this.master.connect(this.ctx.destination);
         this.startAmbient();
       }
-      if (this.ctx.state !== 'running') void this.ctx.resume();
+      if (this.hidden) return;
+      if (this.ctx.state !== 'running') void this.ctx.resume().then(() => this.fadeIn(), () => {});
+      else if (this.master && this.master.gain.value < VOL * 0.5) this.fadeIn();
     } catch {
       this.ctx = null;
     }
@@ -94,7 +101,18 @@ export class Sound {
       /* Einstellung gilt dann nur für diese Sitzung */
     }
     if (on) this.unlock();
-    else if (this.ctx && this.ctx.state === 'running') void this.ctx.suspend();
+    else if (this.ctx && this.master && this.ctx.state === 'running') {
+      // Auch beim Ausschalten erst leise drehen, damit nichts knackt
+      const ctx = this.ctx;
+      const g = this.master.gain;
+      g.cancelScheduledValues(ctx.currentTime);
+      g.setValueAtTime(g.value, ctx.currentTime);
+      g.linearRampToValueAtTime(0, ctx.currentTime + 0.08);
+      clearTimeout(this.suspendTimer);
+      this.suspendTimer = window.setTimeout(() => {
+        if (!this.enabled && ctx.state === 'running') void ctx.suspend();
+      }, 150);
+    }
   }
 
   /** Für die Musik: Audio-Kontext und Ausgang, sobald der Ton freigegeben ist */
@@ -110,11 +128,43 @@ export class Sound {
     return this.enabled;
   }
 
-  /** Pausiert den Ton, solange der Tab im Hintergrund ist. */
+  /** Ton weich hochfahren (nach Pause oder Rückkehr aus dem Hintergrund) */
+  private fadeIn() {
+    const ctx = this.ctx;
+    const m = this.master;
+    if (!ctx || !m || this.hidden || !this.enabled) return;
+    const t = ctx.currentTime;
+    m.gain.cancelScheduledValues(t);
+    m.gain.setValueAtTime(Math.min(m.gain.value, VOL), t);
+    m.gain.linearRampToValueAtTime(VOL, t + 0.6);
+  }
+
+  /**
+   * Pausiert den Ton, solange die App im Hintergrund ist.
+   * Erst leise drehen, dann anhalten: Hart abgeschnitten knackt es, und iOS spielt beim
+   * Wechsel sonst einen Rest aus dem Audiopuffer ab. Beim Zurückkommen weich einblenden.
+   */
   setHidden(hidden: boolean) {
-    if (!this.ctx || !this.enabled) return;
-    if (hidden && this.ctx.state === 'running') void this.ctx.suspend();
-    else if (!hidden && this.ctx.state === 'suspended') void this.ctx.resume();
+    if (hidden === this.hidden) return;
+    this.hidden = hidden;
+    clearTimeout(this.suspendTimer);
+    const ctx = this.ctx;
+    const m = this.master;
+    if (!ctx || !m) return;
+    const t = ctx.currentTime;
+    m.gain.cancelScheduledValues(t);
+    if (hidden) {
+      m.gain.setValueAtTime(m.gain.value, t);
+      m.gain.linearRampToValueAtTime(0, t + 0.08);
+      this.suspendTimer = window.setTimeout(() => {
+        if (this.hidden && this.ctx?.state === 'running') void this.ctx.suspend();
+      }, 150);
+      return;
+    }
+    m.gain.setValueAtTime(0, t);
+    if (!this.enabled) return;
+    if (ctx.state === 'running') this.fadeIn();
+    else void ctx.resume().then(() => this.fadeIn(), () => {});
   }
 
   private noiseBuffer(): AudioBuffer {
@@ -195,7 +245,7 @@ export class Sound {
 
   play(name: Sfx) {
     const ctx = this.ctx;
-    if (!this.enabled || !ctx || ctx.state !== 'running') return;
+    if (!this.enabled || this.hidden || !ctx || ctx.state !== 'running') return;
     const now = ctx.currentTime;
     const gap = GAP[name] ?? 0.03;
     if (now - (this.last[name] ?? -9) < gap) return;

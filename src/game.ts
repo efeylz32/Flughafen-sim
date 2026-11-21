@@ -1138,12 +1138,16 @@ export class Game {
       }
     }
     if (!this.selected) {
+      // Truck nach seiner gezeichneten Position (geparkte stehen in ihrer Bucht), der nächste gewinnt.
+      // Bei kleinem Zoom wird der Fangradius größer, damit man ihn mit dem Finger trifft.
+      const r = Math.max(14, 18 / Math.max(0.3, this.renderer.zoom));
+      let best = r * r;
       for (const t of sim.trucks) {
-        const cx = (t.fx + 0.5) * TILE;
-        const cy = (t.fy + 0.5) * TILE;
-        if (Math.abs(wx - cx) < 14 && Math.abs(wy - cy) < 14) {
+        const p = this.renderer.truckAt(t.id) ?? { x: (t.fx + 0.5) * TILE, y: (t.fy + 0.5) * TILE };
+        const d = (wx - p.x) ** 2 + (wy - p.y) ** 2;
+        if (d < best) {
+          best = d;
           this.selected = { kind: 'truck', id: t.id };
-          break;
         }
       }
     }

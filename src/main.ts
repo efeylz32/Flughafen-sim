@@ -22,7 +22,16 @@ async function boot() {
   const unlock = () => game.sound.unlock();
   // iPhone und iPad zählen erst das Loslassen als Nutzeraktion, deshalb mehrere Ereignisse
   for (const ev of ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown']) window.addEventListener(ev, unlock, { capture: true });
-  document.addEventListener('visibilitychange', () => game.sound.setHidden(document.hidden));
+  // Im Hintergrund still. Auf dem Handy schon beim Wegwischen (blur kommt dort vor visibilitychange).
+  const hide = () => game.sound.setHidden(true);
+  const show = () => !document.hidden && game.sound.setHidden(false);
+  document.addEventListener('visibilitychange', () => (document.hidden ? hide() : show()));
+  window.addEventListener('pagehide', hide);
+  window.addEventListener('pageshow', show);
+  if (matchMedia('(pointer: coarse)').matches) {
+    window.addEventListener('blur', hide);
+    window.addEventListener('focus', show);
+  }
 
   // Beim Verlassen oder Wegwischen speichern, damit nichts verloren geht
   const flush = () => game.save();

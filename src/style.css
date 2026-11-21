@@ -712,12 +712,12 @@ html, body { touch-action: none; overscroll-behavior: none; }
 #hud .modal { padding-top: max(16px, calc(var(--safe-t) + 8px)); padding-bottom: max(16px, calc(var(--safe-b) + 8px)); padding-left: max(16px, calc(var(--safe-l) + 8px)); padding-right: max(16px, calc(var(--safe-r) + 8px)); }
 
 /* Ausbau: Reiter und kompakte Zeilen */
-.ausbau .atabs { display: flex; gap: 6px; margin: 0 0 4px; flex: none; }
-.ausbau .atabs button { position: relative; flex: 1; border: 0; border-radius: 10px; padding: 9px 4px; min-height: 40px; font-weight: 800; font-size: 14px; background: #eef2f7; color: var(--ink); white-space: nowrap; }
-.ausbau .atabs button.on { background: var(--accent); color: #fff; }
-.ausbau .atabs .adot { display: none; position: absolute; top: 5px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 2px #fff; }
-.ausbau .atabs button.can .adot { display: block; }
-.ausbau .atabs button.on .adot { box-shadow: 0 0 0 2px var(--accent); background: #8ff0b8; }
+.atabs { display: flex; gap: 6px; margin: 0 0 4px; flex: none; }
+.atabs button { position: relative; flex: 1; border: 0; border-radius: 10px; padding: 9px 4px; min-height: 40px; font-weight: 800; font-size: 14px; background: #eef2f7; color: var(--ink); white-space: nowrap; }
+.atabs button.on { background: var(--accent); color: #fff; }
+.atabs .adot { display: none; position: absolute; top: 5px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 2px #fff; }
+.atabs button.can .adot { display: block; }
+.atabs button.on .adot { box-shadow: 0 0 0 2px var(--accent); background: #8ff0b8; }
 .ausbau .body > .sub b { color: var(--ink); }
 .ausbau .tlist { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
 .ausbau .trow { display: flex; align-items: center; gap: 10px; background: #f4f7fb; border-radius: 14px; padding: 10px 10px 10px 12px; }
@@ -752,3 +752,39 @@ html, body { touch-action: none; overscroll-behavior: none; }
 @media (max-height: 500px) and (orientation: landscape) {
   #hud .modal { padding-top: max(8px, var(--safe-t)); padding-bottom: max(8px, var(--safe-b)); }
 }
+
+/* Fuhrpark: Truckliste */
+.stats > .tap { cursor: pointer; }
+.stats > .sel { box-shadow: inset 0 0 0 2px var(--accent); }
+.ffilter { display: flex; gap: 6px; margin: 10px 0 6px; }
+.ffilter button { flex: 1; border: 0; border-radius: 10px; padding: 8px 6px; font-weight: 800; font-size: 13.5px; background: #eef2f7; color: var(--ink); }
+.ffilter button.on { background: var(--ink); color: #fff; }
+.flist { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
+.frow { background: #f4f7fb; border-radius: 14px; overflow: hidden; }
+.frow.bad { background: #fdf0ee; }
+.frow.open { box-shadow: inset 0 0 0 2px var(--accent); background: #fff; }
+.fhead { width: 100%; display: flex; align-items: center; gap: 10px; border: 0; background: transparent; padding: 9px 10px; text-align: left; }
+.fnum { flex: none; width: 30px; height: 30px; border-radius: 9px; background: var(--rc); color: #fff; font-family: var(--display); font-weight: 800; font-size: 14px; display: flex; align-items: center; justify-content: center; box-shadow: inset 0 -2px 0 rgba(0,0,0,.18); }
+.fname { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.fname b { font-size: 14.5px; }
+.fname small { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fside { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
+.fst { font-size: 11.5px; font-weight: 800; border-radius: 7px; padding: 2px 7px; background: #e6ebf2; color: var(--muted); white-space: nowrap; }
+.fst.go { background: #dcebfb; color: #1f5fa8; }
+.fst.warn { background: #fff1cc; color: #8a5a00; }
+.fst.bad { background: #fbdcd8; color: #a3302a; }
+.fwear { width: 56px; height: 5px; border-radius: 3px; background: #dde3ea; overflow: hidden; }
+.fwear i { display: block; height: 100%; background: var(--good); border-radius: 3px; }
+.fwear i.low { background: var(--bad); }
+.fmore { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 6px; }
+.fstats { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: #34455a; }
+.fmore .roles { display: flex; flex-wrap: wrap; gap: 6px; }
+.fmore .roles button { flex: 1 1 auto; border: 0; padding: 9px 10px; font-size: 13.5px; font-weight: 700; background: #e6ebf2; color: var(--ink); border-radius: 10px; }
+.fmore .roles button.on { background: var(--accent); color: #fff; }
+.fmore .meta { font-size: 12.5px; color: var(--muted); margin: 0; }
+.facts { display: flex; flex-direction: column; gap: 6px; margin-top: 2px; }
+.facts button { border: 0; border-radius: 11px; padding: 10px; font-weight: 800; font-size: 14px; }
+.facts .secondary { background: #eef2f7; }
+.fmore .progress { height: 9px; border-radius: 5px; background: #e3e8ef; overflow: visible; position: relative; margin: 2px 0; }
+.fmore .progress span { display: block; height: 100%; border-radius: 5px; background: var(--good); }
+.fmore .progress span.low { background: var(--bad); }

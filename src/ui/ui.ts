@@ -58,7 +58,7 @@ import { latestSlot, metaOfSlot, removeSlot, Slot, SLOTS } from '../saves';
 import { COMPLETE_SUPER, MILESTONES, completion } from '../sim/progression';
 import { MISSIONS, MISSION_GO } from '../sim/missions';
 import { SCENARIOS } from '../sim/scenarios';
-import type { Contract, Job, Sim } from '../sim/sim';
+import type { Contract, Job, Sim, Truck } from '../sim/sim';
 
 const num = (n: number) => Math.round(n).toLocaleString('de-DE');
 const eur = (n: number) => `${num(n)} €`;
@@ -299,6 +299,11 @@ export class UI {
   private staffBtn!: HTMLButtonElement;
   private staffBadge!: HTMLElement;
   private lastStaff = '';
+  private lastStaffT = 0;
+  /** Reiter im Fenster Fuhrpark und Personal, aufgeklappter Truck, Filter der Liste */
+  private staffTab: 'fleet' | 'staff' = 'fleet';
+  private fleetOpen = -1;
+  private fleetFilter: 'all' | 'idle' | 'problem' = 'all';
   private diff: DiffId = 'normal';
   private map: MapId = 'coast';
   private decision!: HTMLElement;
@@ -500,6 +505,7 @@ export class UI {
     this.dealBadge = el('span', 'badge hidden');
     this.dealBtn.appendChild(this.dealBadge);
     this.staffBtn = mk(ICONS.people, 'Fuhrpark und Personal', () => {
+      if (!this.staffBadge.classList.contains('hidden')) this.staffTab = 'staff';
       this.staffModal.classList.remove('hidden');
       this.renderStaff(true);
       click();
@@ -710,7 +716,6 @@ export class UI {
     this.ctlModal.innerHTML = `<div class="dialog deals ctl"><div class="dhead"><h2>Leitstand</h2><button class="x" aria-label="Schließen">${ICONS.close}</button></div><div class="tabs ctltabs">${[
       ['overview', 'Verlauf'],
       ['devices', 'Anlagen'],
-      ['fleet', 'Flotte'],
       ['rules', 'Regeln'],
       ['power', 'Strom'],
       ['log', 'Logbuch'],
@@ -826,12 +831,58 @@ export class UI {
 
     // Personal
     this.staffModal = el('div', 'modal hidden');
-    this.staffModal.innerHTML = `<div class="dialog deals"><div class="dhead"><h2>Fuhrpark und Personal</h2><button class="x" aria-label="Schließen">${ICONS.close}</button></div><div class="body"></div></div>`;
+    this.staffModal.innerHTML = `<div class="dialog deals staffdlg"><div class="dhead"><h2>Fuhrpark und Personal</h2><button class="x" aria-label="Schließen">${ICONS.close}</button></div><div class="atabs"><button data-stab="fleet">Trucks<i class="adot"></i></button><button data-stab="staff">Personal<i class="adot"></i></button></div><div class="body"></div></div>`;
     this.staffBody = this.staffModal.querySelector('.body')!;
     this.staffModal.querySelector('.x')!.addEventListener('click', () => this.staffModal.classList.add('hidden'));
     this.staffModal.addEventListener('click', (e) => {
       const t = e.target as HTMLElement;
       if (t === this.staffModal) return this.staffModal.classList.add('hidden');
+      const sim = this.game.sim;
+      const stab = t.closest<HTMLElement>('[data-stab]');
+      if (stab) {
+        this.staffTab = stab.dataset.stab as typeof this.staffTab;
+        this.renderStaff(true);
+        (this.staffBody.closest('.dialog') as HTMLElement).scrollTop = 0;
+        click();
+        return;
+      }
+      const ff = t.closest<HTMLElement>('[data-ffilter]');
+      if (ff) {
+        const f = ff.dataset.ffilter as typeof this.fleetFilter;
+        this.fleetFilter = this.fleetFilter === f ? 'all' : f;
+        this.renderStaff(true);
+        click();
+        return;
+      }
+      // Truck in der Liste: antippen klappt ihn auf
+      const fr = t.closest<HTMLElement>('[data-frole]');
+      const fa = t.closest<HTMLElement>('[data-fact]');
+      const fh = t.closest<HTMLElement>('[data-ftruck]');
+      if (fr) {
+        const [id, role] = fr.dataset.frole!.split(':');
+        sim.setRole(Number(id), role as TruckRole);
+        click();
+      } else if (fa) {
+        const [what, idS] = fa.dataset.fact!.split(':');
+        const id = Number(idS);
+        const tr = sim.trucks.find((x) => x.id === id);
+        if (tr && what === 'show') {
+          this.staffModal.classList.add('hidden');
+          this.game.selected = { kind: 'truck', id };
+          const p = { x: Math.round(tr.fx), y: Math.round(tr.fy) };
+          this.game.focusTile(p.x, p.y);
+          return;
+        }
+        if (tr) {
+          const r = what === 'agv' ? sim.upgrade('truck', id) : what === 'over' ? sim.overhaul('truck', id) : what === 'new' ? sim.replaceTruck(id) : null;
+          if (r && !r.ok) this.game.fail(r.reason ?? 'Nicht möglich');
+          else if (r) this.game.sound.play('upgrade');
+        }
+      } else if (fh) {
+        const id = Number(fh.dataset.ftruck);
+        this.fleetOpen = this.fleetOpen === id ? -1 : id;
+        click();
+      }
       const fl = t.closest<HTMLElement>('[data-fleet]');
       if (fl) this.game.setAllRoles(fl.dataset.fleet as TruckRole);
       const h = t.closest<HTMLElement>('[data-hire]');
@@ -1819,24 +1870,24 @@ export class UI {
       cranesBroken: sim.cranes.filter((c) => c.wear >= 1).length,
     };
     const key = roles.map((r) => `${sim.staff[r]}:${sim.sick[r].length}:${sim.staffNeed(r)}:${Math.round(sim.xp[r] * 100)}`).join('|') + JSON.stringify(fleet) + byRole.join() + `|${sim.nightShift}|${sim.wagePolicy}|${Math.round(sim.mood * 100)}|${roles.map((r) => `${sim.trainLeft[r]}${Math.floor(sim.money / 5000)}`).join()}`;
-    if (!force && key === this.lastStaff) return;
-    this.lastStaff = key;
+    // Die Truckliste ändert sich ständig: höchstens alle 0,6 s neu zeichnen
+    const now = performance.now();
+    const fkey = this.staffTab === 'fleet' ? this.fleetKey() : '';
+    const full = `${this.staffTab}|${key}|${fkey}`;
+    if (!force && (full === this.lastStaff || now - this.lastStaffT < 600)) return;
+    this.lastStaff = full;
+    this.lastStaffT = now;
+    for (const b of this.staffModal.querySelectorAll<HTMLElement>('[data-stab]')) {
+      b.classList.toggle('on', b.dataset.stab === this.staffTab);
+      // Punkt am Reiter: Hier ist etwas zu tun
+      b.classList.toggle('can', b.dataset.stab === 'fleet' ? fleet.broken + fleet.noDriver > 0 && this.staffTab !== 'fleet' : roles.some((r) => sim.staffAvail(r) < sim.staffNeed(r)) && this.staffTab !== 'staff');
+    }
+    if (this.staffTab === 'fleet') {
+      this.staffBody.innerHTML = this.fleetHtml(fleet, byRole);
+      return;
+    }
     const total = roles.reduce((n, r) => n + sim.staff[r] * sim.wagePerHour(r), 0);
-    const dot = (r: TruckRole) => (ROLE_DOT[r] ? `<span class="dot" style="background:${ROLE_DOT[r]}"></span>` : '<span class="dot hollow"></span>');
     this.staffBody.innerHTML = `
-      <h3>Fuhrpark</h3>
-      <div class="stats">
-        <div><b>${fleet.total}</b><span>Trucks</span></div>
-        <div><b>${fleet.agv}</b><span>fahrerlos</span></div>
-        <div><b>${fleet.idle}</b><span>ohne Auftrag</span></div>
-        <div class="${fleet.jam ? 'warn' : ''}"><b>${fleet.jam}</b><span>im Stau</span></div>
-        <div class="${fleet.broken ? 'bad' : ''}"><b>${fleet.broken}</b><span>ausgefallen</span></div>
-        <div class="${fleet.noDriver ? 'bad' : ''}"><b>${fleet.noDriver}</b><span>ohne Fahrer</span></div>
-      </div>
-      <div class="roleList">${byRole.map(([r, n]) => `<div>${dot(r)}<span>${ROLE_NAMES[r].name}</span><b>${n}</b></div>`).join('')}</div>
-      ${fleet.worn ? `<p class="sub">${fleet.worn} Trucks sind über 75 % abgenutzt.</p>` : ''}
-      <div class="pm"><button class="secondary" data-fleet="auto">Alle auf Automatik</button></div>
-      <p class="sub">Kräne: ${fleet.cranes}, davon ${fleet.big} Containerbrücken${fleet.cranesBroken ? `, <span class="neg">${fleet.cranesBroken} ausgefallen</span>` : ''}.</p>
       <h3>Betrieb und Stimmung</h3>
       <div class="deal">
         <div class="dl"><b>Stimmung</b><span class="tag ${sim.mood < 0.35 ? 'neg' : ''}">${Math.round(sim.mood * 100)} %</span></div>
@@ -1868,6 +1919,87 @@ export class UI {
         })
         .join('')}
       <p class="sub">Löhne gesamt: ${eur(total)} pro Stunde, ${eur(total * 24)} pro Tag.</p>`;
+  }
+
+  /** Kurzer Zustand eines Trucks für die Liste: Text und Farbe */
+  private truckState(t: Truck): [string, string] {
+    if (t.build) return ['Überholung', 'warn'];
+    if (t.wear >= 1) return ['ausgefallen', 'bad'];
+    if (!t.staffed) return ['ohne Fahrer', 'bad'];
+    if (t.stuck > 0) return ['im Stau', 'warn'];
+    if (t.job) return ['unterwegs', 'go'];
+    if (t.parked) return ['parkt', 'idle'];
+    return ['frei', 'idle'];
+  }
+  private fleetKey(): string {
+    const sim = this.game.sim;
+    return `${this.fleetFilter}|${this.fleetOpen}|${sim.level}|${Math.floor(sim.money / 10000)}|${sim.trucks
+      .map((t) => `${t.id}${t.role}${t.agv ? 1 : 0}${Math.round(t.wear * 20)}${Math.round(t.cap * 20)}${this.truckState(t)[0]}${t.job ? `${t.job.stage}${t.job.cargo}` : ''}${t.load}`)
+      .join(',')}`;
+  }
+  /** Reiter „Trucks“: Kennzahlen, Filter und die ganze Flotte als Liste */
+  private fleetHtml(fleet: { total: number; agv: number; idle: number; jam: number; broken: number; noDriver: number; worn: number; cranes: number; big: number; cranesBroken: number }, byRole: (readonly [TruckRole, number])[]): string {
+    const sim = this.game.sim;
+    const problem = (t: Truck) => !!t.build || t.wear >= 1 || !t.staffed || t.stuck > 0 || t.wear > 0.75;
+    const idle = (t: Truck) => !t.job && t.wear < 1 && !t.build;
+    const list = sim.trucks.map((t, i) => [t, i] as const).filter(([t]) => (this.fleetFilter === 'problem' ? problem(t) : this.fleetFilter === 'idle' ? idle(t) : true));
+    const nProblem = sim.trucks.filter(problem).length;
+    const roles = (Object.keys(ROLE_NAMES) as TruckRole[]).filter((r) => (r !== 'plant' && r !== 'export') || sim.level >= 2);
+    const dot = (r: TruckRole) => (ROLE_DOT[r] ? `<span class="dot" style="background:${ROLE_DOT[r]}"></span>` : '<span class="dot hollow"></span>');
+    const tile = (n: number, label: string, cls: string, f?: string) =>
+      `<div class="${cls} ${f ? 'tap' : ''} ${f && this.fleetFilter === f ? 'sel' : ''}" ${f ? `data-ffilter="${f}"` : ''}><b>${n}</b><span>${label}</span></div>`;
+    const rows = list
+      .map(([t, i]) => {
+        const [st, cls] = this.truckState(t);
+        const cond = Math.round((1 - t.wear) * 100);
+        const cap = Math.round(t.cap * 100);
+        const open = this.fleetOpen === t.id;
+        const what = t.build ? 'In der Generalüberholung' : t.job && t.wear < 1 ? jobText(t.job) : sim.truckWhy(t) || 'Wartet auf einen Auftrag';
+        let more = '';
+        if (open) {
+          const up = sim.upgradeInfo('truck', t.id);
+          const over = sim.canOverhaul('truck', t.id);
+          more = `<div class="fmore">
+            <div class="fstats"><span>Zustand <b class="${t.wear > 0.75 ? 'neg' : ''}">${cond} %</b></span><span>Höchstwert <b class="${cap < 60 ? 'neg' : ''}">${cap} %</b></span><span>Geladen <b>${t.load}</b></span>${t.zone ? `<span>Zone <b>${t.zone}</b></span>` : ''}</div>
+            <div class="progress cap"><span class="${t.wear > 0.75 ? 'low' : ''}" style="width:${cond}%"></span><i style="left:${cap}%"></i></div>
+            ${cap < 60 ? '<div class="meta neg">Alt: fällt öfter aus. Überholen oder tauschen.</div>' : ''}
+            <div class="rolelabel">Aufgabe</div>
+            <div class="roles">${roles.map((r) => `<button data-frole="${t.id}:${r}" class="${t.role === r ? 'on' : ''}">${ROLE_NAMES[r].name}</button>`).join('')}</div>
+            <div class="meta">${ROLE_NAMES[t.role].text}${t.role === 'auto' ? '' : ' Feste Aufgabe: 25 % schneller, lädt doppelt so schnell.'}</div>
+            <div class="facts">
+              <button class="secondary" data-fact="show:${t.id}">Auf der Karte zeigen</button>
+              ${!t.build && t.cap < 0.9 ? `<button class="secondary" data-fact="over:${t.id}" ${over.ok ? '' : 'disabled'}>Überholen · ${eur(over.cost)}</button>` : ''}
+              ${t.cap < 0.8 || t.wear > 0.6 ? `<button class="secondary" data-fact="new:${t.id}">Neu tauschen · ${eur(sim.replaceCost(t.id))}</button>` : ''}
+              ${!t.agv && up ? (sim.level >= up.level ? `<button class="primary" data-fact="agv:${t.id}">Fahrerlos machen · ${eur(up.cost)}</button>` : `<div class="locknote">${ICONS.lock}<span>Fahrerlos ab Hafenstufe ${up.level}</span></div>`) : ''}
+            </div>
+          </div>`;
+        }
+        return `<div class="frow ${open ? 'open' : ''} ${cls}">
+          <button class="fhead" data-ftruck="${t.id}">
+            <span class="fnum" style="--rc:${ROLE_DOT[t.role] ?? '#8a96a6'}">${i + 1}</span>
+            <span class="fname"><b>${t.agv ? 'Fahrerlos' : 'Truck'} ${i + 1}</b><small>${ROLE_NAMES[t.role].name} · ${what}</small></span>
+            <span class="fside"><span class="fst ${cls}">${st}</span><span class="fwear" title="Zustand ${cond} %"><i class="${t.wear > 0.75 ? 'low' : ''}" style="width:${cond}%"></i></span></span>
+          </button>${more}</div>`;
+      })
+      .join('');
+    return `
+      <div class="stats">
+        ${tile(fleet.total, 'Trucks', '', 'all')}
+        ${tile(fleet.agv, 'fahrerlos', '')}
+        ${tile(fleet.idle, 'ohne Auftrag', '', 'idle')}
+        ${tile(fleet.jam, 'im Stau', fleet.jam ? 'warn' : '', 'problem')}
+        ${tile(fleet.broken, 'ausgefallen', fleet.broken ? 'bad' : '', 'problem')}
+        ${tile(fleet.noDriver, 'ohne Fahrer', fleet.noDriver ? 'bad' : '', 'problem')}
+      </div>
+      <div class="roleList">${byRole.map(([r, n]) => `<div>${dot(r)}<span>${ROLE_NAMES[r].name}</span><b>${n}</b></div>`).join('')}</div>
+      <div class="pm"><button class="secondary" data-fleet="auto">Alle auf Automatik</button></div>
+      <div class="ffilter">
+        <button data-ffilter="all" class="${this.fleetFilter === 'all' ? 'on' : ''}">Alle ${sim.trucks.length}</button>
+        <button data-ffilter="idle" class="${this.fleetFilter === 'idle' ? 'on' : ''}">Frei ${sim.trucks.filter(idle).length}</button>
+        <button data-ffilter="problem" class="${this.fleetFilter === 'problem' ? 'on' : ''}">Probleme ${nProblem}</button>
+      </div>
+      <div class="flist">${rows || '<p class="sub">Hier ist gerade kein Truck.</p>'}</div>
+      <p class="sub">Tippe einen Truck an für Aufgabe, Zustand und Werkstatt. Kräne: ${fleet.cranes}, davon ${fleet.big} Containerbrücken${fleet.cranesBroken ? `, <span class="neg">${fleet.cranesBroken} ausgefallen</span>` : ''}.</p>`;
   }
 
   private contractCard(c: Contract, active: boolean, canAccept: boolean): string {
@@ -1954,25 +2086,6 @@ export class UI {
             .map(({ e, i }) => `<div class="logrow ${e.kind} ${e.x !== undefined ? 'go' : ''}" data-log="${i}"><span class="lt">Tag ${e.day} · ${e.clock}</span><span>${esc(e.text)}</span></div>`)
             .join('')}</div>`
         : '<p class="sub">Noch keine Meldungen in dieser Sitzung.</p>';
-    } else if (this.ctlTab === 'fleet') {
-      const status = (t: (typeof sim.trucks)[number]) => (t.build ? 'Überholung' : t.wear >= 1 ? 'ausgefallen' : !t.staffed ? 'ohne Fahrer' : t.stuck > 0 ? 'im Stau' : t.job ? 'unterwegs' : 'frei');
-      html = `<p class="sub">Alle Trucks auf einen Blick. Rolle antippen wechselt sie. ${sim.trucks.length} Trucks, davon ${sim.trucks.filter((t) => t.agv).length} fahrerlos.</p>
-        <div class="fleet">${sim.trucks
-          .map((t, i) => {
-            const w = Math.round((1 - t.wear) * 100);
-            const cap = Math.round(t.cap * 100);
-            const up = sim.upgradeInfo('truck', t.id);
-            return `<div class="fleetrow ${t.wear >= 1 ? 'bad' : ''}">
-              <div class="fh"><b>${i + 1}. ${t.agv ? 'Fahrerlos' : 'Truck'}</b><span class="tag">${status(t)}</span><button class="chip" data-fl="role:${t.id}">${ROLE_NAMES[t.role].name}</button></div>
-              <div class="progress cap"><span style="width:${w}%"></span><i style="left:${cap}%"></i></div>
-              <div class="fb"><span>Zustand ${w} % · Höchstwert ${cap} %</span>
-                <button data-fl="show:${t.id}">Zeigen</button>
-                ${!t.agv && up && sim.level >= up.level ? `<button data-fl="agv:${t.id}">Fahrerlos ${eur(up.cost)}</button>` : ''}
-                ${t.cap < 0.9 ? `<button data-fl="over:${t.id}">Überholen ${eur(sim.overhaulCost('truck', t.id))}</button>` : ''}
-                ${t.cap < 0.8 || t.wear > 0.6 ? `<button data-fl="new:${t.id}">Neu tauschen ${eur(sim.replaceCost(t.id))}</button>` : ''}
-              </div></div>`;
-          })
-          .join('')}</div>`;
     } else if (this.ctlTab === 'rules') {
       const opt = <K extends string>(rec: Record<K, string>, sel: K) =>
         (Object.keys(rec) as K[]).map((k) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${rec[k]}</option>`).join('');
