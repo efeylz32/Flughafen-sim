@@ -1127,6 +1127,33 @@ describe('Bauzeit, Gebrauchtkauf und Höchstzustand', () => {
     expect(g.staffed).toBe(true);
   });
 
+  it('voller Stapelplatz: Trucks mit fester Aufgabe helfen beim Räumen, wenn sie sonst nichts zu tun haben', () => {
+    const sim = basicPort(3, 1);
+    sim.nextShipIn = 1e9;
+    for (const t of sim.trucks) sim.setRole(t.id, 'crane');
+    // Kein Schiff, also keine Kranfahrten. Stapelplatz zu 90 % voll.
+    const cap = sim.yardCapacity;
+    let left = Math.ceil(cap * 0.9);
+    for (const i of sim.yardTileList) {
+      const n = Math.min(left, 6);
+      sim.stock[i] = n;
+      left -= n;
+    }
+    expect(sim.yardStock / cap).toBeGreaterThan(0.8);
+    const before = sim.yardStock;
+    run(sim, 2);
+    expect(sim.yardStock).toBeLessThan(before);
+    // Sie bleiben in ihrer Rolle und fahren als Aushilfe
+    expect(sim.trucks.every((t) => t.role === 'crane')).toBe(true);
+    // Unter der Schwelle bleiben sie stehen
+    const calm = basicPort(3, 1);
+    calm.nextShipIn = 1e9;
+    for (const t of calm.trucks) calm.setRole(t.id, 'crane');
+    calm.stock[calm.yardTileList[0]] = 6;
+    run(calm, 2);
+    expect(calm.stock[calm.yardTileList[0]]).toBe(6);
+  });
+
   it('Gebrauchtmarkt: Einzelstück mit eigenem Zustand, nach dem Kauf weg, Rückgängig bringt es zurück', () => {
     const sim = new Sim();
     for (let x = 4; x < 8; x++) sim.build('kai', x, k);

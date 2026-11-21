@@ -209,7 +209,7 @@ function jobText(j: Job | null): string {
   const cargo = { imp: 'Container', rimp: 'Bahn-Container', reef: 'Kühlcontainer', haz: 'Gefahrgut', empty: 'Leercontainer', exp: 'Export-Container', ware: 'ausgepackte Ware', prem: 'Fertigware', food: 'Lebensmittel' }[j.cargo];
   if (j.stage === 0) return `Fährt zu: ${j.srcKind === 'crane' ? 'Kran' : j.srcKind === 'gate' ? 'Gate' : j.srcKind === 'plant' ? 'Verarbeitung' : j.srcKind === 'rail' ? 'Gleisanschluss' : store}`;
   const dst = j.dstKind === 'store' ? store : j.dstKind === 'gate' ? 'Gate' : j.dstKind === 'rail' ? 'Gleisanschluss' : j.dstKind === 'plant' ? 'Verarbeitung' : 'Kran';
-  return `Bringt ${cargo} zu: ${dst}`;
+  return `${j.help ? 'Hilft beim Räumen: ' : ''}Bringt ${cargo} zu: ${dst}`;
 }
 
 const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
@@ -2007,7 +2007,7 @@ export class UI {
     if (t.wear >= 1) return ['ausgefallen', 'bad'];
     if (!t.staffed) return ['ohne Fahrer', 'bad'];
     if (t.stuck > 0) return ['im Stau', 'warn'];
-    if (t.job) return ['unterwegs', 'go'];
+    if (t.job) return t.job.help ? ['hilft aus', 'go'] : ['unterwegs', 'go'];
     if (t.parked) return ['parkt', 'idle'];
     return ['frei', 'idle'];
   }
@@ -2045,7 +2045,7 @@ export class UI {
             ${cap < 60 ? '<div class="meta neg">Alt: fällt öfter aus. Überholen oder tauschen.</div>' : ''}
             <div class="rolelabel">Aufgabe</div>
             <div class="roles">${roles.map((r) => `<button data-frole="${t.id}:${r}" class="${t.role === r ? 'on' : ''}">${ROLE_NAMES[r].name}</button>`).join('')}</div>
-            <div class="meta">${ROLE_NAMES[t.role].text}${t.role === 'auto' ? '' : ' Feste Aufgabe: 25 % schneller, lädt doppelt so schnell.'}</div>
+            <div class="meta">${ROLE_NAMES[t.role].text}${t.role === 'auto' ? '' : ' Feste Aufgabe: 25 % schneller, lädt doppelt so schnell. Ohne eigene Fahrt hilft er ab 80 % vollem Stapelplatz beim Räumen.'}</div>
             <div class="facts">
               <button class="secondary" data-fact="show:${t.id}">Auf der Karte zeigen</button>
               ${!t.build && t.cap < 0.9 ? `<button class="secondary" data-fact="over:${t.id}" ${over.ok ? '' : 'disabled'}>Überholen · ${eur(over.cost)}</button>` : ''}
@@ -2172,7 +2172,11 @@ export class UI {
       html = `<p class="sub">Regeln werden jede Spielstunde geprüft. Ist die Bedingung erfüllt, führt der Leitstand die Aktion aus. Spätere Regeln gewinnen bei Widerspruch.</p>
         ${sim.rules
           .map(
-            (r, i) => `<div class="rule ${r.on ? '' : 'off'}"><span><b>Wenn</b> ${RULE_CONDS[r.cond]} <b>dann</b> ${RULE_ACTS[r.act]}</span><div class="ruleb"><button class="secondary" data-rule="toggle:${i}">${r.on ? 'Aus' : 'An'}</button><button class="secondary" data-rule="del:${i}">Löschen</button></div></div>`,
+            (r, i) => `<div class="rule ${r.on ? '' : 'off'}"><span><b>Wenn</b> ${RULE_CONDS[r.cond]} <b>dann</b> ${RULE_ACTS[r.act]}</span>${
+              r.cond === 'yardHigh' && (r.act === 'role:export' || r.act === 'role:crane' || r.act === 'role:plant')
+                ? `<div class="meta warnline">Das räumt den Stapelplatz nicht: ${r.act === 'role:export' ? 'Export holt neue Container vom Gate ins Lager und bringt sie erst zum Kran, wenn ein Schiff lädt' : r.act === 'role:crane' ? 'Kran räumen bringt Container ins Lager' : 'Verarbeitung fährt zu den Hallen'}. Zum Räumen ist „Ausgang“ richtig. Freie Trucks helfen ab 80 % ohnehin von selbst aus.</div>`
+                : ''
+            }<div class="ruleb"><button class="secondary" data-rule="toggle:${i}">${r.on ? 'Aus' : 'An'}</button><button class="secondary" data-rule="del:${i}">Löschen</button></div></div>`,
           )
           .join('') || '<p class="sub">Noch keine Regel.</p>'}
         <div class="rule new"><label>Wenn <select name="cond">${opt(RULE_CONDS, this.newRule.cond)}</select></label><label>dann <select name="act">${opt(RULE_ACTS, this.newRule.act)}</select></label><button class="primary" data-rule="add:0">Regel hinzufügen</button></div>`;
@@ -2490,7 +2494,7 @@ export class UI {
       const roles = (Object.keys(ROLE_NAMES) as TruckRole[]).filter((r) => r !== 'plant' || sim.level >= 2).filter((r) => r !== 'export' || sim.level >= 2);
       actions = `<div class="rolelabel">Aufgabe</div><div class="roles">${roles
         .map((r) => `<button data-role="${r}" class="${t.role === r ? 'on' : ''}">${ROLE_NAMES[r].name}</button>`)
-        .join('')}</div><div class="meta">${ROLE_NAMES[t.role].text}${t.role === 'auto' ? '' : ' Feste Aufgabe: 25 % schneller, lädt doppelt so schnell.'}</div>`;
+        .join('')}</div><div class="meta">${ROLE_NAMES[t.role].text}${t.role === 'auto' ? '' : ' Feste Aufgabe: 25 % schneller, lädt doppelt so schnell. Ohne eigene Fahrt hilft er ab 80 % vollem Stapelplatz beim Räumen.'}</div>`;
       if (!t.agv) actions += upgradeBtn('truck', 'Fahrerlos machen', sim.upgradeInfo('truck', t.id)!);
       if (!t.build) actions += overhaulBtn('truck', t.id, t.cap);
     }

@@ -42,6 +42,7 @@ import {
   TUNNEL_MUL,
   BRIDGE_MUL,
   PARK_SLOTS,
+  YARD_HELP,
   USED_SELLERS,
   USED_HOURS,
   USED_NEW_PER_HOUR,
@@ -348,6 +349,8 @@ export interface Job {
   tgt: [number, number];
   /** Anzahl Container auf dieser Fahrt */
   n: number;
+  /** Truck mit fester Aufgabe hilft aus (voller Stapelplatz) */
+  help?: boolean;
 }
 
 /** Ein Gerät auf dem Gebrauchtmarkt: jedes Angebot ist ein Einzelstück */
@@ -2658,17 +2661,26 @@ export class Sim {
   private assignJob(t: Truck) {
     let bestScore = 0;
     let best: Job | null = null;
-    // Jede Fahrt gehört zu einer Aufgabe. Trucks mit fester Aufgabe nehmen nur die passenden.
-    const offer = (tag: string, weight: number, dist: number, job: Job) => {
-      if (job.n <= 0 || (t.role !== 'auto' && !tag.includes(t.role))) return;
-      const score = weight / (1 + dist / (15 * DIST_UNIT));
-      if (score > bestScore) {
-        bestScore = score;
-        best = job;
-      }
-    };
+    let helpScore = 0;
+    let helpBest: Job | null = null;
     const cap = this.yardCapacity;
     const fill = cap ? this.yardStock / cap : 0;
+    // Voller Stapelplatz: Wer für seine feste Aufgabe nichts findet, hilft beim Räumen (Lager zu Gate oder Bahn)
+    const help = t.role !== 'auto' && fill > YARD_HELP;
+    // Jede Fahrt gehört zu einer Aufgabe. Trucks mit fester Aufgabe nehmen nur die passenden.
+    const offer = (tag: string, weight: number, dist: number, job: Job) => {
+      if (job.n <= 0) return;
+      const score = weight / (1 + dist / (15 * DIST_UNIT));
+      if (t.role === 'auto' || tag.includes(t.role)) {
+        if (score > bestScore) {
+          bestScore = score;
+          best = job;
+        }
+      } else if (help && job.srcKind === 'store' && (job.dstKind === 'gate' || job.dstKind === 'rail') && job.cargo !== 'empty' && score > helpScore) {
+        helpScore = score;
+        helpBest = job;
+      }
+    };
     const press = fill > 0.8 ? 1.4 : 1;
     // Trucks mit Zone fahren nur innerhalb ihrer Zone, Fahrten verbinden nur gleiche Zonen
     const zOk = (z: number) => t.zone === 0 || t.zone === z;
@@ -2942,7 +2954,11 @@ export class Sim {
       }
     }
 
-    const job = best as Job | null;
+    let job = best as Job | null;
+    if (!job && helpBest) {
+      job = helpBest as Job;
+      job.help = true;
+    }
     if (!job) return;
     this.srcRes(job, job.n);
     this.dstRes(job, job.n);
@@ -3078,7 +3094,7 @@ export class Sim {
     const tgt = j.tgt[j.stage];
 
     if (t.tile === tgt && t.next < 0) {
-      t.wait = TRUCK_HANDLE_GM * (t.role === 'auto' ? 1 : ROUTINE_HANDLE);
+      t.wait = TRUCK_HANDLE_GM * (t.role === 'auto' || t.job?.help ? 1 : ROUTINE_HANDLE);
       const storeTile = j.stage === 0 ? (j.srcKind === 'store' ? j.src : -1) : j.dstKind === 'store' ? j.dst : -1;
       if (storeTile >= 0 && this.rtgCovers(storeTile)) t.wait *= RTG_HANDLE;
       // Hohe Stapel: Wer unten steht, muss erst freigeräumt werden (Abholen vom Lager)
@@ -3162,7 +3178,7 @@ export class Sim {
       t.stuck = 0;
     }
 
-    t.prog += (t.agv ? AGV_SPEED : TRUCK_SPEED) * ROAD_SPEED[this.roadTier[t.next]] * (t.agv ? 1 : this.eff('driver')) * (1 + 0.08 * this.tech.engine) * (this.hasProject('control') ? 1.1 : 1) * (t.role === 'auto' ? 1 : ROUTINE_SPEED) * (1 - WEAR_SLOWDOWN * t.wear) * dt;
+    t.prog += (t.agv ? AGV_SPEED : TRUCK_SPEED) * ROAD_SPEED[this.roadTier[t.next]] * (t.agv ? 1 : this.eff('driver')) * (1 + 0.08 * this.tech.engine) * (this.hasProject('control') ? 1.1 : 1) * (t.role === 'auto' || t.job?.help ? 1 : ROUTINE_SPEED) * (1 - WEAR_SLOWDOWN * t.wear) * dt;
     if (this.level >= 2) {
       this.addWear(t, WEAR_TRUCK_PER_GM * this.wearMul * (this.tech.diesel ? 1.3 : 1) * dt);
       if (t.wear >= 1) this.noteBroken('Ein Truck', { x: t.px, y: t.py });
@@ -3467,7 +3483,12 @@ export class Sim {
     if (t.stuck > 0) return 'Steht im Stau.';
     if (t.job) return '';
     if (t.parked) return 'Wartet auf dem Stellplatz auf einen Auftrag.';
-    if (t.role !== 'auto') return 'Für seine feste Rolle gibt es gerade keine Fahrt.';
+    if (t.role !== 'auto') {
+      const cap = this.yardCapacity;
+      return cap && this.yardStock / cap > YARD_HELP
+        ? 'Für seine feste Rolle gibt es gerade keine Fahrt. Er hilft beim Räumen, sobald ein Gate oder Zug Container abnimmt.'
+        : 'Für seine feste Rolle gibt es gerade keine Fahrt. Ab 80 % vollem Stapelplatz hilft er beim Räumen.';
+    }
     return 'Kein Auftrag: Gerade ist nichts zu fahren.';
   }
 

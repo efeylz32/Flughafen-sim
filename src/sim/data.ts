@@ -436,6 +436,8 @@ export const ROLE_NAMES: Record<TruckRole, { name: string; text: string }> = {
   export: { name: 'Export', text: 'Holt Export am Gate ab und bringt ihn zum Kran.' },
   plant: { name: 'Verarbeitung', text: 'Versorgt Packhalle und Veredelung und fährt die Fertigware raus.' },
 };
+/** Ab dieser Füllung des Stapelplatzes helfen Trucks mit fester Aufgabe beim Räumen, wenn sie für ihre Rolle nichts zu tun haben */
+export const YARD_HELP = 0.8;
 /** Funkzeit der Automatik vor jeder Fahrt in Spielminuten */
 export const DISPATCH_GM = 0.6;
 
