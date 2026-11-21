@@ -809,3 +809,10 @@ html, body { touch-action: none; overscroll-behavior: none; }
 .uoff .ubuy { display: flex; flex-direction: column; align-items: center; border: 0; border-radius: 12px; padding: 8px 10px; margin-top: 3px; line-height: 1.2; }
 .uoff .ubuy span { font-weight: 800; font-size: 14.5px; }
 .uoff .ubuy small { font-weight: 700; font-size: 12px; opacity: .9; }
+
+/* Lotsenturm: Liegeplätze im Überblick */
+.berthrep { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.berthrep .br { display: grid; grid-template-columns: auto 1fr auto; column-gap: 10px; row-gap: 1px; align-items: baseline; background: #f4f7fb; border-radius: 12px; padding: 8px 10px; font-size: 13.5px; }
+.berthrep .br span:nth-child(2) { color: #34455a; }
+.berthrep .br span:nth-child(3) { font-weight: 800; }
+.berthrep .br small { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }

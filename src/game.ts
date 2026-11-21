@@ -803,6 +803,7 @@ export class Game {
         else if (k === T.Solar) add('solar', x, y);
         else if (k === T.Battery) add('battery', x, y);
         else if (k === T.Customs) add('customs', x, y);
+        else if (k === T.Tower) add('tower', x, y);
         else if (k === T.Track) add('track', x, y);
         else if (k === T.Parking) add('parking', x, y);
       }
@@ -1186,6 +1187,7 @@ export class Game {
       else if (k === T.Kai) this.selected = { kind: 'kai', id: sim.idx(tx, ty) };
       else if (k === T.Hazmat) this.selected = { kind: 'hazmat', id: sim.idx(tx, ty) };
       else if (k === T.Empty) this.selected = { kind: 'emptyyard', id: sim.idx(tx, ty) };
+      else if (k === T.Tower) this.selected = { kind: 'tower', id: sim.idx(tx, ty) };
     }
     if (this.selected && (this.selected.kind !== before?.kind || this.selected.id !== before?.id)) this.sound.play('click');
   }

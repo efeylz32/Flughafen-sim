@@ -8,7 +8,7 @@ import { Sim } from '../src/sim/sim';
 import { GrowBot, helpMilestones } from './growbot';
 import { StuckWatch, checkState } from './invariants';
 
-const TOOLS: BuildTool[] = ['kai', 'crane', 'lcrane', 'road', 'road2', 'hwy', 'yard', 'reefer', 'hazard', 'emptyyard', 'gate', 'truck', 'unpack', 'pack', 'cold', 'fill', 'workshop', 'solar', 'battery', 'customs', 'track', 'parking', 'rtg', 'rail', 'dredge'];
+const TOOLS: BuildTool[] = ['kai', 'crane', 'lcrane', 'road', 'road2', 'hwy', 'yard', 'reefer', 'hazard', 'emptyyard', 'gate', 'truck', 'unpack', 'pack', 'cold', 'fill', 'workshop', 'solar', 'battery', 'customs', 'tower', 'track', 'parking', 'rtg', 'rail', 'dredge'];
 const ROLES: TruckRole[] = ['auto', 'crane', 'out', 'export', 'plant'];
 const CONDS: RuleCond[] = ['yardHigh', 'yardLow', 'shipsWait', 'night', 'day', 'reeferHigh', 'powerOut'];
 const ACTS: RuleAct[] = ['role:auto', 'role:crane', 'role:out', 'role:export', 'role:plant', 'shift:on', 'shift:off'];

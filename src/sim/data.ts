@@ -48,9 +48,10 @@ export enum T {
   Parking = 16,
   Hill = 17,
   Customs = 18,
+  Tower = 19,
 }
 
-export type Tool = 'view' | 'kai' | 'crane' | 'lcrane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'road2' | 'hwy' | 'solar' | 'battery' | 'customs' | 'track' | 'parking' | 'rtg' | 'hazard' | 'emptyyard' | 'fill' | 'assign' | 'copy' | 'paste' | 'yarduse' | 'zone' | 'oneway' | 'overpass' | 'buyland' | 'berth' | 'demolish';
+export type Tool = 'view' | 'kai' | 'crane' | 'lcrane' | 'road' | 'yard' | 'reefer' | 'gate' | 'rail' | 'truck' | 'dredge' | 'unpack' | 'pack' | 'cold' | 'workshop' | 'road2' | 'hwy' | 'solar' | 'battery' | 'customs' | 'tower' | 'track' | 'parking' | 'rtg' | 'hazard' | 'emptyyard' | 'fill' | 'assign' | 'copy' | 'paste' | 'yarduse' | 'zone' | 'oneway' | 'overpass' | 'buyland' | 'berth' | 'demolish';
 export type BuildTool = Exclude<Tool, 'view' | 'demolish' | 'assign' | 'copy' | 'paste' | 'yarduse' | 'zone' | 'oneway' | 'overpass' | 'buyland' | 'berth'>;
 
 export const COST: Record<BuildTool, number> = {
@@ -75,6 +76,7 @@ export const COST: Record<BuildTool, number> = {
   parking: 2_000,
   battery: 40_000,
   customs: 30_000,
+  tower: 60_000,
   hwy: 4_000,
   hazard: 12_000,
   emptyyard: 2_000,
@@ -107,6 +109,7 @@ export const UNLOCK: Record<BuildTool, number> = {
   battery: 4,
   hwy: 4,
   customs: 5,
+  tower: 3,
 };
 /** Ab welcher Hafenstufe Systeme und Inhalte dazukommen (damit sich das Spiel über viele Stufen entfaltet) */
 export const LV = {

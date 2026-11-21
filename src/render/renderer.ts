@@ -21,7 +21,7 @@ export interface View {
   calm?: boolean;
   /** Blaupause, die gerade eingefügt werden soll (für die Vorschau) */
   bp?: { w: number; h: number; items: { dx: number; dy: number; tool: string; rot?: boolean }[] } | null;
-  selected: { kind: 'ship' | 'crane' | 'gate' | 'yard' | 'reefer' | 'hazmat' | 'emptyyard' | 'kai' | 'rail' | 'plant' | 'shop' | 'truck'; id: number } | null;
+  selected: { kind: 'ship' | 'crane' | 'gate' | 'yard' | 'reefer' | 'hazmat' | 'emptyyard' | 'kai' | 'rail' | 'plant' | 'shop' | 'truck' | 'tower'; id: number } | null;
   /** Anteil zwischen letztem und nächstem Tick (0..1) für weiche Bewegung. */
   alpha: number;
   /** Laufzeit in Sekunden (Echtzeit) für Animationen. */
@@ -885,6 +885,26 @@ export class Renderer {
             g.circle(px + TILE / 2, py + 12, 4).fill(0xf2c230);
             g.rect(px + 4, py + TILE - 6, TILE - 8, 2).fill(0xd9473f);
             g.rect(px + 4 + (TILE - 8) / 2, py + TILE - 6, (TILE - 8) / 4, 2).fill(0xffffff);
+            break;
+          }
+          case T.Tower: {
+            // Lotsenturm: runder Turm mit Glaskanzel und Funkmast, Schatten nach rechts unten
+            g.rect(px, py, TILE, TILE).fill(0xd7dcd2);
+            g.ellipse(px + TILE / 2 + 3, py + TILE / 2 + 4, 11, 10).fill({ color: 0x000000, alpha: 0.2 });
+            g.circle(px + TILE / 2, py + TILE / 2 + 1, 10.5).fill(0xe9edf1);
+            g.circle(px + TILE / 2, py + TILE / 2 + 1, 10.5).stroke({ width: 1.2, color: 0xb9c4cc });
+            g.circle(px + TILE / 2, py + TILE / 2 + 1, 7.2).fill(0x2f6db0);
+            g.circle(px + TILE / 2, py + TILE / 2 + 1, 7.2).stroke({ width: 1.4, color: 0x1d3550 });
+            for (let k = 0; k < 4; k++) {
+              const an = (k * Math.PI) / 2 + Math.PI / 4;
+              g.moveTo(px + TILE / 2 + Math.cos(an) * 2.5, py + TILE / 2 + 1 + Math.sin(an) * 2.5)
+                .lineTo(px + TILE / 2 + Math.cos(an) * 7, py + TILE / 2 + 1 + Math.sin(an) * 7)
+                .stroke({ width: 0.9, color: 0x9ec0ef, alpha: 0.8 });
+            }
+            g.circle(px + TILE / 2, py + TILE / 2 + 1, 2.6).fill(0xf4f8fd);
+            g.circle(px + TILE / 2, py + TILE / 2 + 1, 1.3).fill(0xd9473f);
+            g.rect(px + 3, py + 3, 4, 4).fill(0xd9473f);
+            g.rect(px + 4, py + 4, 2, 2).fill(0xffffff);
             break;
           }
           case T.Battery: {
@@ -2457,7 +2477,7 @@ export class Renderer {
       if (!r) return;
       x = r.x * TILE;
       y = r.y * TILE;
-    } else if (sel.kind === 'yard' || sel.kind === 'reefer' || sel.kind === 'hazmat' || sel.kind === 'emptyyard' || sel.kind === 'kai') {
+    } else if (sel.kind === 'yard' || sel.kind === 'reefer' || sel.kind === 'hazmat' || sel.kind === 'emptyyard' || sel.kind === 'kai' || sel.kind === 'tower') {
       x = (sel.id % GRID_W) * TILE;
       y = ((sel.id / GRID_W) | 0) * TILE;
     } else {

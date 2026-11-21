@@ -1127,6 +1127,44 @@ describe('Bauzeit, Gebrauchtkauf und Höchstzustand', () => {
     expect(g.staffed).toBe(true);
   });
 
+  it('Lotsenturm: das nächste Schiff geht an den ruhigeren Liegeplatz statt in den Stau', () => {
+    const mk = (tower: boolean) => {
+      const sim = new Sim(7);
+      sim.level = 3;
+      sim.money = 5_000_000;
+      for (let x = 4; x < 8; x++) sim.build('kai', x, k);
+      for (let x = 14; x < 18; x++) sim.build('kai', x, k);
+      sim.build('crane', 5, k);
+      sim.build('crane', 15, k);
+      for (let x = 3; x <= 20; x++) sim.build('road', x, k + 1);
+      for (let x = 9; x <= 12; x++) sim.build('yard', x, k + 2);
+      sim.build('gate', 19, k + 2);
+      sim.build('truck', 10, k + 1);
+      if (tower) {
+        expect(sim.build('tower', 2, k + 3).ok).toBe(true);
+        expect(sim.canBuild('tower', 2, k + 5).ok).toBe(false);
+      }
+      sim.finishAll();
+      sim.updateMissions(true);
+      sim.mission = Math.max(sim.mission, 6);
+      sim.nextShipIn = 1;
+      const [left, right] = sim.berths();
+      // Links noch zugestaut
+      for (let i = 0; i < 2000 && !sim.ships.some((s) => s.state === 'sailing'); i++) {
+        for (let x = 3; x <= 9; x++) sim.roadJam[sim.idx(x, k + 1)] = 10;
+        sim.tick();
+      }
+      const s = sim.ships.find((x) => x.state === 'sailing')!;
+      expect(s).toBeDefined();
+      return { at: s.berthX, left, right, piloted: !!s.piloted };
+    };
+    const without = mk(false);
+    expect(without.at).toBe(without.left);
+    const withTower = mk(true);
+    expect(withTower.at).toBe(withTower.right);
+    expect(withTower.piloted).toBe(true);
+  });
+
   it('voller Stapelplatz: Trucks mit fester Aufgabe helfen beim Räumen, wenn sie sonst nichts zu tun haben', () => {
     const sim = basicPort(3, 1);
     sim.nextShipIn = 1e9;

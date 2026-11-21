@@ -102,6 +102,7 @@ const ICONS: Record<string, string> = {
   zone: svg('<rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.5"/><rect x="13" y="3.5" width="7.5" height="7.5" rx="1.5"/><rect x="3.5" y="13" width="7.5" height="7.5" rx="1.5"/><path d="M13 16.8h7.5M16.8 13v7.5"/>'),
   chart: svg('<path d="M4 20V4M4 20h16"/><rect x="7" y="12" width="3" height="6" rx=".6"/><rect x="12" y="8" width="3" height="10" rx=".6"/><rect x="17" y="10.5" width="3" height="7.5" rx=".6"/>'),
   customs: svg('<path d="M12 3l8 3v5c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/><path d="M9 12l2 2 4-4"/>'),
+  tower: svg('<path d="M9 21l1-11h4l1 11z"/><path d="M8 10h8l-1-4H9z"/><path d="M12 6V3"/><path d="M5 5c-1 1.5-1 3.5 0 5M19 5c1 1.5 1 3.5 0 5"/>'),
   overpass: svg('<path d="M2 15h20"/><path d="M5 15v5M19 15v5"/><path d="M12 3v18" opacity=".5"/>'),
   oneway: svg('<path d="M3 12h14"/><path d="M13 7l5 5-5 5"/><path d="M3 5h18M3 19h18" opacity=".5"/>'),
   buyland: svg('<path d="M4 20V9l8-5 8 5v11z"/><path d="M9 20v-6h6v6"/><path d="M12 4v-1"/>'),
@@ -160,6 +161,7 @@ const TOOLS: ToolDef[] = [
   { cat: 'gear', tool: 'truck', label: 'Truck', sub: '25k', color: '#e0a030' },
   { cat: 'build', tool: 'unpack', label: 'Packhalle', sub: '60k · 3×2', color: '#c98a3c' },
   { cat: 'build', tool: 'pack', label: 'Veredeln', sub: '90k · 3×3', color: '#7a5cc7' },
+  { cat: 'build', tool: 'tower', label: 'Lotsenturm', sub: '60k', color: '#2f6db0' },
   { cat: 'plan', tool: 'yarduse', label: 'Zweck', sub: 'Lager', color: '#9c6b3c' },
   { cat: 'store', tool: 'rtg', label: 'Portalkran', sub: '60k', color: '#f2a030' },
   { cat: 'store', tool: 'reefer', label: 'Kühlplatz', sub: '4k', color: '#3b9bd6' },
@@ -230,6 +232,7 @@ const TIPS: Record<string, [string, string]> = {
   rail: ['Bahnterminal', 'Ein Teil der Container geht per Bahn. Das entlastet die Gates.'],
   parking: ['Stellplätze', 'Freie Trucks warten hier statt auf der Straße. Das hält die Wege frei.'],
   hwy: ['Autobahn', 'Schnell und breit, aber teuer. Lohnt sich für die Hauptachse vom Gate ins Lager.'],
+  tower: ['Lotsenturm', 'Der Lotse schickt jedes Schiff an den Liegeplatz, der am meisten schafft: Kran-Tempo, abzüglich Stau, Trucks und Container, die dort noch warten. Ist der linke Liegeplatz noch zugestaut, geht das nächste Schiff an einen ruhigeren. Einer reicht für den ganzen Hafen.'],
   customs: ['Zollhof', 'Ab dem Seehafen muss etwa jeder achte Import-Container durch den Zoll. Ohne Zollhof prüft das Gate selbst und braucht dafür dreimal so lange. Jedes Zollhof-Feld prüft 8 Container pro Stunde.'],
   overpass: ['Überführung', 'An Kreuzungen warten Trucks auf Querverkehr. Eine Überführung auf der Kreuzung hebt das auf. Nochmal tippen baut sie ab.'],
   oneway: ['Einbahnstraße', 'Tippe auf eine Straße, um die Fahrtrichtung festzulegen. Einbahnstraßen fassen mehr Trucks.'],
@@ -2362,6 +2365,7 @@ export class UI {
       const c = sim.contracts.find((c) => c.id === s.contractId);
       html = `<h3>${s.name} <span class="tag">${SHIP_TYPES[s.type].name}</span></h3>
         <div class="meta">${s.line}${c ? ` · Bonus ${eur(c.bonus)} bei pünktlicher Abfertigung` : ''}</div>
+        ${s.piloted && s.berthX >= 0 && s.state !== 'queued' ? `<div class="meta pos">Vom Lotsen an Liegeplatz ${sim.berths().indexOf(sim.berthContaining(s.berthX)) + 1} geleitet</div>` : ''}
         <div class="progress"><span style="width:${Math.round((done / s.total) * 100)}%"></span></div>
         <div class="meta">${done} von ${s.total} Containern abgeladen${s.reefers ? `, noch ${s.reefers} Kühlcontainer an Bord` : ''}</div>
         ${s.exportTotal ? `<div class="progress exp"><span style="width:${Math.round((s.loaded / s.exportTotal) * 100)}%"></span></div><div class="meta">${s.loaded} von ${s.exportTotal} Export-Containern geladen</div>` : ''}
@@ -2424,6 +2428,21 @@ export class UI {
       html = `<h3>Kaimauer <span class="tag">${closed ? 'gesperrt' : 'offen'}</span></h3>
         <div class="meta">${closed ? 'Hier legt kein neues Schiff an. Schiffe, die schon liegen, werden fertig abgefertigt.' : 'Schiffe legen hier an, wenn mindestens 4 Kai-Felder in einer Reihe frei sind.'}</div>`;
       actions = `<button class="${closed ? 'primary' : 'secondary'}" data-berth="1">${closed ? 'Liegeplatz öffnen' : 'Liegeplatz sperren'}</button>`;
+    } else if (sel.kind === 'tower') {
+      const rep = sim.berthReport();
+      const lvl = (p: number) => (p < 4 ? ['ruhig', 'pos'] : p < 10 ? ['mittel', ''] : ['viel Verkehr', 'neg']);
+      html = `<h3>Lotsenturm <span class="tag">leitet die Schiffe</span></h3>
+        <div class="meta">Jedes Schiff geht an den Liegeplatz, der am meisten schafft: Kran-Tempo, abzüglich Stau, Trucks und Container, die dort noch warten.</div>
+        <div class="berthrep">${
+          rep.length
+            ? rep
+                .map((b) => {
+                  const [t, c] = lvl(b.pressure);
+                  return `<div class="br"><b>Liegeplatz ${b.no}</b><span>${b.cranes} ${b.cranes === 1 ? 'Kran' : 'Kräne'} · ${b.moves} Moves/Std.</span><span class="${c}">${b.closed ? 'gesperrt' : t}</span><small>${b.ship ? `belegt: ${b.ship}` : 'frei'}</small></div>`;
+                })
+                .join('')
+            : '<div class="meta">Noch kein Liegeplatz.</div>'
+        }</div>`;
     } else if (sel.kind === 'hazmat') {
       html = `<h3>Gefahrgutfläche <span class="tag">${sim.capAt(sel.id)} Container pro Feld</span></h3>
         <div class="meta">Dieses Feld: ${sim.stock[sel.id]} · Gesamt: ${sim.hazStock} von ${sim.hazCapacity}</div>

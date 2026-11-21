@@ -421,6 +421,8 @@ export type ShipState = 'queued' | 'sailing' | 'unloading' | 'leaving';
 
 export interface Ship {
   id: number;
+  /** Vom Lotsenturm an den Liegeplatz geleitet */
+  piloted?: boolean;
   name: string;
   line: string;
   color: number;
@@ -750,7 +752,7 @@ const covers = (e: Box, x: number, y: number) => x >= e.x && y >= e.y && x < e.x
 const UNLOADING = 'Wird entladen.';
 const LOADING = 'Wird beladen.';
 const emptyBook = (): DayBook => ({ fees: 0, exportFees: 0, rail: 0, berth: 0, bonus: 0, penalty: 0, running: 0, wages: 0, interest: 0, building: 0, handled: 0, ships: 0, onTime: 0, bn: { crane: 0, trucks: 0, yard: 0, gate: 0 }, jamPeak: 0, power: 0 });
-const TILE_OF: Partial<Record<BuildTool, T>> = { kai: T.Kai, road: T.Road, yard: T.Yard, road2: T.Road, hwy: T.Road, solar: T.Solar, battery: T.Battery, customs: T.Customs, track: T.Track, parking: T.Parking, reefer: T.Reefer, hazard: T.Hazmat, emptyyard: T.Empty, fill: T.Plant, gate: T.Gate, rail: T.Rail, unpack: T.Plant, pack: T.Plant, cold: T.Plant, workshop: T.Shop };
+const TILE_OF: Partial<Record<BuildTool, T>> = { kai: T.Kai, road: T.Road, yard: T.Yard, road2: T.Road, hwy: T.Road, solar: T.Solar, battery: T.Battery, customs: T.Customs, tower: T.Tower, track: T.Track, parking: T.Parking, reefer: T.Reefer, hazard: T.Hazmat, emptyyard: T.Empty, fill: T.Plant, gate: T.Gate, rail: T.Rail, unpack: T.Plant, pack: T.Plant, cold: T.Plant, workshop: T.Shop };
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 
 const eur = (n: number) => `${Math.round(n).toLocaleString('de-DE')} €`;
@@ -1647,8 +1649,83 @@ export class Sim {
     return Math.hypot(s.x - p.x, s.y - p.y) < s.len + 0.5;
   }
 
-  /** Sucht einen freien Liegeplatz für ein Schiff. Liefert den x-Anfang oder -1. */
-  private findBerth(len: number, deep: boolean): number {
+  /** Gibt es einen Lotsenturm? */
+  get hasTower(): boolean {
+    for (let i = COAST_ROW * GRID_W; i < this.kind.length; i++) if (this.kind[i] === T.Tower) return true;
+    return false;
+  }
+  /** Was die Kräne an diesem Liegeplatz zusammen schaffen (Moves pro Stunde, nur einsatzbereite) */
+  berthMoves(b: number, len = SHIP_LEN): number {
+    return this.cranesAtBerth(b, len)
+      .filter((c) => !c.build && c.wear < 1 && c.staffed)
+      .reduce((n, c) => n + 60 / CRANE_MODELS[c.model].move, 0);
+  }
+  /**
+   * Verkehr rund um einen Liegeplatz: Stau auf den Straßen, Trucks in der Nähe, Fahrten für seine Kräne
+   * und Container, die noch am Kran warten. 0 = ruhig, ab etwa 10 ist dort viel los.
+   */
+  berthPressure(b: number, len = SHIP_LEN): number {
+    // Pro Spieltick nur einmal rechnen, die Einfahrt fragt jeden Tick
+    if (this.pressTick !== this.tickCount) {
+      this.pressTick = this.tickCount;
+      this.pressCache.clear();
+    }
+    const key = b * 16 + len;
+    const hit = this.pressCache.get(key);
+    if (hit !== undefined) return hit;
+    const v = this.calcPressure(b, len);
+    this.pressCache.set(key, v);
+    return v;
+  }
+  private pressTick = -1;
+  private towerHintDay = -1;
+  private pressCache = new Map<number, number>();
+  private calcPressure(b: number, len: number): number {
+    const cranes = this.cranesAtBerth(b, len);
+    const pts: [number, number][] = cranes.length ? cranes.map((c) => [c.x, c.y]) : [];
+    if (!pts.length) for (let k = 0; k < len; k++) { const t = qTile(b + k); if (t) pts.push(t); }
+    if (!pts.length) return 0;
+    const R = 4;
+    const x0 = Math.max(0, Math.min(...pts.map((p) => p[0])) - R);
+    const x1 = Math.min(GRID_W - 1, Math.max(...pts.map((p) => p[0])) + R);
+    const y0 = Math.max(0, Math.min(...pts.map((p) => p[1])) - 1);
+    const y1 = Math.min(GRID_H - 1, Math.max(...pts.map((p) => p[1])) + R + 1);
+    let jam = 0;
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) jam += Math.min(10, this.roadJam[y * GRID_W + x]);
+    let near = 0;
+    let stuck = 0;
+    for (const t of this.trucks) {
+      if (!t.job && t.wait <= 0) continue;
+      const x = Math.round(t.fx);
+      const y = Math.round(t.fy);
+      if (x < x0 || x > x1 || y < y0 || y > y1) continue;
+      near++;
+      if (t.stuck > 0) stuck++;
+    }
+    const ids = new Set(cranes.map((c) => c.id));
+    const work = this.trucks.filter((t) => t.job && ((t.job.srcKind === 'crane' && ids.has(t.job.src)) || (t.job.dstKind === 'crane' && ids.has(t.job.dst)))).length;
+    const left = cranes.reduce((n, c) => n + c.buffer + c.bufReef + c.bufHaz + c.expBuf, 0);
+    return stuck * 2 + near * 0.6 + work * 0.4 + left * 0.3 + jam * 0.15;
+  }
+  /** Für den Lotsenturm: alle Liegeplätze mit Kränen, Tempo, Verkehr und wer gerade dort liegt */
+  berthReport(): { no: number; x: number; cranes: number; moves: number; pressure: number; ship?: string; closed: boolean }[] {
+    return this.berths().map((b, i) => ({
+      no: i + 1,
+      x: b,
+      cranes: this.cranesAtBerth(b).length,
+      moves: Math.round(this.berthMoves(b)),
+      pressure: this.berthPressure(b),
+      ship: this.ships.find((s) => (s.state === 'unloading' || s.state === 'sailing') && s.berthX < b + SHIP_LEN && s.berthX + s.len > b)?.name,
+      closed: this.closedQ[b] === 1,
+    }));
+  }
+
+  /**
+   * Sucht einen freien Liegeplatz für ein Schiff. Liefert den x-Anfang oder -1.
+   * Ohne Lotsenturm zählen nur die Kräne (bei Gleichstand der linke). Mit Lotsenturm das Kran-Tempo,
+   * geteilt durch den Verkehr dort: Ist ein Liegeplatz noch zugestaut, geht das Schiff an einen ruhigeren.
+   */
+  private findBerth(len: number, deep: boolean, tower = this.hasTower): number {
     const occ = this.ships
       .filter((s) => s.state === 'sailing' || s.state === 'unloading' || (s.state === 'leaving' && s.berthX >= 0 && this.nearBerth(s)))
       .map((s) => [s.berthX, s.berthX + s.len] as const);
@@ -1666,7 +1743,11 @@ export class Sim {
       // Bündig am Rand oder an einem Nachbarschiff liegen, damit keine Lücken entstehen
       const flushL = !this.isKai(x - 1) || occ.some(([, b]) => b === x);
       const flushR = !this.isKai(x + len) || occ.some(([a]) => a === x + len);
-      const score = this.cranesAtBerth(x, len).length * 10 + (flushL ? 3 : 0) + (flushR ? 2 : 0) - (deep ? 0 : deepTiles);
+      const fit = (flushL ? 3 : 0) + (flushR ? 2 : 0) - (deep ? 0 : deepTiles);
+      const moves = tower ? this.berthMoves(x, len) : 0;
+      const score = tower
+        ? (moves > 0 ? moves / (1 + this.berthPressure(x, len) * 0.08) : -100) + fit * 0.5
+        : this.cranesAtBerth(x, len).length * 10 + fit;
       if (score > bestScore) {
         bestScore = score;
         best = x;
@@ -1716,6 +1797,7 @@ export class Sim {
       case 'solar':
       case 'battery':
       case 'customs':
+      case 'tower':
       case 'track':
       case 'parking':
       case 'gate':
@@ -1725,6 +1807,7 @@ export class Sim {
       case 'fill':
       case 'workshop':
         if (k !== T.Land) reason = k === T.Water ? 'Nicht auf dem Wasser' : 'Das Feld ist belegt';
+        else if (tool === 'tower' && this.hasTower) reason = 'Ein Lotsenturm reicht für den ganzen Hafen';
         else if (tool === 'hazard' && this.nearBuildings(x, y, 1, 1)) reason = `Gefahrgut braucht ${HAZ_DIST} Felder Abstand zu Gates, Hallen und Werkstatt`;
         else if ((tool === 'gate' || tool === 'unpack' || tool === 'pack' || tool === 'cold' || tool === 'fill' || tool === 'workshop') && this.nearHaz(x, y, sw, sh)) reason = `Zu nah an einer Gefahrgutfläche (${HAZ_DIST} Felder Abstand)`;
         break;
@@ -1796,6 +1879,7 @@ export class Sim {
       case 'solar':
       case 'battery':
       case 'customs':
+      case 'tower':
       case 'track':
       case 'parking':
         this.kind[i] = TILE_OF[tool]!;
@@ -2069,9 +2153,10 @@ export class Sim {
       case T.Solar:
       case T.Battery:
       case T.Customs:
+      case T.Tower:
       case T.Track:
       case T.Parking: {
-        const tool: BuildTool = this.kind[i] === T.Solar ? 'solar' : this.kind[i] === T.Battery ? 'battery' : this.kind[i] === T.Customs ? 'customs' : this.kind[i] === T.Parking ? 'parking' : 'track';
+        const tool: BuildTool = this.kind[i] === T.Solar ? 'solar' : this.kind[i] === T.Battery ? 'battery' : this.kind[i] === T.Customs ? 'customs' : this.kind[i] === T.Tower ? 'tower' : this.kind[i] === T.Parking ? 'parking' : 'track';
         out.push({ tool, x, y, refund: this.give(this.costOf(tool), factor) });
         break;
       }
@@ -3609,7 +3694,7 @@ export class Sim {
     for (const t of this.trucks) v += t.paid;
     v += this.gates.length * this.costOf('gate') + this.rails.length * this.costOf('rail') + this.rtgs.length * this.costOf('rtg') + this.shops.length * this.costOf('workshop');
     for (const p of this.plants) v += this.costOf(p.kind);
-    const tile: Partial<Record<T, BuildTool>> = { [T.Kai]: 'kai', [T.Road]: 'road', [T.Yard]: 'yard', [T.Reefer]: 'reefer', [T.Hazmat]: 'hazard', [T.Empty]: 'emptyyard', [T.Solar]: 'solar', [T.Battery]: 'battery', [T.Customs]: 'customs', [T.Track]: 'track', [T.Parking]: 'parking' };
+    const tile: Partial<Record<T, BuildTool>> = { [T.Kai]: 'kai', [T.Road]: 'road', [T.Yard]: 'yard', [T.Reefer]: 'reefer', [T.Hazmat]: 'hazard', [T.Empty]: 'emptyyard', [T.Solar]: 'solar', [T.Battery]: 'battery', [T.Customs]: 'customs', [T.Tower]: 'tower', [T.Track]: 'track', [T.Parking]: 'parking' };
     for (let i = 0; i < this.kind.length; i++) {
       const tool = tile[this.kind[i] as T];
       if (tool) v += this.costOf(tool);
@@ -4299,6 +4384,15 @@ export class Sim {
         const b = this.findBerth(s.len, SHIP_TYPES[s.type].deep);
         if (b < 0) continue;
         s.berthX = b;
+        s.piloted = this.hasTower || undefined;
+        // Ohne Lotsenturm: einmal am Tag darauf hinweisen, wenn das Schiff in einen Stau fährt und ein ruhigerer Platz frei wäre
+        if (!s.piloted && this.level >= UNLOCK.tower && this.towerHintDay !== this.day && this.berthPressure(b, s.len) > 8) {
+          const alt = this.findBerth(s.len, SHIP_TYPES[s.type].deep, true);
+          if (alt >= 0 && alt !== b) {
+            this.towerHintDay = this.day;
+            this.emit(`${s.name} legt dort an, wo noch viel Verkehr ist, obwohl ein ruhigerer Liegeplatz frei wäre. Ein Lotsenturm (Gebäude) leitet Schiffe dorthin.`, 'info', { x: qTile(b)?.[0], y: qTile(b)?.[1] });
+          }
+        }
         s.wp = 0;
         s.state = 'sailing';
       }
