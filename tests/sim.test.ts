@@ -1692,6 +1692,42 @@ describe('Gleise ins Land und Außenanbindung', () => {
     expect(sim.hinterlandMul(g)).toBeGreaterThan(1);
   });
 
+  it('Speditions-Lkw fahren von außen über die Straßen zum Gate und wieder hinaus', () => {
+    const watch = (sim: Sim, hours: number) => {
+      const waited = new Set<number>();
+      const left = new Set<number>();
+      let maxOn = 0;
+      for (let i = 0; i < hours * 150; i++) {
+        sim.tick();
+        if (i % 50 === 0) sim.drainEvents();
+        for (const h of sim.haulers) {
+          if (h.phase === 'wait') waited.add(h.id);
+          if (h.phase === 'out' && h.off > 0) left.add(h.id);
+        }
+        maxOn = Math.max(maxOn, sim.haulers.length);
+      }
+      return { waited, left, maxOn };
+    };
+    // Ohne Straße ins Hinterland: keine Lkw von außen, das Gate arbeitet trotzdem
+    const plain = basicPort(3, 1);
+    const p = watch(plain, 24);
+    expect(p.waited.size).toBe(0);
+    expect(plain.gates[0].served).toBeGreaterThan(0);
+    // Mit Straße zum unteren Rand
+    const sim = basicPort(3, 1);
+    for (let y = k + 2; y < GRID_H; y++) sim.build('road', 20, y);
+    expect(sim.hinterlandExits().length).toBeGreaterThan(0);
+    const r = watch(sim, 24);
+    expect(r.waited.size).toBeGreaterThan(5);
+    expect(r.left.size).toBeGreaterThan(5);
+    // Es stauen sich keine Lkw ohne Ende auf
+    expect(r.maxOn).toBeLessThanOrEqual(8);
+    // Abriss der Zufahrt: Lkw auf dem Weg fahren zurück oder verschwinden, nichts hängt fest
+    for (let y = k + 2; y < GRID_H; y++) sim.demolish(20, y);
+    watch(sim, 3);
+    expect(sim.haulers.length).toBe(0);
+  });
+
   it('Ausfahrten ins Hinterland: nur wo eine Straße auf den Rand zuläuft, nicht an jedem Feld entlang des Rands', () => {
     const sim = new Sim();
     const yb = GRID_H - 1;

@@ -2412,7 +2412,7 @@ export class UI {
         <div class="why"><b>Zustand</b><br>${sim.gateWhy(g)}</div>
         <div class="meta">Wartend nach draußen: ${g.apron.length} von ${GATE_APRON_CAP}${sim.level >= 2 ? ` · Export wartet auf Truck: ${g.inApron}` : ''}</div>
         <div class="meta">Abgefertigt: ${num(g.served)}${g.emptyIn ? ` · Leercontainer von außen: ${g.emptyIn}` : ''}</div>
-        <div class="meta ${sim.hinterlandMul(g) > 1 ? 'pos' : ''}">${sim.hinterlandMul(g) > 1 ? `Hinterland angebunden: +${Math.round((sim.hinterlandMul(g) - 1) * 100)} % Tempo` : 'Nicht ans Hinterland angebunden: Eine Straße bis zum unteren oder linken Kartenrand bringt +30 % Tempo (mit Autobahn +50 %).'}</div>`;
+        <div class="meta ${sim.hinterlandMul(g) > 1 ? 'pos' : ''}">${sim.hinterlandMul(g) > 1 ? `Hinterland angebunden: +${Math.round((sim.hinterlandMul(g) - 1) * 100)} % Tempo. Speditions-Lkw kommen über die Ausfahrt und fahren im Verkehr mit (${sim.haulers.filter((h) => h.gate === g.id).length} unterwegs).` : 'Nicht ans Hinterland angebunden: Eine Straße bis zum unteren oder linken Kartenrand bringt +30 % Tempo (mit Autobahn +50 %).'}</div>`;
     } else if (sel.kind === 'yard') {
       const kinds = [sim.stock[sel.id] - sim.stockRail[sel.id], sim.stockRail[sel.id], sim.stockExp[sel.id]].filter((n) => n > 0).length;
       html = `<h3>Stapelplatz <span class="tag">${sim.capAt(sel.id)} Container pro Feld${sim.rtgCovers(sel.id) ? ' mit Portalkran' : ''}</span></h3>

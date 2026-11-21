@@ -1,6 +1,6 @@
 import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture, TilingSprite } from 'pixi.js';
 import { CRANE_MODELS, YARD_USES, DIFFS, SHIP_PATIENCE_GM, TRUCK_PATIENCE_GM, ZONES, COAST_ROW, CRANE_EXP_BUFFER, GRID_H, GRID_W, MapId, MIN_PER_DAY, PLOT_W, RAIL_CAP, RAIL_TRAVEL_GM, dimsOf, T, TICK_GM, TILE, YARD_CAP_PER_TILE, RTG_CAP } from '../sim/data';
-import type { Crane, Rail, Ship, Sim, Truck } from '../sim/sim';
+import type { Crane, Hauler, Rail, Ship, Sim, Truck } from '../sim/sim';
 import { N as QN, S as QS_, W as QW, qOf, qOfWater, qTile, sideOf, OUT, Q_MAX } from '../sim/quay';
 /** Drehung der Kai-Grafik: Wasser liegt im Norden, Süden, Westen oder Osten */
 const SIDE_ANGLE = [0, Math.PI, -Math.PI / 2, Math.PI / 2];
@@ -1526,6 +1526,82 @@ export class Renderer {
     return { root, load, brake, badge, lat: 7, key: '', agv: t.agv, rot: t.angle };
   }
 
+  /** Speditions-Lkw: Sattelzug mit Kabine in Firmenfarbe, bis zu zwei Container auf dem Auflieger */
+  private haulerViews = new Map<number, { root: Container; load: Sprite[]; rot: number; lat: number; key: number }>();
+  private makeHauler(h: Hauler) {
+    const root = new Container();
+    const g = new Graphics();
+    g.roundRect(-14, -3, 30, 11, 2.5).fill({ color: 0x000000, alpha: 0.24 });
+    // Auflieger
+    g.roundRect(-15.5, -4.4, 21.5, 8.8, 1.2).fill(0x30363f);
+    g.rect(-14.8, -3.7, 20, 7.4).fill(0x6b7480);
+    g.rect(-14.8, -0.4, 20, 0.8).fill(0x59616c);
+    // Zugmaschine
+    g.roundRect(6.6, -5.6, 9, 11.2, 2.6).fill(shade(h.color, 0.7));
+    g.roundRect(7.2, -5, 7.8, 10, 2.2).fill(h.color);
+    g.roundRect(12.3, -4, 2.4, 8, 1).fill(0x22344b);
+    g.rect(7.8, -0.8, 4.2, 1.6).fill(h.color === 0xf4f6f8 ? 0xd9473f : 0xffffff);
+    root.addChild(g);
+    const load: Sprite[] = [];
+    for (let k = 0; k < 2; k++) {
+      const s = this.box(this.boxH, 0xffffff, -14.6 + k * 9.8, -3.9, 0.98);
+      s.visible = false;
+      root.addChild(s);
+      load.push(s);
+    }
+    return { root, load, rot: h.angle, lat: 7, key: -1 };
+  }
+  private syncHaulers(sim: Sim, a: number, view: View) {
+    const seen = new Set<number>();
+    for (const h of sim.haulers) {
+      seen.add(h.id);
+      let v = this.haulerViews.get(h.id);
+      if (!v) {
+        v = this.makeHauler(h);
+        v.rot = h.angle;
+        this.haulerViews.set(h.id, v);
+        this.truckLayer.addChild(v.root);
+      }
+      if (v.key !== h.load) {
+        v.key = h.load;
+        v.load.forEach((s, k) => {
+          s.visible = k < h.load;
+          s.tint = BOX[hash(h.id, k + 70) % BOX.length];
+        });
+      }
+      let d = h.angle - v.rot;
+      d = Math.atan2(Math.sin(d), Math.cos(d));
+      v.rot += d * Math.min(1, view.dt * 12);
+      v.root.rotation = v.rot;
+      const off = h.poff + (h.off - h.poff) * a;
+      const ex = h.exit % GRID_W;
+      const ey = (h.exit / GRID_W) | 0;
+      if (off > 0) {
+        // Draußen auf der Straße ins Hinterland, rechts in Fahrtrichtung
+        const bottom = ey === GRID_H - 1;
+        v.lat += (7 - v.lat) * Math.min(1, view.dt * 6);
+        const wx = (bottom ? ex + 0.5 : ex + 0.5 - off) * TILE;
+        const wy = (bottom ? ey + 0.5 + off : ey + 0.5) * TILE;
+        v.root.position.set(wx - Math.sin(v.rot) * v.lat, wy + Math.cos(v.rot) * v.lat);
+        continue;
+      }
+      const lt = h.next >= 0 ? h.next : h.tile;
+      const tier = sim.roadTier[lt];
+      const want = sim.oneway[lt] >= 0 ? (tier > 0 ? [9, 0, -9][Math.min(2, h.slot)] : h.slot ? -6.5 : 6.5) : tier > 0 ? (h.slot ? 4.5 : 11) : 7;
+      v.lat += (want - v.lat) * Math.min(1, view.dt * 6);
+      v.root.position.set(
+        (h.px + (h.fx - h.px) * a + 0.5) * TILE - Math.sin(v.rot) * v.lat,
+        (h.py + (h.fy - h.py) * a + 0.5) * TILE + Math.cos(v.rot) * v.lat,
+      );
+    }
+    for (const [id, v] of this.haulerViews) {
+      if (!seen.has(id)) {
+        v.root.destroy({ children: true });
+        this.haulerViews.delete(id);
+      }
+    }
+  }
+
   /** Wo ein Truck gerade gezeichnet wird (Weltpixel). Geparkte stehen in ihrer Bucht, nicht auf der Straße. */
   truckAt(id: number): { x: number; y: number } | null {
     const v = this.trucks.get(id);
@@ -1907,6 +1983,7 @@ export class Renderer {
 
     this.syncShips(sim, a, view);
     this.syncTrucks(sim, a, view);
+    this.syncHaulers(sim, a, view);
     this.syncCranes(sim, a, view);
     this.syncTrains(sim, a);
     this.updateYard(sim);
@@ -2213,29 +2290,6 @@ export class Renderer {
       }
     }
     this.drawSites(g, sim, view.time);
-    // Verkehr ins Hinterland: Speditions-Lkw fahren auf den Anschlussstraßen
-    for (const e of sim.hinterlandExits()) {
-      const ex = (e % GRID_W) * TILE;
-      const ey = ((e / GRID_W) | 0) * TILE;
-      const bottom = ((e / GRID_W) | 0) === GRID_H - 1;
-      for (let k = 0; k < 3; k++) {
-        const u = (view.time * 0.12 + k / 3 + (e % 7) * 0.13) % 1;
-        const away = k % 2 === 0;
-        const d = (away ? u : 1 - u) * 600;
-        const col = BOX[(e + k) % BOX.length];
-        if (bottom) {
-          const tx = ex + (away ? 18 : 6);
-          const ty = ey + TILE + 10 + d;
-          g.roundRect(tx, ty, 8, 20, 2).fill(col);
-          g.roundRect(tx, away ? ty - 6 : ty + 20, 8, 6, 1.5).fill(0x2b323b);
-        } else {
-          const tx = ex - 30 - d;
-          const ty = ey + (away ? 6 : 18);
-          g.roundRect(tx, ty, 20, 8, 2).fill(col);
-          g.roundRect(away ? tx - 6 : tx + 20, ty, 6, 8, 1.5).fill(0x2b323b);
-        }
-      }
-    }
     // Rauch über arbeitenden Hallen und aus den Schornsteinen der Schiffe am Kai
     const puff = (px: number, py: number, seed: number, size: number) => {
       for (let k = 0; k < 4; k++) {

@@ -380,6 +380,18 @@ export const REEFER_SPOIL_PENALTY = 500;
 
 // Gate
 export const GATE_PROCESS_GM = 2; // 30 Container pro Stunde und Gate
+/** Speditions-Lkw: höchstens so viele gleichzeitig auf dem Weg zu einem Gate */
+export const HAUL_MAX_PER_GATE = 3;
+/** So lange wartet ein Gate auf eine volle Ladung, bevor es einen Lkw für einen einzelnen Container holt */
+export const HAUL_WAIT_GM = 10;
+/** Laden und Abladen am Gate */
+export const HAUL_HANDLE_GM = 1.5;
+/** So weit fahren sie außerhalb der Karte, bevor sie verschwinden (Felder) */
+export const HAUL_OUTSIDE = 14;
+/** Höchstens so viele Container stauen sich pro Gate für die Lkw auf (sonst gehen sie ohne Bild raus) */
+export const HAUL_BACKLOG = 12;
+/** Farben der Speditionen */
+export const HAUL_COLORS = [0xf4f6f8, 0xd9473f, 0x2f6db0, 0x2f9e6b, 0xf2b336, 0x6d5bd0];
 export const GATE_APRON_CAP = 4;
 export const GATE_IN_CAP = 4;
 

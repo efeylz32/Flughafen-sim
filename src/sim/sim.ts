@@ -42,6 +42,12 @@ import {
   TUNNEL_MUL,
   BRIDGE_MUL,
   PARK_SLOTS,
+  HAUL_MAX_PER_GATE,
+  HAUL_WAIT_GM,
+  HAUL_HANDLE_GM,
+  HAUL_OUTSIDE,
+  HAUL_BACKLOG,
+  HAUL_COLORS,
   YARD_HELP,
   USED_SELLERS,
   USED_HOURS,
@@ -313,6 +319,42 @@ export interface Gate {
   served: number;
   staffed: boolean;
   zone: number;
+  /** Für die Speditions-Lkw: angelieferte und abzuholende Container, vorgemerkte Abholungen, wartet seit */
+  haulIn?: number;
+  haulOut?: number;
+  haulRes?: number;
+  haulSince?: number;
+}
+
+/** Speditions-Lkw von außen: kommen über eine Ausfahrt zum Gate und fahren wieder hinaus */
+export interface Hauler {
+  id: number;
+  gate: number;
+  tile: number;
+  next: number;
+  prog: number;
+  fx: number;
+  fy: number;
+  px: number;
+  py: number;
+  dir: number;
+  angle: number;
+  stuck: number;
+  slot: number;
+  /** in: fährt zum Gate, wait: lädt am Gate, out: fährt zur Ausfahrt */
+  phase: 'in' | 'wait' | 'out';
+  /** Randfeld, über das er kommt und geht */
+  exit: number;
+  /** Ziel am Gate */
+  tgt: number;
+  /** Strecke außerhalb der Karte in Feldern (0 = auf der Karte), vorher fürs flüssige Bild */
+  off: number;
+  poff: number;
+  /** Container an Bord (fürs Bild) und für ihn vorgemerkte Abholung */
+  load: number;
+  res: number;
+  wait: number;
+  color: number;
 }
 
 export interface Rail {
@@ -783,6 +825,9 @@ export class Sim {
 
   cranes: Crane[] = [];
   gates: Gate[] = [];
+  /** Speditions-Lkw auf dem Weg zu oder von den Gates (nicht gespeichert, nur Verkehr und Bild) */
+  haulers: Hauler[] = [];
+  private nextHaulerId = 1;
   rails: Rail[] = [];
   plants: Plant[] = [];
   shops: Shop[] = [];
@@ -1149,15 +1194,17 @@ export class Sim {
   }
 
   /** Fährt gerade ein anderer Truck quer über diese Kreuzung? Parkende und ladende zählen nicht. */
-  private crossTraffic(me: Truck, tile: number, dir: number): boolean {
+  private crossTraffic(me: object, tile: number, dir: number): boolean {
     const dirOf = (from: number, to: number) => (to === from + 1 ? 0 : to === from + GRID_W ? 1 : to === from - 1 ? 2 : 3);
-    for (const o of this.trucks) {
-      if (o === me || o.next < 0) continue;
+    const hit = (o: { tile: number; next: number }) => {
+      if (o === me || o.next < 0) return false;
       let d = -1;
       if (o.next === tile) d = dirOf(o.tile, tile);
       else if (o.tile === tile) d = dirOf(tile, o.next);
-      if (d >= 0 && d % 2 !== dir % 2) return true;
-    }
+      return d >= 0 && d % 2 !== dir % 2;
+    };
+    for (const o of this.trucks) if (hit(o)) return true;
+    for (const o of this.haulers) if (o.off <= 0 && hit(o)) return true;
     return false;
   }
 
@@ -1661,9 +1708,13 @@ export class Sim {
 
   /** Gibt es einen Lotsenturm? */
   get hasTower(): boolean {
-    for (let i = COAST_ROW * GRID_W; i < this.kind.length; i++) if (this.kind[i] === T.Tower) return true;
-    return false;
+    if (this.towerCache.v === this.version) return this.towerCache.has;
+    let has = false;
+    for (let i = COAST_ROW * GRID_W; i < this.kind.length && !has; i++) if (this.kind[i] === T.Tower) has = true;
+    this.towerCache = { v: this.version, has };
+    return has;
   }
+  private towerCache = { v: -1, has: false };
   /** Was die Kräne an diesem Liegeplatz zusammen schaffen (Moves pro Stunde, nur einsatzbereite) */
   berthMoves(b: number, len = SHIP_LEN): number {
     return this.cranesAtBerth(b, len)
@@ -1736,6 +1787,7 @@ export class Sim {
    * geteilt durch den Verkehr dort: Ist ein Liegeplatz noch zugestaut, geht das Schiff an einen ruhigeren.
    */
   private findBerth(len: number, deep: boolean, tower = this.hasTower): number {
+    const starts = new Set(tower ? this.berths() : []);
     const occ = this.ships
       .filter((s) => s.state === 'sailing' || s.state === 'unloading' || (s.state === 'leaving' && s.berthX >= 0 && this.nearBerth(s)))
       .map((s) => [s.berthX, s.berthX + s.len] as const);
@@ -1754,6 +1806,8 @@ export class Sim {
       const flushL = !this.isKai(x - 1) || occ.some(([, b]) => b === x);
       const flushR = !this.isKai(x + len) || occ.some(([a]) => a === x + len);
       const fit = (flushL ? 3 : 0) + (flushR ? 2 : 0) - (deep ? 0 : deepTiles);
+      // Mit Lotsenturm nur sinnvolle Anlegestellen bewerten (bündig oder Anfang eines Liegeplatzes), das spart viel Rechnen
+      if (tower && !flushL && !flushR && !starts.has(x)) continue;
       const moves = tower ? this.berthMoves(x, len) : 0;
       const score = tower
         ? (moves > 0 ? moves / (1 + this.berthPressure(x, len) * 0.08) : -100) + fit * 0.5
@@ -3469,6 +3523,7 @@ export class Sim {
     this.updateShips(dt);
     this.updateCranes(dt);
     this.updateTrucks(dt);
+    this.updateHaulers(dt);
     this.updateGates(dt);
     this.updateCustoms(dt);
     this.updateRails(dt);
@@ -4699,6 +4754,12 @@ export class Sim {
         this.lane[t.next * 4 + (d === 1 ? 0 : d === GRID_W ? 1 : d === -1 ? 2 : 3)]++;
       }
     }
+    // Speditions-Lkw stehen genauso in den Spuren
+    for (const h of this.haulers) {
+      if (h.off > 0) continue;
+      if (h.dir >= 0) this.lane[h.tile * 4 + h.dir]++;
+      if (h.next >= 0) this.lane[h.next * 4 + Sim.stepDir(h.tile, h.next)]++;
+    }
     if (this.tickCount % 5 === 0) for (let i = 0; i < this.roadJam.length; i++) this.roadJam[i] *= 0.93;
     for (const t of this.trucks) {
       // Ausgefallen: bleibt stehen, wo er ist, bis die Werkstatt kommt. In der Überholung ebenso.
@@ -4784,6 +4845,218 @@ export class Sim {
     }
   }
 
+  // ───────────────────────── Speditions-Lkw ─────────────────────────
+
+  /** Beste Ausfahrt für ein Gate: hin und zurück erreichbar, kürzester Weg. Je Bauzustand gemerkt. */
+  private gateRoute(g: Gate): { exit: number; acc: number } | null {
+    if (this.routeCache.v !== this.version) this.routeCache = { v: this.version, m: new Map() };
+    const hit = this.routeCache.m.get(g.id);
+    if (hit !== undefined) return hit;
+    let best: { exit: number; acc: number } | null = null;
+    let bestD = Infinity;
+    const exits = this.hinterlandExits();
+    for (const a of this.accessOf(g)) {
+      const toGate = this.distMap(a);
+      for (const e of exits) {
+        const back = this.distMap(e)[a];
+        if (toGate[e] < 0 || back < 0) continue;
+        const d = toGate[e] + back;
+        if (d < bestD) {
+          bestD = d;
+          best = { exit: e, acc: a };
+        }
+      }
+    }
+    this.routeCache.m.set(g.id, best);
+    return best;
+  }
+  private routeCache: { v: number; m: Map<number, { exit: number; acc: number } | null> } = { v: -1, m: new Map() };
+  /** Richtung von der Ausfahrt nach innen (0 Ost, 3 Nord) */
+  private static inward(exit: number): number {
+    return ((exit / GRID_W) | 0) === GRID_H - 1 ? 3 : 0;
+  }
+
+  private updateHaulers(dt: number) {
+    // Anfordern: Jedes Gate holt sich Lkw für das, was rein- oder rausgeht
+    for (const g of this.gates) {
+      const inN = g.haulIn ?? 0;
+      const outFree = (g.haulOut ?? 0) - (g.haulRes ?? 0);
+      const pend = inN + Math.max(0, outFree);
+      if (pend <= 0) {
+        g.haulSince = undefined;
+        continue;
+      }
+      g.haulSince ??= this.gm;
+      const coming = this.haulers.reduce((n, h) => n + (h.gate === g.id && h.phase !== 'out' ? 1 : 0), 0);
+      if (coming >= HAUL_MAX_PER_GATE || (pend < TRUCK_CAP && this.gm - g.haulSince < HAUL_WAIT_GM)) continue;
+      const route = this.gateRoute(g);
+      if (!route) {
+        // Ohne Straße ins Hinterland bleibt es wie bisher: Die Container gehen einfach nach draußen
+        g.haulIn = g.haulOut = g.haulRes = 0;
+        g.haulSince = undefined;
+        continue;
+      }
+      const load = Math.min(TRUCK_CAP, inN);
+      const res = Math.min(TRUCK_CAP, Math.max(0, outFree));
+      g.haulIn = inN - load;
+      g.haulRes = (g.haulRes ?? 0) + res;
+      g.haulSince = g.haulIn + (g.haulOut ?? 0) - g.haulRes > 0 ? this.gm : undefined;
+      const ex = route.exit % GRID_W;
+      const ey = (route.exit / GRID_W) | 0;
+      this.haulers.push({
+        id: this.nextHaulerId++, gate: g.id, tile: route.exit, next: -1, prog: 0, fx: ex, fy: ey, px: ex, py: ey,
+        dir: -1, angle: Sim.inward(route.exit) === 3 ? -Math.PI / 2 : 0, stuck: 0, slot: 0,
+        phase: 'in', exit: route.exit, tgt: route.acc, off: HAUL_OUTSIDE, poff: HAUL_OUTSIDE, load, res, wait: 0,
+        color: HAUL_COLORS[this.nextHaulerId % HAUL_COLORS.length],
+      });
+    }
+    const speed = TRUCK_SPEED * 0.9;
+    for (const h of [...this.haulers]) {
+      h.px = h.fx;
+      h.py = h.fy;
+      h.poff = h.off;
+      const g = this.gates.find((x) => x.id === h.gate);
+      // Gate abgerissen: wieder nach Hause
+      if (!g && h.phase !== 'out') {
+        h.phase = 'out';
+        h.res = 0;
+      }
+      // Außerhalb der Karte: auf der Straße ins Hinterland
+      if (h.off > 0) {
+        if (h.phase === 'out') {
+          h.off += speed * dt;
+          if (h.off >= HAUL_OUTSIDE) this.haulers = this.haulers.filter((x) => x !== h);
+          continue;
+        }
+        h.off = Math.max(0, h.off - speed * dt);
+        if (h.off > 0) continue;
+        // An der Ausfahrt rein, sobald die Spur frei ist
+        const d = Sim.inward(h.exit);
+        if (this.kind[h.exit] !== T.Road) {
+          this.haulers = this.haulers.filter((x) => x !== h);
+          if (g) g.haulRes = Math.max(0, (g.haulRes ?? 0) - h.res);
+          continue;
+        }
+        if (this.lane[h.exit * 4 + d] >= this.laneCap(h.exit, d)) {
+          h.off = 0.001;
+          continue;
+        }
+        this.lane[h.exit * 4 + d]++;
+        h.tile = h.exit;
+        h.dir = d;
+        continue;
+      }
+      if (h.phase === 'wait') {
+        h.wait -= dt;
+        if (h.wait > 0) continue;
+        // Abladen ist erledigt, jetzt den Import mitnehmen
+        if (g) {
+          const take = Math.min(TRUCK_CAP, g.haulOut ?? 0);
+          g.haulOut = (g.haulOut ?? 0) - take;
+          g.haulRes = Math.max(0, (g.haulRes ?? 0) - h.res);
+          h.load = take;
+        }
+        h.res = 0;
+        h.phase = 'out';
+        continue;
+      }
+      const target = h.phase === 'in' ? h.tgt : h.exit;
+      if (h.tile === target && h.next < 0) {
+        if (h.phase === 'in') {
+          h.phase = 'wait';
+          h.wait = HAUL_HANDLE_GM;
+          h.load = 0;
+        } else {
+          // Raus aus der Karte
+          h.off = 0.001;
+          h.dir = -1;
+          h.angle = Sim.inward(h.exit) === 3 ? Math.PI / 2 : Math.PI;
+        }
+        continue;
+      }
+      if (this.driveHauler(h, target, dt, speed) === 'lost') {
+        if (h.phase === 'in') {
+          if (g) g.haulRes = Math.max(0, (g.haulRes ?? 0) - h.res);
+          h.res = 0;
+          h.phase = 'out';
+        } else this.haulers = this.haulers.filter((x) => x !== h);
+      }
+    }
+  }
+
+  /** Fahren wie ein Truck: kürzester Weg, Spuren, Einbahnen, Vorfahrt an Kreuzungen. Ohne Verschleiß. */
+  private driveHauler(h: Hauler, tgt: number, dt: number, speed: number): 'ok' | 'lost' {
+    if (h.next < 0) {
+      const d = this.distMap(tgt);
+      const here = d[h.tile];
+      if (here < 0) return 'lost';
+      const x = h.tile % GRID_W;
+      const y = (h.tile / GRID_W) | 0;
+      const cand = [x < GRID_W - 1 ? h.tile + 1 : -1, y < GRID_H - 1 ? h.tile + GRID_W : -1, x > 0 ? h.tile - 1 : -1, y > 0 ? h.tile - GRID_W : -1];
+      let pick = -1;
+      let pickDir = -1;
+      for (let dir = 0; dir < 4; dir++) {
+        const n = cand[dir];
+        if (n < 0 || d[n] < 0 || d[n] + this.stepCost(n) !== here || !this.canStep(h.tile, n, dir)) continue;
+        const free = this.lane[n * 4 + dir] < this.laneCap(n, dir);
+        if (pick < 0 || free) {
+          pick = n;
+          pickDir = dir;
+          if (free) break;
+        }
+      }
+      if (pick < 0) return 'lost';
+      h.angle = [0, Math.PI / 2, Math.PI, -Math.PI / 2][pickDir];
+      if (!this.overpass[pick] && h.stuck < CROSS_WAIT_GM && this.isJunction(pick)) {
+        const a = (pickDir + 1) % 4;
+        const b = (pickDir + 3) % 4;
+        if (this.lane[pick * 4 + a] + this.lane[pick * 4 + b] > 0 && this.crossTraffic(h, pick, pickDir)) {
+          h.stuck += dt;
+          this.roadJam[h.tile] += dt;
+          return 'ok';
+        }
+      }
+      if (this.lane[pick * 4 + pickDir] >= this.laneCap(pick, pickDir) && h.stuck < TRUCK_PATIENCE_GM) {
+        h.stuck += dt;
+        this.roadJam[h.tile] += dt;
+        return 'ok';
+      }
+      h.slot = 0;
+      const cap = this.laneCap(pick, pickDir);
+      if (cap > 1 && this.lane[pick * 4 + pickDir] > 0) {
+        let used = 0;
+        for (const o of [...this.trucks, ...this.haulers]) {
+          if (o === h) continue;
+          if ((o.tile === pick && o.dir === pickDir) || (o.next === pick && Sim.stepDir(o.tile, pick) === pickDir)) used |= 1 << o.slot;
+        }
+        while (h.slot < cap - 1 && used & (1 << h.slot)) h.slot++;
+      }
+      this.lane[pick * 4 + pickDir]++;
+      h.next = pick;
+      h.prog = 0;
+      h.stuck = 0;
+    }
+    h.prog += speed * ROAD_SPEED[this.roadTier[h.next]] * dt;
+    const nx = h.next % GRID_W;
+    const ny = (h.next / GRID_W) | 0;
+    const cx = h.tile % GRID_W;
+    const cy = (h.tile / GRID_W) | 0;
+    h.angle = Math.atan2(ny - cy, nx - cx);
+    if (h.prog >= 1) {
+      if (h.dir >= 0 && this.lane[h.tile * 4 + h.dir] > 0) this.lane[h.tile * 4 + h.dir]--;
+      h.dir = ny > cy ? 1 : ny < cy ? 3 : nx > cx ? 0 : 2;
+      h.tile = h.next;
+      h.next = -1;
+      h.prog = 0;
+      h.fx = nx;
+      h.fy = ny;
+    } else {
+      h.fx = cx + (nx - cx) * h.prog;
+      h.fy = cy + (ny - cy) * h.prog;
+    }
+    return 'ok';
+  }
+
   private updateGates(dt: number) {
     this.exportNeed = this.computeExportNeed();
     for (const g of this.gates) {
@@ -4791,6 +5064,9 @@ export class Sim {
         g.proc -= dt;
         if (g.proc <= 0) {
           g.proc = 0;
+          // Draußen ist ein Lkw dafür unterwegs: rein mit der Ladung, raus mit dem Import
+          if (g.procIn) g.haulIn = Math.min(HAUL_BACKLOG, (g.haulIn ?? 0) + 1);
+          else if (g.procCust !== 2) g.haulOut = Math.min(HAUL_BACKLOG, (g.haulOut ?? 0) + 1);
           if (g.procIn && g.procEmpty) {
             g.emptyIn++;
             this.money -= EMPTY_IN_COST;
@@ -5800,6 +6076,8 @@ export class Sim {
     };
     if (same(this.cranes, L.cranes)) take(this.cranes, L.cranes);
     if (same(this.gates, L.gates)) take(this.gates, L.gates);
+    // Speditions-Lkw werden nicht gespeichert: ihre Vormerkungen gelten nicht mehr
+    for (const g of this.gates) g.haulRes = 0;
     if (same(this.plants, L.plants)) take(this.plants, L.plants);
     if (same(this.rails, L.rails)) take(this.rails, L.rails);
     if (same(this.shops, L.shops)) take(this.shops, L.shops);
